@@ -1,4 +1,6 @@
 import Foundation
+import Photos
+import PhotosUI
 import SwiftUI
 
 enum AppScreen: String {
@@ -19,17 +21,70 @@ enum AppScreen: String {
     case cleanup
 }
 
-struct Trip: Identifiable, Hashable {
-    let id = UUID()
-    let place: String
-    let dates: String
-    let photoCount: Int
-    let imageName: String
+enum PhotoSource: Hashable, Sendable {
+    case bundled(String)
+    case library(String)
+    case imported(String)
 }
 
-struct ReelPhoto: Identifiable, Hashable {
-    let id: Int
-    let imageName: String
+struct TripAsset: Identifiable, Hashable, Sendable {
+    let id: String
+    let source: PhotoSource
+    let creationDate: Date?
+    let filename: String
+}
+
+struct Trip: Identifiable, Hashable, Sendable {
+    let id: String
+    let place: String
+    let dates: String
+    let startDate: Date
+    let endDate: Date
+    let assets: [TripAsset]
+    let coverID: String
+
+    var photoCount: Int { assets.count }
+
+    var coverSource: PhotoSource {
+        assets.first(where: { $0.id == coverID })?.source
+            ?? assets.first?.source
+            ?? .bundled("my-khe-beach")
+    }
+
+    var shortPlace: String {
+        place.split(separator: ",", maxSplits: 1).first.map(String.init) ?? place
+    }
+
+    func renamed(_ newPlace: String) -> Trip {
+        Trip(
+            id: id,
+            place: newPlace,
+            dates: dates,
+            startDate: startDate,
+            endDate: endDate,
+            assets: assets,
+            coverID: coverID
+        )
+    }
+
+    func retainingAssets(withIDs identifiers: Set<String>) -> Trip? {
+        let retained = assets.filter { identifiers.contains($0.id) }
+        guard !retained.isEmpty else { return nil }
+        return Trip(
+            id: id,
+            place: place,
+            dates: dates,
+            startDate: startDate,
+            endDate: endDate,
+            assets: retained,
+            coverID: identifiers.contains(coverID) ? coverID : retained[retained.count / 2].id
+        )
+    }
+}
+
+struct ReelPhoto: Identifiable, Hashable, Sendable {
+    let id: String
+    let source: PhotoSource
     let label: String
     let time: String
     let isSimilar: Bool
@@ -77,7 +132,7 @@ struct ProjectFormat: Identifiable, Hashable {
 }
 
 struct PhotoDecision: Equatable {
-    let id: Int
+    let id: String
     let previousIndex: Int
     let previousWasCut: Bool
 }
@@ -94,24 +149,82 @@ final class TripReelModel: ObservableObject {
     @Published var screen: AppScreen = .welcome
     @Published var buildCount = 0
     @Published var currentPhotoIndex = 0
-    @Published var cutPhotoIDs: Set<Int> = []
+    @Published var cutPhotoIDs: Set<String> = []
     @Published var history: [PhotoDecision] = []
     @Published var pace: Double = 0.46
     @Published var showCutHint = true
     @Published var renderProgress = 0.0
     @Published var titleCards: Set<TitleCardKind> = [.opening]
-    @Published var titleText = "Da Nang"
+    @Published var titleText = "My trip"
     @Published var selectedTrackID: String? = "coast"
     @Published var cutToBeat = true
     @Published var selectedFormatID = "sequence"
-    @Published var cleanupSelection: Set<Int> = []
+    @Published var cleanupSelection: Set<String> = []
     @Published var cleanupShowsGrid = false
-    @Published var selectedPhotoCount = 3
+    @Published var selectedPhotoCount = 0
     @Published var exportQuality: ExportQuality = .standard
+    @Published private(set) var trips: [Trip] = []
+    @Published private(set) var selectedTrip: Trip?
+    @Published private(set) var photos: [ReelPhoto] = []
+    @Published private(set) var libraryPreviewPhotos: [ReelPhoto] = []
+    @Published private(set) var libraryPhotoCount = 0
+    @Published private(set) var isScanningLibrary = false
+    @Published private(set) var libraryErrorMessage: String?
 
+    let usesDemoData: Bool
+
+    private let photoLibrary: any PhotoLibraryServing
+    private let manualPhotoImporter = ManualPhotoImportService()
     private var workTask: Task<Void, Never>?
+    private var placeTask: Task<Void, Never>?
+    private var detectorTask: Task<[DetectedTrip], Never>?
+    private var scanGeneration = UUID()
+    private var manualSelectionGeneration = UUID()
+    private var pendingResultNavigation = false
+    private var isManualSelectionInProgress = false
+    private var scanCoordinatorActive = false
+    private var scanAgainRequested = false
+    private var hasScannedLibrary = false
+    private var hasManualSelection = false
+    private var hasPermissionFreeSelection = false
+    private var lastAuthorizationStatus: PHAuthorizationStatus?
+    private let placeResolver = TripPlaceResolver()
+    private var resolvedCoordinates: [String: PhotoCoordinate] = [:]
+    private var activeImportedPhotos: [ManualImportedPhoto] = []
 
-    init(arguments: [String] = ProcessInfo.processInfo.arguments) {
+    init(
+        arguments: [String] = ProcessInfo.processInfo.arguments,
+        useDemoData: Bool? = nil,
+        photoLibrary: (any PhotoLibraryServing)? = nil
+    ) {
+        let demoMode = useDemoData ?? arguments.contains("-qaScreen")
+        usesDemoData = demoMode
+        self.photoLibrary = photoLibrary ?? PhotoLibraryService()
+
+        if demoMode {
+            let fixtures = Self.makeDemoTrips()
+            trips = fixtures
+            selectedTrip = fixtures.first
+            photos = fixtures.first.map { Self.makeReelPhotos(from: $0) } ?? []
+            libraryPreviewPhotos = Array(photos.prefix(6))
+            libraryPhotoCount = fixtures.reduce(0) { $0 + $1.photoCount }
+            selectedPhotoCount = 3
+            titleText = fixtures.first?.shortPlace ?? "My trip"
+        } else {
+            self.photoLibrary.onLibraryChange = { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self,
+                          !self.hasPermissionFreeSelection,
+                          !self.isManualSelectionInProgress else { return }
+                    if self.hasManualSelection {
+                        await self.reconcilePhotoKitManualSelection()
+                    } else {
+                        await self.refreshPhotoLibraryIfAuthorized(force: true)
+                    }
+                }
+            }
+        }
+
 #if DEBUG
         if let flagIndex = arguments.firstIndex(of: "-qaScreen"),
            arguments.indices.contains(flagIndex + 1),
@@ -142,13 +255,6 @@ final class TripReelModel: ObservableObject {
         "HAN RIVER BOAT"
     ]
 
-    let trips = [
-        Trip(place: "Da Nang, Vietnam", dates: "Aug 2 – Aug 9, 2026", photoCount: 84, imageName: "my-khe-beach"),
-        Trip(place: "Kyoto, Japan", dates: "Apr 11 – Apr 18, 2026", photoCount: 212, imageName: "hoi-an-lanes"),
-        Trip(place: "Lisbon, Portugal", dates: "Nov 3 – Nov 8, 2025", photoCount: 96, imageName: "night-market"),
-        Trip(place: "Big Sur, California", dates: "Jun 21 – Jun 23, 2025", photoCount: 41, imageName: "han-river")
-    ]
-
     let tracks = [
         MusicTrack(id: "drift", name: "Slow Drift", mood: "Ambient piano", bpm: "72", symbol: "waveform", tint: Color(red: 0.56, green: 0.70, blue: 0.86), bars: [8, 15, 11, 20, 13]),
         MusicTrack(id: "coast", name: "Coast Road", mood: "Warm indie guitar", bpm: "96", symbol: "guitars", tint: TR.accent, bars: [12, 21, 15, 25, 18]),
@@ -163,34 +269,27 @@ final class TripReelModel: ObservableObject {
         ProjectFormat(id: "edl", name: "Edit decision list", apps: "Premiere Pro, Avid", fileExtension: "EDL")
     ]
 
-    lazy var photos: [ReelPhoto] = (0..<84).map { index in
-        let assetIndex = index % Self.assetNames.count
-        let hour = 7 + ((index * 3) % 12)
-        let minute = (index * 17) % 60
-        return ReelPhoto(
-            id: index,
-            imageName: Self.assetNames[assetIndex],
-            label: "IMG_\(2140 + index)",
-            time: String(format: "%02d:%02d", hour, minute),
-            isSimilar: index % 4 == 1
-        )
-    }
-
     var currentPhoto: ReelPhoto {
-        photos[min(currentPhotoIndex, photos.count - 1)]
+        guard !photos.isEmpty else { return Self.placeholderPhoto }
+        return photos[min(max(0, currentPhotoIndex), photos.count - 1)]
     }
 
-    var keptCount: Int {
-        photos.count - cutPhotoIDs.count
+    var keptPhotos: [ReelPhoto] {
+        photos.filter { !cutPhotoIDs.contains($0.id) }
     }
+
+    var keptCount: Int { keptPhotos.count }
 
     var secondsPerPhoto: Double {
         1.85 - (pace * 1.25)
     }
 
     var durationText: String {
-        let seconds = max(1, Int((Double(keptCount) * secondsPerPhoto).rounded()))
-        return "\(seconds / 60):\(String(format: "%02d", seconds % 60))"
+        Self.durationText(photoCount: keptCount, secondsPerPhoto: secondsPerPhoto)
+    }
+
+    var rawDurationText: String {
+        Self.durationText(photoCount: photos.count, secondsPerPhoto: 4.0 / 3.0)
     }
 
     var selectedTrack: MusicTrack? {
@@ -201,6 +300,30 @@ final class TripReelModel: ObservableObject {
         formats.first { $0.id == selectedFormatID } ?? formats[0]
     }
 
+    var tripsEyebrow: String {
+        if isScanningLibrary { return "Scanning \(libraryPhotoCount) photos" }
+        if !usesDemoData {
+            return "\(trips.count) trip\(trips.count == 1 ? "" : "s") · \(libraryPhotoCount) photos scanned"
+        }
+        return "\(trips.count) trip\(trips.count == 1 ? "" : "s") found"
+    }
+
+    var tripPlace: String { selectedTrip?.place ?? "Your trip" }
+    var tripShortPlace: String { selectedTrip?.shortPlace ?? "Your trip" }
+    var tripDates: String { selectedTrip?.dates ?? "Selected photos" }
+
+    var tripMonthYear: String {
+        guard let date = selectedTrip?.startDate else { return "Your trip" }
+        return Self.monthYearFormatter.string(from: date)
+    }
+
+    func previewSource(at index: Int) -> PhotoSource {
+        guard !photos.isEmpty else {
+            return .bundled(Self.assetNames[index.modulo(Self.assetNames.count)])
+        }
+        return photos[index.modulo(photos.count)].source
+    }
+
     func go(_ next: AppScreen) {
         workTask?.cancel()
         withAnimation(.easeInOut(duration: 0.32)) {
@@ -208,31 +331,352 @@ final class TripReelModel: ObservableObject {
         }
     }
 
-    func startBuild() {
+    func dismissLibraryMessage() {
+        libraryErrorMessage = nil
+    }
+
+    func scanPhotoLibrary(navigateToResults: Bool) async {
+        guard !usesDemoData else {
+            if navigateToResults { showTripResults() }
+            return
+        }
+
+        pendingResultNavigation = pendingResultNavigation || navigateToResults
+        if scanCoordinatorActive {
+            scanAgainRequested = true
+            return
+        }
+
+        scanCoordinatorActive = true
+        defer {
+            scanCoordinatorActive = false
+            scanAgainRequested = false
+        }
+
+        var completedGeneration: UUID?
+        repeat {
+            scanAgainRequested = false
+            guard let generation = await performPhotoLibraryScan() else { return }
+            completedGeneration = generation
+        } while scanAgainRequested && !Task.isCancelled
+
+        guard let completedGeneration, !Task.isCancelled else {
+            pendingResultNavigation = false
+            return
+        }
+
+        if pendingResultNavigation {
+            pendingResultNavigation = false
+            showTripResults()
+        } else if screen == .trips && trips.isEmpty {
+            go(.empty)
+        } else if screen == .empty && !trips.isEmpty {
+            go(.trips)
+        }
+
+        placeTask = Task { [weak self] in
+            await self?.resolveTripNames(generation: completedGeneration)
+        }
+    }
+
+    private func performPhotoLibraryScan() async -> UUID? {
+        let generation = UUID()
+        scanGeneration = generation
+        placeTask?.cancel()
+        detectorTask?.cancel()
+        isScanningLibrary = true
+        libraryErrorMessage = nil
+        lastAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        defer {
+            if scanGeneration == generation {
+                isScanningLibrary = false
+                if Task.isCancelled {
+                    pendingResultNavigation = false
+                }
+            }
+        }
+
+        let metadata = await photoLibrary.fetchAllPhotos()
+        guard scanGeneration == generation, !Task.isCancelled else { return nil }
+
+        libraryPhotoCount = metadata.count
+        selectedPhotoCount = metadata.count
+        libraryPreviewPhotos = Self.makePreviewPhotos(from: metadata)
+
+        let task = Task.detached(priority: .userInitiated) {
+            TripDetector.detect(in: metadata, shouldCancel: { Task.isCancelled })
+        }
+        detectorTask = task
+        let detected = await task.value
+        if scanGeneration == generation {
+            detectorTask = nil
+        }
+        guard scanGeneration == generation, !Task.isCancelled else { return nil }
+
+        trips = detected.map { Self.makeTrip(from: $0) }
+        discardImportedPhotoFiles()
+        hasManualSelection = false
+        hasPermissionFreeSelection = false
+        isManualSelectionInProgress = false
+        resolvedCoordinates = Dictionary(
+            uniqueKeysWithValues: detected.compactMap { trip in
+                trip.centroid.map { (trip.id, $0) }
+            }
+        )
+        reconcileActiveFilm(withAvailableLibraryIDs: Set(metadata.map(\.id)))
+        hasScannedLibrary = true
+        return generation
+    }
+
+    func refreshPhotoLibraryIfAuthorized(force: Bool = false) async {
+        guard !usesDemoData else { return }
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        let previousStatus = lastAuthorizationStatus
+
+        guard status == .authorized || status == .limited else {
+            if hasPermissionFreeSelection { return }
+            clearLibraryState(afterAuthorizationChangedTo: status)
+            return
+        }
+
+        if hasManualSelection && !force {
+            if !hasPermissionFreeSelection {
+                await reconcilePhotoKitManualSelection()
+            }
+            return
+        }
+
+        let upgradedFromLimited = status == .authorized && previousStatus == .limited
+        let shouldNavigate = upgradedFromLimited && screen == .limited
+        guard force || shouldNavigate || !hasScannedLibrary || previousStatus != status else { return }
+        await scanPhotoLibrary(navigateToResults: shouldNavigate)
+    }
+
+    @discardableResult
+    func loadManualSelection(identifiers: [String]) async -> Bool {
+        guard !identifiers.isEmpty else { return false }
+        let generation = beginManualSelection()
+        defer {
+            if manualSelectionGeneration == generation {
+                isManualSelectionInProgress = false
+            }
+        }
+        let metadata = await photoLibrary.fetchPhotos(withLocalIdentifiers: identifiers)
+        guard manualSelectionGeneration == generation, !Task.isCancelled else { return false }
+        guard !metadata.isEmpty, Set(metadata.map(\.id)) == Set(identifiers) else {
+            isManualSelectionInProgress = false
+            libraryErrorMessage = "Some selected photos are outside TripReel's current Photo Library access. Allow Full Access or add them to Limited Access, then try again."
+            return false
+        }
+
+        return await installPhotoKitManualSelection(
+            metadata: metadata,
+            identifiers: identifiers,
+            generation: generation
+        )
+    }
+
+    private func installPhotoKitManualSelection(
+        metadata: [PhotoMetadata],
+        identifiers: [String],
+        generation: UUID
+    ) async -> Bool {
+        guard manualSelectionGeneration == generation, !Task.isCancelled else { return false }
+        invalidateAutomaticScan()
+        var order: [String: Int] = [:]
+        for (index, identifier) in identifiers.enumerated() where order[identifier] == nil {
+            order[identifier] = index
+        }
+        let sorted = metadata.sorted {
+            let left = order[$0.id] ?? .max
+            let right = order[$1.id] ?? .max
+            return left == right ? $0.id < $1.id : left < right
+        }
+        let dated = sorted.compactMap(\.creationDate)
+        let startDate = dated.min() ?? Date()
+        let endDate = dated.max() ?? startDate
+        let assets = sorted.map {
+            TripAsset(
+                id: $0.id,
+                source: .library($0.id),
+                creationDate: $0.creationDate,
+                filename: $0.filename
+            )
+        }
+        let coordinate = sorted.compactMap(\.coordinate).first
+        return await installManualTrip(
+            assets: assets,
+            startDate: startDate,
+            endDate: endDate,
+            coordinate: coordinate,
+            importedPhotos: [],
+            generation: generation
+        )
+    }
+
+    /// Imports picker items directly when PhotoKit identifiers are unavailable
+    /// or outside the current Limited-access set. This keeps the manual picker
+    /// useful even when the user declines library-wide access.
+    @discardableResult
+    func loadManualSelection(items: [PhotosPickerItem]) async -> Bool {
+        guard !items.isEmpty else { return false }
+        let generation = beginManualSelection()
+        defer {
+            if manualSelectionGeneration == generation {
+                isManualSelectionInProgress = false
+            }
+        }
+
+        let identifiers = items.compactMap(\.itemIdentifier)
+        if identifiers.count == items.count {
+            let metadata = await photoLibrary.fetchPhotos(withLocalIdentifiers: identifiers)
+            guard manualSelectionGeneration == generation, !Task.isCancelled else { return false }
+            if Set(metadata.map(\.id)) == Set(identifiers) {
+                return await installPhotoKitManualSelection(
+                    metadata: metadata,
+                    identifiers: identifiers,
+                    generation: generation
+                )
+            }
+        }
+
+        let result = await manualPhotoImporter.importItems(items)
+        guard manualSelectionGeneration == generation, !Task.isCancelled else {
+            await manualPhotoImporter.removeImportedFiles(for: result.photos)
+            return false
+        }
+        invalidateAutomaticScan()
+
+        var seen = Set<String>()
+        let imported = result.photos.filter { seen.insert($0.id).inserted }
+        guard !imported.isEmpty else {
+            isManualSelectionInProgress = false
+            libraryErrorMessage = "TripReel couldn't import the selected photos. Check your iCloud connection and try again."
+            return false
+        }
+
+        let assets = imported.map { photo in
+            TripAsset(
+                id: photo.id,
+                source: .imported(photo.filePath),
+                creationDate: photo.creationDate,
+                filename: photo.filename
+            )
+        }
+        let dated = imported.compactMap(\.creationDate)
+        let startDate = dated.min() ?? Date()
+        let endDate = dated.max() ?? startDate
+        if result.failureCount > 0 {
+            libraryErrorMessage = "Imported \(imported.count) photos. \(result.failureCount) couldn't be downloaded from Photos; you can try those again when iCloud is available."
+        }
+
+        return await installManualTrip(
+            assets: assets,
+            startDate: startDate,
+            endDate: endDate,
+            coordinate: imported.compactMap(\.coordinate).first,
+            importedPhotos: imported,
+            generation: generation
+        )
+    }
+
+    private func installManualTrip(
+        assets: [TripAsset],
+        startDate: Date,
+        endDate: Date,
+        coordinate: PhotoCoordinate?,
+        importedPhotos: [ManualImportedPhoto],
+        generation: UUID
+    ) async -> Bool {
+        guard !assets.isEmpty,
+              manualSelectionGeneration == generation,
+              !Task.isCancelled else {
+            if !importedPhotos.isEmpty {
+                await manualPhotoImporter.removeImportedFiles(for: importedPhotos)
+            }
+            return false
+        }
+        let trip = Trip(
+            id: "manual-\(assets[0].id)",
+            place: "Selected photos",
+            dates: Self.dateText(from: startDate, to: endDate),
+            startDate: startDate,
+            endDate: endDate,
+            assets: assets,
+            coverID: assets[assets.count / 2].id
+        )
+
+        discardImportedPhotoFiles()
+        activeImportedPhotos = importedPhotos
+        hasManualSelection = true
+        hasPermissionFreeSelection = !importedPhotos.isEmpty
+        isManualSelectionInProgress = false
+        trips = [trip]
+        selectedTrip = nil
+        photos = []
+        selectedPhotoCount = assets.count
+        libraryPhotoCount = max(libraryPhotoCount, assets.count)
+        libraryPreviewPhotos = Array(Self.makeReelPhotos(from: trip).prefix(6))
+        hasScannedLibrary = true
+        isScanningLibrary = false
+        showTripResults()
+
+        if let coordinate,
+           let name = await placeResolver.placeName(for: coordinate),
+           manualSelectionGeneration == generation,
+           trips.first?.id == trip.id {
+            let renamed = trip.renamed(name)
+            trips[0] = renamed
+            if selectedTrip?.id == trip.id { selectedTrip = renamed }
+        }
+        return true
+    }
+
+    func showTripResults() {
+        go(trips.isEmpty ? .empty : .trips)
+    }
+
+    func startBuild(trip: Trip) {
+        guard !trip.assets.isEmpty else { return }
+        selectedTrip = trip
+        photos = Self.makeReelPhotos(from: trip)
+        titleText = trip.shortPlace
         workTask?.cancel()
         buildCount = 0
         currentPhotoIndex = 0
         cutPhotoIDs = []
         history = []
+        cleanupSelection = []
         go(.building)
+
+        let total = photos.count
+        let steps = min(30, max(1, total))
         workTask = Task { [weak self] in
             guard let self else { return }
-            for count in stride(from: 3, through: 84, by: 3) {
-                try? await Task.sleep(nanoseconds: 120_000_000)
+            for step in 1...steps {
+                try? await Task.sleep(nanoseconds: 100_000_000)
                 guard !Task.isCancelled else { return }
-                self.buildCount = count
+                let currentTotal = self.photos.count
+                self.buildCount = min(currentTotal, Int(ceil(Double(total * step) / Double(steps))))
             }
+            self.buildCount = self.photos.count
             try? await Task.sleep(nanoseconds: 650_000_000)
             guard !Task.isCancelled else { return }
             self.go(.firstWatch)
         }
     }
 
+    func startBuild() {
+        guard let trip = selectedTrip ?? trips.first else { return }
+        startBuild(trip: trip)
+    }
+
     func decideCurrentPhoto(cut: Bool) {
+        guard !photos.isEmpty else { return }
         decidePhoto(id: currentPhoto.id, cut: cut)
     }
 
-    func decidePhoto(id: Int, cut: Bool) {
+    func decidePhoto(id: String, cut: Bool) {
         guard let photoIndex = photos.firstIndex(where: { $0.id == id }) else { return }
 
         history.append(
@@ -298,5 +742,319 @@ final class TripReelModel: ObservableObject {
         cleanupShowsGrid = false
         showCutHint = true
         go(.trips)
+    }
+
+    private func resolveTripNames(generation: UUID) async {
+        let tripIDs = trips.map(\.id)
+        for tripID in tripIDs {
+            guard !Task.isCancelled, scanGeneration == generation else { return }
+            guard trips.contains(where: { $0.id == tripID }) else { continue }
+            guard let detectedCoordinate = resolvedCoordinates[tripID] else { continue }
+            guard let name = await placeResolver.placeName(for: detectedCoordinate) else { continue }
+            guard !Task.isCancelled, scanGeneration == generation else { return }
+            guard let currentIndex = trips.firstIndex(where: { $0.id == tripID }) else { continue }
+            let renamed = trips[currentIndex].renamed(name)
+            trips[currentIndex] = renamed
+            if selectedTrip?.id == tripID { selectedTrip = renamed }
+        }
+    }
+
+    private func clearLibraryState(afterAuthorizationChangedTo status: PHAuthorizationStatus) {
+        scanGeneration = UUID()
+        pendingResultNavigation = false
+        scanAgainRequested = false
+        detectorTask?.cancel()
+        detectorTask = nil
+        placeTask?.cancel()
+        lastAuthorizationStatus = status
+        hasScannedLibrary = false
+        hasManualSelection = false
+        hasPermissionFreeSelection = false
+        isScanningLibrary = false
+        trips = []
+        selectedTrip = nil
+        photos = []
+        libraryPreviewPhotos = []
+        libraryPhotoCount = 0
+        selectedPhotoCount = 0
+        resolvedCoordinates = [:]
+        cutPhotoIDs = []
+        history = []
+
+        if screen != .welcome && screen != .access {
+            go(.access)
+        }
+    }
+
+    @discardableResult
+    private func beginManualSelection() -> UUID {
+        let generation = UUID()
+        manualSelectionGeneration = generation
+        isManualSelectionInProgress = true
+        invalidateAutomaticScan()
+        libraryErrorMessage = nil
+        return generation
+    }
+
+    private func invalidateAutomaticScan() {
+        scanGeneration = UUID()
+        pendingResultNavigation = false
+        scanAgainRequested = false
+        detectorTask?.cancel()
+        detectorTask = nil
+        placeTask?.cancel()
+        isScanningLibrary = false
+    }
+
+    private func discardImportedPhotoFiles() {
+        guard !activeImportedPhotos.isEmpty else { return }
+        let discarded = activeImportedPhotos
+        activeImportedPhotos = []
+        Task { [manualPhotoImporter] in
+            await manualPhotoImporter.removeImportedFiles(for: discarded)
+        }
+    }
+
+    private func reconcilePhotoKitManualSelection() async {
+        guard hasManualSelection,
+              !hasPermissionFreeSelection,
+              !isManualSelectionInProgress,
+              let manualTrip = trips.first else { return }
+
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .authorized || status == .limited else {
+            clearLibraryState(afterAuthorizationChangedTo: status)
+            return
+        }
+
+        let generation = manualSelectionGeneration
+        let identifiers = manualTrip.assets.compactMap { asset -> String? in
+            if case let .library(identifier) = asset.source { return identifier }
+            return nil
+        }
+        guard !identifiers.isEmpty else { return }
+
+        let availableMetadata = await photoLibrary.fetchPhotos(withLocalIdentifiers: identifiers)
+        guard manualSelectionGeneration == generation,
+              hasManualSelection,
+              !Task.isCancelled else { return }
+
+        let availableIDs = Set(availableMetadata.map(\.id))
+        guard availableIDs.count != Set(identifiers).count else { return }
+        let removedCount = Set(identifiers).subtracting(availableIDs).count
+        let retainedTrip = manualTrip.retainingAssets(withIDs: availableIDs)
+
+        trips = retainedTrip.map { [$0] } ?? []
+        selectedPhotoCount = retainedTrip?.photoCount ?? 0
+        libraryPreviewPhotos = retainedTrip.map {
+            Array(Self.makeReelPhotos(from: $0).prefix(6))
+        } ?? []
+        if selectedTrip?.id == manualTrip.id {
+            selectedTrip = retainedTrip
+        }
+        libraryErrorMessage = "\(removedCount) selected photo\(removedCount == 1 ? " is" : "s are") no longer available and \(removedCount == 1 ? "was" : "were") removed."
+        reconcileActiveFilm(withAvailableLibraryIDs: availableIDs)
+
+        if retainedTrip == nil {
+            hasManualSelection = false
+            hasScannedLibrary = false
+            if photos.isEmpty {
+                go(.empty)
+            }
+        }
+    }
+
+    private func reconcileActiveFilm(withAvailableLibraryIDs availableIDs: Set<String>) {
+        guard !photos.isEmpty else { return }
+
+        let retainedPhotoIDs = Set(photos.compactMap { photo -> String? in
+            switch photo.source {
+            case .bundled:
+                return photo.id
+            case let .library(identifier):
+                return availableIDs.contains(identifier) ? photo.id : nil
+            case .imported:
+                return photo.id
+            }
+        })
+        guard retainedPhotoIDs.count != photos.count else { return }
+
+        photos.removeAll { !retainedPhotoIDs.contains($0.id) }
+        cutPhotoIDs.formIntersection(retainedPhotoIDs)
+        cleanupSelection.formIntersection(retainedPhotoIDs)
+        history.removeAll { !retainedPhotoIDs.contains($0.id) }
+        currentPhotoIndex = min(currentPhotoIndex, max(0, photos.count - 1))
+        buildCount = min(buildCount, photos.count)
+        selectedTrip = selectedTrip?.retainingAssets(withIDs: retainedPhotoIDs)
+
+        guard !photos.isEmpty else {
+            workTask?.cancel()
+            selectedTrip = nil
+            go(trips.isEmpty ? .empty : .trips)
+            return
+        }
+
+        libraryErrorMessage = "Some photos in this film are no longer available, so TripReel removed those frames."
+    }
+
+    private static func makeTrip(from detected: DetectedTrip) -> Trip {
+        let assets = detected.photos.map {
+            TripAsset(
+                id: $0.id,
+                source: .library($0.id),
+                creationDate: $0.creationDate,
+                filename: $0.filename
+            )
+        }
+        let fallbackPlace = detected.centroid == nil
+            ? "Photo trip"
+            : "Travel · \(monthYearFormatter.string(from: detected.startDate))"
+        return Trip(
+            id: detected.id,
+            place: fallbackPlace,
+            dates: dateText(from: detected.startDate, to: detected.endDate),
+            startDate: detected.startDate,
+            endDate: detected.endDate,
+            assets: assets,
+            coverID: detected.coverID
+        )
+    }
+
+    private static func makePreviewPhotos(from metadata: [PhotoMetadata]) -> [ReelPhoto] {
+        let assets = metadata.suffix(6).map {
+            TripAsset(id: $0.id, source: .library($0.id), creationDate: $0.creationDate, filename: $0.filename)
+        }
+        return makeReelPhotos(
+            from: Trip(
+                id: "library-preview",
+                place: "Library",
+                dates: "",
+                startDate: Date(),
+                endDate: Date(),
+                assets: assets,
+                coverID: assets.first?.id ?? ""
+            )
+        )
+    }
+
+    private static func makeReelPhotos(from trip: Trip) -> [ReelPhoto] {
+        trip.assets.enumerated().map { index, asset in
+            let fallbackLabel = "PHOTO_\(String(format: "%04d", index + 1))"
+            let label = asset.filename.isEmpty ? fallbackLabel : asset.filename
+            return ReelPhoto(
+                id: asset.id,
+                source: asset.source,
+                label: label,
+                time: asset.creationDate.map(timeFormatter.string) ?? "—",
+                isSimilar: {
+                    if case .bundled = asset.source { return index % 4 == 1 }
+                    return false
+                }()
+            )
+        }
+    }
+
+    private static func makeDemoTrips() -> [Trip] {
+        [
+            makeDemoTrip(id: "da-nang", place: "Da Nang, Vietnam", dates: "Aug 2 – Aug 9, 2026", count: 84, start: date(2026, 8, 2), end: date(2026, 8, 9), coverName: "my-khe-beach"),
+            makeDemoTrip(id: "kyoto", place: "Kyoto, Japan", dates: "Apr 11 – Apr 18, 2026", count: 212, start: date(2026, 4, 11), end: date(2026, 4, 18), coverName: "hoi-an-lanes"),
+            makeDemoTrip(id: "lisbon", place: "Lisbon, Portugal", dates: "Nov 3 – Nov 8, 2025", count: 96, start: date(2025, 11, 3), end: date(2025, 11, 8), coverName: "night-market"),
+            makeDemoTrip(id: "big-sur", place: "Big Sur, California", dates: "Jun 21 – Jun 23, 2025", count: 41, start: date(2025, 6, 21), end: date(2025, 6, 23), coverName: "han-river")
+        ]
+    }
+
+    private static func makeDemoTrip(
+        id: String,
+        place: String,
+        dates: String,
+        count: Int,
+        start: Date,
+        end: Date,
+        coverName: String
+    ) -> Trip {
+        let duration = end.timeIntervalSince(start)
+        let assets = (0..<count).map { index in
+            let imageName = assetNames[index % assetNames.count]
+            let progress = count <= 1 ? 0 : Double(index) / Double(count - 1)
+            return TripAsset(
+                id: "demo-\(id)-\(index)",
+                source: .bundled(imageName),
+                creationDate: start.addingTimeInterval(duration * progress),
+                filename: "IMG_\(2140 + index)"
+            )
+        }
+        let coverID = assets.first(where: {
+            if case let .bundled(name) = $0.source { return name == coverName }
+            return false
+        })?.id ?? assets[0].id
+        return Trip(
+            id: "demo-\(id)",
+            place: place,
+            dates: dates,
+            startDate: start,
+            endDate: end,
+            assets: assets,
+            coverID: coverID
+        )
+    }
+
+    private static func durationText(photoCount: Int, secondsPerPhoto: Double) -> String {
+        let seconds = max(1, Int((Double(photoCount) * secondsPerPhoto).rounded()))
+        return "\(seconds / 60):\(String(format: "%02d", seconds % 60))"
+    }
+
+    private static func dateText(from startDate: Date, to endDate: Date) -> String {
+        if Calendar.current.isDate(startDate, inSameDayAs: endDate) {
+            return singleDateFormatter.string(from: startDate)
+        }
+        return intervalFormatter.string(from: startDate, to: endDate)
+    }
+
+    private static func date(_ year: Int, _ month: Int, _ day: Int) -> Date {
+        Calendar(identifier: .gregorian).date(from: DateComponents(year: year, month: month, day: day, hour: 8))!
+    }
+
+    private static let placeholderPhoto = ReelPhoto(
+        id: "placeholder",
+        source: .bundled("my-khe-beach"),
+        label: "PHOTO",
+        time: "—",
+        isSimilar: false
+    )
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.setLocalizedDateFormatFromTemplate("HHmm")
+        return formatter
+    }()
+
+    private static let monthYearFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.setLocalizedDateFormatFromTemplate("MMM yyyy")
+        return formatter
+    }()
+
+    private static let singleDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.setLocalizedDateFormatFromTemplate("MMM d yyyy")
+        return formatter
+    }()
+
+    private static let intervalFormatter: DateIntervalFormatter = {
+        let formatter = DateIntervalFormatter()
+        formatter.locale = .current
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }()
+}
+
+private extension Int {
+    func modulo(_ divisor: Int) -> Int {
+        let result = self % divisor
+        return result >= 0 ? result : result + divisor
     }
 }

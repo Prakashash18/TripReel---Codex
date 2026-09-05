@@ -8,6 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		09FCA813CC6F66FA7CF72563 /* SharedViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = D41FD1CB452EA664AADCA413 /* SharedViews.swift */; };
+		A10000000000000000000011 /* TripGrouping.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* TripGrouping.swift */; };
+		A10000000000000000000012 /* PhotoLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* PhotoLibraryService.swift */; };
+		A10000000000000000000013 /* TripGroupingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* TripGroupingTests.swift */; };
+		A10000000000000000000014 /* ManualPhotoImportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* ManualPhotoImportService.swift */; };
 		16775CE8921A1C975E6AB0C8 /* TripReelModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1234F0F1E044033AC9B1F9CB /* TripReelModel.swift */; };
 		195D37ECB1E25C2B9AFBE5B7 /* EditingScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AC88EC76075854F8A3C00D6 /* EditingScreens.swift */; };
 		1D4F9B6D48EC16BACEB005A5 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6209A73B0A254D6C91443085 /* Foundation.framework */; };
@@ -45,6 +49,10 @@
 
 /* Begin PBXFileReference section */
 		00F6BAEE2C5DBF8EB5C3CDBD /* TripReelTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripReelTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000001 /* TripGrouping.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripGrouping.swift; path = Models/TripGrouping.swift; sourceTree = "<group>"; };
+		A10000000000000000000002 /* PhotoLibraryService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PhotoLibraryService.swift; path = Models/PhotoLibraryService.swift; sourceTree = "<group>"; };
+		A10000000000000000000003 /* TripGroupingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TripGroupingTests.swift; sourceTree = "<group>"; };
+		A10000000000000000000004 /* ManualPhotoImportService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ManualPhotoImportService.swift; path = Models/ManualPhotoImportService.swift; sourceTree = "<group>"; };
 		1234F0F1E044033AC9B1F9CB /* TripReelModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelModel.swift; path = Models/TripReelModel.swift; sourceTree = "<group>"; };
 		1CF9079ACB85C5B013FADE35 /* OnboardingScreens.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = OnboardingScreens.swift; path = Screens/OnboardingScreens.swift; sourceTree = "<group>"; };
 		225AE85EF2AEBAFAE4B4B1DE /* InstrumentSerif-Regular.ttf */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; name = "InstrumentSerif-Regular.ttf"; path = "Resources/Fonts/InstrumentSerif-Regular.ttf"; sourceTree = "<group>"; };
@@ -125,6 +133,7 @@
 			isa = PBXGroup;
 			children = (
 				DB0BA881FA7AA6E32CDC6B49 /* TripReelModelTests.swift */,
+				A10000000000000000000003 /* TripGroupingTests.swift */,
 			);
 			path = TripReelTests;
 			sourceTree = "<group>";
@@ -147,6 +156,9 @@
 				D41FD1CB452EA664AADCA413 /* SharedViews.swift */,
 				9B91C5921938D47CF8CB970B /* TripReelTheme.swift */,
 				1234F0F1E044033AC9B1F9CB /* TripReelModel.swift */,
+				A10000000000000000000001 /* TripGrouping.swift */,
+				A10000000000000000000002 /* PhotoLibraryService.swift */,
+				A10000000000000000000004 /* ManualPhotoImportService.swift */,
 				2AC88EC76075854F8A3C00D6 /* EditingScreens.swift */,
 				F1167D34469AD988E42041C2 /* ExportScreens.swift */,
 				1CF9079ACB85C5B013FADE35 /* OnboardingScreens.swift */,
@@ -230,6 +242,7 @@
 		6332735E1A4FFF79C0D1C653 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
+				BuildIndependentTargetsInParallel = YES;
 				LastSwiftUpdateCheck = 2660;
 				LastUpgradeCheck = 2660;
 			};
@@ -294,6 +307,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				AEDE992148CBCD983E5A2E0D /* TripReelModelTests.swift in Sources */,
+				A10000000000000000000013 /* TripGroupingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -306,6 +320,9 @@
 				09FCA813CC6F66FA7CF72563 /* SharedViews.swift in Sources */,
 				641C090014F425E519FA624E /* TripReelTheme.swift in Sources */,
 				16775CE8921A1C975E6AB0C8 /* TripReelModel.swift in Sources */,
+				A10000000000000000000011 /* TripGrouping.swift in Sources */,
+				A10000000000000000000012 /* PhotoLibraryService.swift in Sources */,
+				A10000000000000000000014 /* ManualPhotoImportService.swift in Sources */,
 				195D37ECB1E25C2B9AFBE5B7 /* EditingScreens.swift in Sources */,
 				BB6F2596D9843E277F89C91B /* ExportScreens.swift in Sources */,
 				DA237CD16DB7147A8148D68A /* OnboardingScreens.swift in Sources */,
@@ -431,6 +448,7 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -451,6 +469,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -494,6 +513,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -507,6 +527,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;

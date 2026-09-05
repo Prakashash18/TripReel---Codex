@@ -45,5 +45,20 @@ struct RootView: View {
         .background(Color.black)
         .foregroundStyle(TR.cream)
         .tint(TR.accent)
+        .alert(
+            "Photo Library",
+            isPresented: Binding(
+                get: { model.libraryErrorMessage != nil },
+                set: { isPresented in
+                    if !isPresented { model.dismissLibraryMessage() }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                model.dismissLibraryMessage()
+            }
+        } message: {
+            Text(model.libraryErrorMessage ?? "")
+        }
     }
 }

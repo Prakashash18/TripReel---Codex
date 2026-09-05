@@ -3,8 +3,12 @@ import XCTest
 
 @MainActor
 final class TripReelModelTests: XCTestCase {
+    private func makeModel() -> TripReelModel {
+        TripReelModel(arguments: [], useDemoData: true)
+    }
+
     func testPaceMapsToExpectedDurations() {
-        let model = TripReelModel(arguments: [])
+        let model = makeModel()
 
         model.pace = 0
         XCTAssertEqual(model.secondsPerPhoto, 1.85, accuracy: 0.001)
@@ -16,7 +20,7 @@ final class TripReelModelTests: XCTestCase {
     }
 
     func testCutAndUndoRestorePhotoState() {
-        let model = TripReelModel(arguments: [])
+        let model = makeModel()
         let firstPhotoID = model.currentPhoto.id
 
         model.decideCurrentPhoto(cut: true)
@@ -28,12 +32,12 @@ final class TripReelModelTests: XCTestCase {
         model.undoLastDecision()
 
         XCTAssertFalse(model.cutPhotoIDs.contains(firstPhotoID))
-        XCTAssertEqual(model.currentPhotoIndex, firstPhotoID)
+        XCTAssertEqual(model.currentPhotoIndex, 0)
         XCTAssertTrue(model.history.isEmpty)
     }
 
     func testKeepingAPhotoDoesNotAddItToCuts() {
-        let model = TripReelModel(arguments: [])
+        let model = makeModel()
 
         model.decideCurrentPhoto(cut: false)
 
@@ -43,7 +47,7 @@ final class TripReelModelTests: XCTestCase {
     }
 
     func testNoMusicDisablesBeatCutting() throws {
-        let model = TripReelModel(arguments: [])
+        let model = makeModel()
         let noMusic = try XCTUnwrap(model.tracks.first { $0.id == "none" })
 
         model.selectTrack(noMusic)
@@ -54,9 +58,9 @@ final class TripReelModelTests: XCTestCase {
     }
 
     func testRestartReturnsToTripsAndClearsCleanupState() {
-        let model = TripReelModel(arguments: [])
+        let model = makeModel()
         model.cleanupShowsGrid = true
-        model.cleanupSelection = [1, 3, 5]
+        model.cleanupSelection = ["one", "three", "five"]
 
         model.restart()
 
@@ -67,23 +71,24 @@ final class TripReelModelTests: XCTestCase {
     }
 
     func testChangingDecisionAndUndoRestoresPreviousCutState() {
-        let model = TripReelModel(arguments: [])
+        let model = makeModel()
         model.currentPhotoIndex = model.photos.count - 1
+        let lastPhotoID = model.currentPhoto.id
 
         model.decideCurrentPhoto(cut: true)
-        XCTAssertTrue(model.cutPhotoIDs.contains(83))
+        XCTAssertTrue(model.cutPhotoIDs.contains(lastPhotoID))
 
         model.go(.cut)
         model.decideCurrentPhoto(cut: false)
-        XCTAssertFalse(model.cutPhotoIDs.contains(83))
+        XCTAssertFalse(model.cutPhotoIDs.contains(lastPhotoID))
 
         model.undoLastDecision()
-        XCTAssertTrue(model.cutPhotoIDs.contains(83))
+        XCTAssertTrue(model.cutPhotoIDs.contains(lastPhotoID))
         XCTAssertEqual(model.currentPhotoIndex, 83)
     }
 
     func testExportQualityControlsWatermark() {
-        let model = TripReelModel(arguments: [])
+        let model = makeModel()
 
         model.startRender(hd: false)
         XCTAssertEqual(model.exportQuality, .standard)
@@ -95,13 +100,74 @@ final class TripReelModelTests: XCTestCase {
     }
 
     func testPhotoFixtureIsDeterministic() {
-        let model = TripReelModel(arguments: [])
+        let model = makeModel()
 
         XCTAssertEqual(model.photos.count, 84)
-        XCTAssertEqual(model.photos.first?.imageName, "my-khe-beach")
+        XCTAssertEqual(model.photos.first?.source, .bundled("my-khe-beach"))
         XCTAssertEqual(model.photos.first?.label, "IMG_2140")
-        XCTAssertEqual(model.photos.first?.time, "07:00")
         XCTAssertEqual(model.photos.last?.label, "IMG_2223")
-        XCTAssertEqual(model.photos.last?.time, "16:31")
+    }
+
+    func testProductionModelDoesNotSilentlyLoadDemoTrips() {
+        let model = TripReelModel(arguments: [], useDemoData: false)
+
+        XCTAssertTrue(model.trips.isEmpty)
+        XCTAssertTrue(model.photos.isEmpty)
+        XCTAssertFalse(model.usesDemoData)
+    }
+
+    func testLibraryScanGroupsAssetsAndBuildUsesTheirIdentifiers() async throws {
+        let start = Calendar.current.startOfDay(for: Date()).addingTimeInterval(8 * 60 * 60)
+        let metadata = (0..<15).map { index in
+            PhotoMetadata(
+                id: "library-\(index)",
+                creationDate: start.addingTimeInterval(Double(index) * 20 * 60 * 60 / 14),
+                coordinate: nil,
+                filename: "IMG_\(index).HEIC",
+                pixelWidth: 4_032,
+                pixelHeight: 3_024,
+                isScreenshot: index == 4
+            )
+        }
+        let service = StubPhotoLibrary(photos: metadata)
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: service
+        )
+
+        await model.scanPhotoLibrary(navigateToResults: true)
+
+        XCTAssertEqual(model.libraryPhotoCount, 15)
+        XCTAssertEqual(model.selectedPhotoCount, 15)
+        XCTAssertEqual(model.trips.count, 1)
+        XCTAssertEqual(model.screen, .trips)
+        XCTAssertEqual(model.libraryPreviewPhotos.count, 6)
+
+        let trip = try XCTUnwrap(model.trips.first)
+        model.startBuild(trip: trip)
+
+        XCTAssertEqual(model.photos.map(\.id), metadata.map(\.id))
+        XCTAssertEqual(model.photos.first?.source, .library("library-0"))
+        XCTAssertEqual(model.selectedTrip?.id, trip.id)
+        model.go(.trips)
+    }
+}
+
+private final class StubPhotoLibrary: PhotoLibraryServing, @unchecked Sendable {
+    var onLibraryChange: (@Sendable () -> Void)?
+    let photos: [PhotoMetadata]
+
+    init(photos: [PhotoMetadata]) {
+        self.photos = photos
+    }
+
+    func fetchAllPhotos() async -> [PhotoMetadata] {
+        photos
+    }
+
+    func fetchPhotos(withLocalIdentifiers identifiers: [String]) async -> [PhotoMetadata] {
+        let requested = Set(identifiers)
+        return photos.filter { requested.contains($0.id) }
     }
 }

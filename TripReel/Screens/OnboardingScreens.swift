@@ -8,7 +8,7 @@ struct WelcomeScreen: View {
 
     var body: some View {
         ZStack {
-            MontageView(dim: true)
+            MontageView(usesBundledFallback: true, dim: true)
                 .ignoresSafeArea()
 
             LinearGradient(
@@ -64,8 +64,12 @@ struct PhotoAccessScreen: View {
         }
         .onChange(of: pickerItems) { _, newItems in
             guard !newItems.isEmpty else { return }
-            model.selectedPhotoCount = newItems.count
-            model.go(.limited)
+            requestingAccess = true
+            Task {
+                let loaded = await model.loadManualSelection(items: newItems)
+                requestingAccess = false
+                if loaded { pickerItems = [] }
+            }
         }
         .alert("Photo access is off", isPresented: $showAccessDenied) {
             Button("Open Settings") {
@@ -99,12 +103,12 @@ struct PhotoAccessScreen: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 
-                MontageView(showLabels: false)
+                MontageView(usesBundledFallback: true, showLabels: false)
                     .frame(width: compact ? 134 : 184, height: compact ? 169 : 232)
                     .clipShape(RoundedRectangle(cornerRadius: compact ? 18 : 22, style: .continuous))
                     .shadow(color: .black.opacity(0.5), radius: 26, y: 18)
 
-                Text("We look at where and when your photos were taken to find your trips. Nothing leaves your phone.")
+                Text("We use where and when your photos were taken to find trips. Your photos stay in your library.")
                     .font(TR.ui(compact ? 13 : 15))
                     .foregroundStyle(.white.opacity(0.72))
                     .multilineTextAlignment(.center)
@@ -123,7 +127,7 @@ struct PhotoAccessScreen: View {
                             ProgressView()
                                 .tint(TR.ink)
                         }
-                        Text(requestingAccess ? "Opening Photos…" : "Allow photo access")
+                        Text(requestingAccess ? "Finding your trips…" : "Allow photo access")
                     }
                 }
                 .buttonStyle(CreamButtonStyle())
@@ -138,8 +142,10 @@ struct PhotoAccessScreen: View {
                 .photosPicker(
                     isPresented: $showPicker,
                     selection: $pickerItems,
-                    maxSelectionCount: 84,
-                    matching: .images
+                    maxSelectionCount: 0,
+                    matching: .images,
+                    preferredItemEncoding: .current,
+                    photoLibrary: .shared()
                 )
             }
         }
@@ -153,19 +159,18 @@ struct PhotoAccessScreen: View {
         requestingAccess = true
         Task {
             let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
-            await MainActor.run {
-                requestingAccess = false
-                switch status {
-                case .authorized:
-                    model.go(.trips)
-                case .limited:
-                    model.go(.limited)
-                case .denied, .restricted, .notDetermined:
-                    showAccessDenied = true
-                @unknown default:
-                    showAccessDenied = true
-                }
+            switch status {
+            case .authorized:
+                await model.scanPhotoLibrary(navigateToResults: true)
+            case .limited:
+                await model.scanPhotoLibrary(navigateToResults: false)
+                model.go(.limited)
+            case .denied, .restricted, .notDetermined:
+                showAccessDenied = true
+            @unknown default:
+                showAccessDenied = true
             }
+            requestingAccess = false
         }
     }
 }
@@ -196,8 +201,8 @@ struct LimitedAccessScreen: View {
                     LazyVGrid(columns: columns, spacing: 7) {
                         ForEach(0..<6, id: \.self) { index in
                             Group {
-                                if index < 3 {
-                                    PhotoAssetView(imageName: TripReelModel.assetNames[index])
+                                if model.libraryPreviewPhotos.indices.contains(index) {
+                                    PhotoAssetView(source: model.libraryPreviewPhotos[index].source)
                                 } else {
                                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                                         .stroke(.white.opacity(0.24), style: StrokeStyle(lineWidth: 1, dash: [4]))
@@ -226,7 +231,7 @@ struct LimitedAccessScreen: View {
                     .buttonStyle(CreamButtonStyle())
 
                     Button("Continue with \(model.selectedPhotoCount) photos") {
-                        model.go(.trips)
+                        model.showTripResults()
                     }
                     .font(TR.ui(14, weight: .medium))
                     .foregroundStyle(.white.opacity(0.57))

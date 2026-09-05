@@ -1,15 +1,26 @@
+import ImageIO
+import Photos
 import SwiftUI
+import UIKit
 
 struct PhotoAssetView: View {
-    let imageName: String
+    let source: PhotoSource
     var label: String? = nil
     var dim = false
 
+    init(source: PhotoSource, label: String? = nil, dim: Bool = false) {
+        self.source = source
+        self.label = label
+        self.dim = dim
+    }
+
+    init(imageName: String, label: String? = nil, dim: Bool = false) {
+        self.init(source: .bundled(imageName), label: label, dim: dim)
+    }
+
     var body: some View {
         GeometryReader { proxy in
-            Image(imageName)
-                .resizable()
-                .scaledToFill()
+            PhotoSourceImage(source: source, size: proxy.size)
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 .clipped()
                 .overlay {
@@ -35,22 +46,60 @@ struct PhotoAssetView: View {
 
 struct MontageView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var photos: [ReelPhoto] = []
+    var usesBundledFallback = false
     var dim = false
     var watermark = false
     var showLabels = true
     @State private var currentIndex = 0
 
+    private var slideCount: Int {
+        if !photos.isEmpty { return photos.count }
+        return usesBundledFallback ? TripReelModel.assetNames.count : 0
+    }
+
+    private var currentSlide: MontageSlide? {
+        guard slideCount > 0 else { return nil }
+        let index = min(currentIndex, slideCount - 1)
+        if !photos.isEmpty {
+            let photo = photos[index]
+            return MontageSlide(id: photo.id, source: photo.source, label: photo.label)
+        }
+
+        let imageName = TripReelModel.assetNames[index]
+        return MontageSlide(
+            id: "bundled-\(imageName)",
+            source: .bundled(imageName),
+            label: TripReelModel.photoLabels[index]
+        )
+    }
+
+    private var contentKey: MontageContentKey {
+        MontageContentKey(
+            count: slideCount,
+            firstID: photos.first?.id ?? (usesBundledFallback ? TripReelModel.assetNames.first : nil),
+            lastID: photos.last?.id ?? (usesBundledFallback ? TripReelModel.assetNames.last : nil)
+        )
+    }
+
     var body: some View {
         ZStack {
-            ForEach(Array(TripReelModel.assetNames.enumerated()), id: \.offset) { index, imageName in
+            if let slide = currentSlide {
                 PhotoAssetView(
-                    imageName: imageName,
-                    label: showLabels ? TripReelModel.photoLabels[index] : nil,
+                    source: slide.source,
+                    label: showLabels ? slide.label : nil,
                     dim: false
                 )
-                .opacity(currentIndex == index ? 1 : 0)
-                .scaleEffect(reduceMotion ? 1 : (currentIndex == index ? 1.08 : 1.015))
-                .animation(reduceMotion ? nil : .easeInOut(duration: 0.72), value: currentIndex)
+                .id(slide.id)
+                .transition(.opacity)
+                .scaleEffect(reduceMotion ? 1 : 1.08)
+            } else {
+                ZStack {
+                    Color.white.opacity(0.045)
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 32, weight: .light))
+                        .foregroundStyle(.white.opacity(0.24))
+                }
             }
 
             if dim {
@@ -83,14 +132,257 @@ struct MontageView: View {
         }
         .background(Color(red: 0.051, green: 0.035, blue: 0.024))
         .accessibilityHidden(true)
-        .task {
-            guard !reduceMotion else { return }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.72), value: currentIndex)
+        .task(id: contentKey) {
+            currentIndex = 0
+            guard !reduceMotion, slideCount > 0 else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 2_200_000_000)
                 guard !Task.isCancelled else { return }
-                currentIndex = (currentIndex + 1) % TripReelModel.assetNames.count
+                currentIndex = (currentIndex + 1) % slideCount
             }
         }
+    }
+}
+
+private struct MontageSlide {
+    let id: String
+    let source: PhotoSource
+    let label: String
+}
+
+private struct MontageContentKey: Hashable {
+    let count: Int
+    let firstID: String?
+    let lastID: String?
+}
+
+private struct PhotoSourceImage: View {
+    let source: PhotoSource
+    let size: CGSize
+    @Environment(\.displayScale) private var displayScale
+    @StateObject private var loader = PhotoAssetImageLoader()
+
+    private var requestKey: PhotoImageRequestKey? {
+        guard size.width > 1,
+              size.height > 1 else { return nil }
+        switch source {
+        case .bundled:
+            return nil
+        case .library, .imported:
+            break
+        }
+        return PhotoImageRequestKey(
+            source: source,
+            pixelWidth: max(80, Int((size.width * displayScale).rounded(.up))),
+            pixelHeight: max(80, Int((size.height * displayScale).rounded(.up)))
+        )
+    }
+
+    var body: some View {
+        Group {
+            switch source {
+            case let .bundled(imageName):
+                Image(imageName)
+                    .resizable()
+                    .scaledToFill()
+            case .library, .imported:
+                if let image = loader.image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    ZStack {
+                        Color.white.opacity(0.055)
+                        Image(systemName: loader.failed ? "icloud.slash" : "photo")
+                            .font(.system(size: min(size.width, size.height) * 0.23, weight: .light))
+                            .foregroundStyle(.white.opacity(0.28))
+                    }
+                }
+            }
+        }
+        .onChange(of: requestKey, initial: true) { _, newValue in
+            guard let newValue else {
+                loader.cancel()
+                return
+            }
+            loader.load(newValue)
+        }
+        .onAppear {
+            if let requestKey {
+                if loader.failed {
+                    loader.retry(requestKey)
+                } else {
+                    loader.load(requestKey)
+                }
+            }
+        }
+        .onDisappear { loader.cancel() }
+    }
+}
+
+private struct PhotoImageRequestKey: Hashable {
+    let source: PhotoSource
+    let pixelWidth: Int
+    let pixelHeight: Int
+}
+
+@MainActor
+private final class PhotoAssetImageLoader: ObservableObject {
+    @Published private(set) var image: UIImage?
+    @Published private(set) var failed = false
+
+    private static let manager = PHCachingImageManager()
+    private var requestID = PHInvalidImageRequestID
+    private var key: PhotoImageRequestKey?
+    private var retryTask: Task<Void, Never>?
+    private var fileTask: Task<Void, Never>?
+    private var retryCount = 0
+
+    func load(_ key: PhotoImageRequestKey) {
+        guard self.key != key else { return }
+        cancel()
+        self.key = key
+        failed = false
+        request(key)
+    }
+
+    func retry(_ key: PhotoImageRequestKey) {
+        guard self.key == key else {
+            load(key)
+            return
+        }
+        retryTask?.cancel()
+        retryTask = nil
+        retryCount = 0
+        failed = false
+        request(key)
+    }
+
+    private func request(_ key: PhotoImageRequestKey) {
+        cancelImageRequest()
+
+        switch key.source {
+        case .bundled:
+            failed = true
+        case let .library(identifier):
+            requestLibraryImage(identifier: identifier, key: key)
+        case let .imported(path):
+            requestImportedImage(path: path, key: key)
+        }
+    }
+
+    private func requestLibraryImage(identifier: String, key: PhotoImageRequestKey) {
+
+        guard let asset = PHAsset.fetchAssets(
+            withLocalIdentifiers: [identifier],
+            options: nil
+        ).firstObject else {
+            failed = true
+            return
+        }
+
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .opportunistic
+        options.resizeMode = .fast
+        options.isNetworkAccessAllowed = true
+
+        requestID = Self.manager.requestImage(
+            for: asset,
+            targetSize: CGSize(width: key.pixelWidth, height: key.pixelHeight),
+            contentMode: .aspectFill,
+            options: options
+        ) { [weak self] image, info in
+            let cancelled = (info?[PHImageCancelledKey] as? Bool) == true
+            let error = info?[PHImageErrorKey] as? Error
+            let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) == true
+            Task { @MainActor [weak self] in
+                guard let self, self.key == key, !cancelled else { return }
+                if let image {
+                    self.image = image
+                    if !degraded {
+                        self.retryTask?.cancel()
+                        self.retryTask = nil
+                        self.failed = false
+                        self.retryCount = 0
+                    }
+                } else if error != nil || !degraded {
+                    self.failed = true
+                    self.scheduleRetry(for: key)
+                }
+            }
+        }
+    }
+
+    private func requestImportedImage(path: String, key: PhotoImageRequestKey) {
+        fileTask?.cancel()
+        fileTask = Task { [weak self] in
+            let maximumPixelSize = max(key.pixelWidth, key.pixelHeight)
+            let image = await Task.detached(priority: .userInitiated) {
+                guard !Task.isCancelled,
+                      let source = CGImageSourceCreateWithURL(
+                        URL(fileURLWithPath: path) as CFURL,
+                        [kCGImageSourceShouldCache: false] as CFDictionary
+                      ),
+                      let thumbnail = CGImageSourceCreateThumbnailAtIndex(
+                        source,
+                        0,
+                        [
+                            kCGImageSourceCreateThumbnailFromImageAlways: true,
+                            kCGImageSourceCreateThumbnailWithTransform: true,
+                            kCGImageSourceShouldCacheImmediately: true,
+                            kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize
+                        ] as CFDictionary
+                      ) else {
+                    return nil as UIImage?
+                }
+                return UIImage(cgImage: thumbnail)
+            }.value
+
+            guard !Task.isCancelled, let self, self.key == key else { return }
+            if let image {
+                self.retryTask?.cancel()
+                self.retryTask = nil
+                self.image = image
+                self.failed = false
+                self.retryCount = 0
+            } else {
+                self.failed = true
+                self.scheduleRetry(for: key)
+            }
+        }
+    }
+
+    private func scheduleRetry(for key: PhotoImageRequestKey) {
+        guard retryCount < 2, retryTask == nil else { return }
+        retryCount += 1
+        let delay = UInt64(retryCount) * 1_000_000_000
+        retryTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled, let self, self.key == key else { return }
+            self.retryTask = nil
+            self.failed = false
+            self.request(key)
+        }
+    }
+
+    private func cancelImageRequest() {
+        if requestID != PHInvalidImageRequestID {
+            Self.manager.cancelImageRequest(requestID)
+        }
+        requestID = PHInvalidImageRequestID
+    }
+
+    func cancel() {
+        retryTask?.cancel()
+        retryTask = nil
+        fileTask?.cancel()
+        fileTask = nil
+        retryCount = 0
+        cancelImageRequest()
+        key = nil
+        image = nil
+        failed = false
     }
 }
 

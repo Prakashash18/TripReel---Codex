@@ -21,7 +21,7 @@ struct ExportScreen: View {
 
                 VStack(spacing: 14) {
                     ExportOptionCard(
-                        imageName: "my-khe-beach",
+                        source: model.previewSource(at: 0),
                         title: "Standard",
                         subtitle: "720p · watermarked",
                         badge: "FREE",
@@ -33,7 +33,7 @@ struct ExportScreen: View {
                     }
 
                     ExportOptionCard(
-                        imageName: "golden-bridge",
+                        source: model.previewSource(at: 2),
                         title: "HD",
                         subtitle: "1080p · no watermark",
                         badge: "PRO",
@@ -112,7 +112,7 @@ struct ExportScreen: View {
 }
 
 private struct ExportOptionCard: View {
-    let imageName: String
+    let source: PhotoSource
     let title: String
     let subtitle: String
     let badge: String
@@ -127,7 +127,7 @@ private struct ExportOptionCard: View {
         Button(action: action) {
             HStack(spacing: 14) {
                 ZStack(alignment: .topTrailing) {
-                    PhotoAssetView(imageName: imageName)
+                    PhotoAssetView(source: source)
                     if watermark {
                         Text("TripReel")
                             .font(TR.ui(6, weight: .semibold))
@@ -255,7 +255,7 @@ struct PaywallScreen: View {
 
     var body: some View {
         ZStack {
-            MontageView(dim: true, watermark: true)
+            MontageView(photos: model.keptPhotos, dim: true, watermark: true)
                 .ignoresSafeArea()
 
             LinearGradient(colors: [.clear, .black.opacity(0.94)], startPoint: .center, endPoint: .bottom)
@@ -332,7 +332,7 @@ struct RenderingScreen: View {
             WarmBackground(variant: .rendering)
 
             VStack(spacing: 0) {
-                MontageView(showLabels: false)
+                MontageView(photos: model.keptPhotos, showLabels: false)
                     .frame(width: 172, height: 230)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .shadow(color: .black.opacity(0.56), radius: 26, y: 20)
@@ -389,10 +389,14 @@ struct FilmReadyScreen: View {
         VStack(spacing: 0) {
             Spacer(minLength: compact ? 4 : 10)
 
-            MetadataText(text: "Da Nang · \(model.durationText)", color: .white.opacity(0.57))
+            MetadataText(text: "\(model.tripShortPlace) · \(model.durationText)", color: .white.opacity(0.57))
                 .padding(.bottom, compact ? 10 : 20)
 
-            MontageView(watermark: model.exportQuality.includesWatermark, showLabels: false)
+            MontageView(
+                photos: model.keptPhotos,
+                watermark: model.exportQuality.includesWatermark,
+                showLabels: false
+            )
                 .frame(width: previewWidth, height: previewWidth * 14 / 9)
                 .clipShape(RoundedRectangle(cornerRadius: compact ? 18 : 22, style: .continuous))
                 .shadow(color: .black.opacity(0.58), radius: 30, y: 22)
@@ -454,7 +458,7 @@ struct CleanupScreen: View {
             Spacer()
             MetadataText(text: "Saved to camera roll", color: .white.opacity(0.53))
 
-            Text("You cut \(cleanupCount) photos from this film. Want to clear them off your phone too?")
+            Text(cleanupQuestion)
                 .font(TR.display(32))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -466,10 +470,17 @@ struct CleanupScreen: View {
                 .lineSpacing(4)
 
             VStack(spacing: 11) {
-                Button("Review cut photos") {
-                    model.cleanupShowsGrid = true
+                if cleanupCount > 0 {
+                    Button("Review cut photos") {
+                        model.cleanupShowsGrid = true
+                    }
+                    .buttonStyle(GlassButtonStyle())
+                } else {
+                    Button("Done") {
+                        model.restart()
+                    }
+                    .buttonStyle(GlassButtonStyle())
                 }
-                .buttonStyle(GlassButtonStyle())
 
                 Button("Not now") {
                     model.restart()
@@ -489,7 +500,17 @@ struct CleanupScreen: View {
     }
 
     private var cleanupCount: Int {
-        model.cutPhotoIDs.isEmpty ? min(24, model.photos.count) : model.cutPhotoIDs.count
+        if model.usesDemoData && model.cutPhotoIDs.isEmpty {
+            return min(24, model.photos.count)
+        }
+        return model.cutPhotoIDs.count
+    }
+
+    private var cleanupQuestion: String {
+        guard cleanupCount > 0 else {
+            return "Your film is saved, and every original photo is still in your library."
+        }
+        return "You cut \(cleanupCount) photos from this film. Want to clear them off your phone too?"
     }
 }
 
@@ -500,7 +521,10 @@ private struct CleanupGrid: View {
 
     private var candidatePhotos: [ReelPhoto] {
         let explicit = model.photos.filter { model.cutPhotoIDs.contains($0.id) }
-        return explicit.isEmpty ? Array(model.photos.prefix(24)) : explicit
+        if model.usesDemoData && explicit.isEmpty {
+            return Array(model.photos.prefix(24))
+        }
+        return explicit
     }
 
     var body: some View {
@@ -528,7 +552,7 @@ private struct CleanupGrid: View {
                             }
                         } label: {
                             ZStack(alignment: .topTrailing) {
-                                PhotoAssetView(imageName: photo.imageName)
+                                PhotoAssetView(source: photo.source)
                                     .frame(height: 112)
 
                                 ZStack {

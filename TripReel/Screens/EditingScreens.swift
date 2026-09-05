@@ -5,7 +5,7 @@ struct FirstWatchScreen: View {
 
     var body: some View {
         ZStack {
-            MontageView()
+            MontageView(photos: model.photos)
                 .ignoresSafeArea()
 
             LinearGradient(
@@ -17,8 +17,8 @@ struct FirstWatchScreen: View {
 
             VStack(spacing: 0) {
                 VStack(spacing: 7) {
-                    MetadataText(text: "Da Nang, Vietnam", color: .white.opacity(0.82))
-                    Text("Aug 2 – Aug 9, 2026 · the raw cut")
+                    MetadataText(text: model.tripPlace, color: .white.opacity(0.82))
+                    Text("\(model.tripDates) · the raw cut")
                         .font(TR.ui(12))
                         .foregroundStyle(.white.opacity(0.52))
                 }
@@ -30,9 +30,9 @@ struct FirstWatchScreen: View {
                     VStack(spacing: 12) {
                         PlaybackProgressBar()
                         HStack {
-                            MetadataText(text: "84 photos", color: .white.opacity(0.65))
+                            MetadataText(text: "\(model.photos.count) photos", color: .white.opacity(0.65))
                             Spacer()
-                            Text("1:52")
+                            Text(model.rawDurationText)
                                 .font(TR.mono(12))
                                 .tracking(0.8)
                                 .foregroundStyle(.white.opacity(0.65))
@@ -178,7 +178,7 @@ struct CutScreen: View {
 
     private var photoCard: some View {
         ZStack {
-            PhotoAssetView(imageName: model.currentPhoto.imageName)
+            PhotoAssetView(source: model.currentPhoto.source)
 
             LinearGradient(colors: [.clear, .black.opacity(0.64)], startPoint: .center, endPoint: .bottom)
 
@@ -339,8 +339,8 @@ struct PaceScreen: View {
 
                         GeometryReader { proxy in
                             HStack(spacing: 3) {
-                                ForEach(Array(model.photos.prefix(8))) { photo in
-                                    PhotoAssetView(imageName: photo.imageName)
+                                ForEach(Array(model.keptPhotos.prefix(8))) { photo in
+                                    PhotoAssetView(source: photo.source)
                                         .frame(width: 22 + model.secondsPerPhoto * 21)
                                 }
                             }
@@ -418,9 +418,9 @@ private struct AdvancedTimingSheet: View {
             VStack(alignment: .leading, spacing: 16) {
                 SheetHeader(title: "Per-photo timing") { dismiss() }
 
-                ForEach(Array(model.photos.prefix(4))) { photo in
+                ForEach(Array(model.keptPhotos.prefix(4))) { photo in
                     HStack(spacing: 14) {
-                        PhotoAssetView(imageName: photo.imageName)
+                        PhotoAssetView(source: photo.source)
                             .frame(width: 44, height: 44)
                             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                         Text(photo.label)
@@ -452,7 +452,7 @@ struct SecondWatchScreen: View {
 
     var body: some View {
         ZStack {
-            MontageView()
+            MontageView(photos: model.keptPhotos)
                 .ignoresSafeArea()
 
             LinearGradient(
@@ -464,7 +464,7 @@ struct SecondWatchScreen: View {
 
             VStack(spacing: 0) {
                 VStack(spacing: 7) {
-                    MetadataText(text: "Your cut · Da Nang", color: .white.opacity(0.82))
+                    MetadataText(text: "Your cut · \(model.tripShortPlace)", color: .white.opacity(0.82))
                     Text("\(model.keptCount) photos · \(model.durationText)\(trackSuffix)")
                         .font(TR.ui(12))
                         .foregroundStyle(.white.opacity(0.53))
@@ -592,7 +592,7 @@ private struct TitlesSheet: View {
                 VStack(alignment: .leading, spacing: 9) {
                     MetadataText(text: "Opening title text", color: .white.opacity(0.42))
 
-                    TextField("Da Nang", text: $model.titleText)
+                    TextField("Trip title", text: $model.titleText)
                         .font(TR.display(21))
                         .foregroundStyle(TR.cream)
                         .padding(.horizontal, 15)
@@ -617,8 +617,8 @@ private struct TitlesSheet: View {
         let text: String = {
             switch card {
             case .opening: model.titleText
-            case .place: "Hoi An"
-            case .ending: "Aug 2026"
+            case .place: model.tripShortPlace
+            case .ending: model.tripMonthYear
             }
         }()
 
@@ -631,7 +631,7 @@ private struct TitlesSheet: View {
         } label: {
             HStack(spacing: 0) {
                 ZStack {
-                    PhotoAssetView(imageName: TripReelModel.assetNames[index])
+                    PhotoAssetView(source: model.previewSource(at: index))
                     Text(text)
                         .font(TR.display(card == .opening ? 17 : 14))
                         .foregroundStyle(TR.cream)

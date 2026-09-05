@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 struct TripsScreen: View {
@@ -8,29 +9,46 @@ struct TripsScreen: View {
             WarmBackground(variant: .trips)
 
             VStack(spacing: 0) {
-                ScreenHeading(eyebrow: "4 trips found", title: "Your trips")
+                ScreenHeading(eyebrow: model.tripsEyebrow, title: "Your trips")
                     .padding(.horizontal, 24)
                     .padding(.top, 4)
                     .padding(.bottom, 19)
 
                 ScrollView(showsIndicators: false) {
                     LazyVStack(spacing: 10) {
-                        ForEach(model.trips) { trip in
-                            TripRow(trip: trip) {
-                                model.startBuild()
+                        if model.isScanningLibrary && model.trips.isEmpty {
+                            VStack(spacing: 12) {
+                                ProgressView()
+                                    .tint(TR.accent)
+                                Text("Looking through \(model.libraryPhotoCount) accessible photos…")
+                                    .font(TR.ui(13))
+                                    .foregroundStyle(.white.opacity(0.58))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 72)
+                        } else {
+                            ForEach(model.trips) { trip in
+                                TripRow(trip: trip) {
+                                    model.startBuild(trip: trip)
+                                }
                             }
                         }
 
-                        Button("See the empty state") {
-                            model.go(.empty)
+                        if model.usesDemoData {
+                            Button("See the empty state") {
+                                model.go(.empty)
+                            }
+                            .font(TR.ui(13, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.42))
+                            .buttonStyle(.plain)
+                            .padding(.vertical, 14)
                         }
-                        .font(TR.ui(13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.42))
-                        .buttonStyle(.plain)
-                        .padding(.vertical, 14)
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 32)
+                }
+                .refreshable {
+                    await model.refreshPhotoLibraryIfAuthorized(force: true)
                 }
             }
         }
@@ -45,7 +63,7 @@ private struct TripRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 14) {
-                PhotoAssetView(imageName: trip.imageName)
+                PhotoAssetView(source: trip.coverSource)
                     .frame(width: 76, height: 76)
                     .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
 
@@ -80,6 +98,8 @@ private struct TripRow: View {
 
 struct EmptyTripsScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @State private var showPicker = false
+    @State private var pickerItems: [PhotosPickerItem] = []
 
     var body: some View {
         ZStack {
@@ -113,21 +133,40 @@ struct EmptyTripsScreen: View {
 
                 VStack(spacing: 15) {
                     Button("Pick photos manually") {
-                        model.startBuild()
+                        showPicker = true
                     }
                     .buttonStyle(CreamButtonStyle())
+                    .photosPicker(
+                        isPresented: $showPicker,
+                        selection: $pickerItems,
+                        maxSelectionCount: 0,
+                        matching: .images,
+                        preferredItemEncoding: .current,
+                        photoLibrary: .shared()
+                    )
 
-                    Button("Back to trips") {
-                        model.go(.trips)
+                    Button(model.isScanningLibrary ? "Scanning library…" : "Scan photo library again") {
+                        Task {
+                            await model.refreshPhotoLibraryIfAuthorized(force: true)
+                            if !model.trips.isEmpty { model.go(.trips) }
+                        }
                     }
                     .font(TR.ui(14, weight: .medium))
                     .foregroundStyle(.white.opacity(0.53))
                     .buttonStyle(.plain)
+                    .disabled(model.isScanningLibrary)
                 }
                 .padding(.horizontal, 30)
                 .padding(.bottom, 20)
             }
             .safeAreaPadding(.vertical)
+        }
+        .onChange(of: pickerItems) { _, newItems in
+            guard !newItems.isEmpty else { return }
+            Task {
+                let loaded = await model.loadManualSelection(items: newItems)
+                if loaded { pickerItems = [] }
+            }
         }
         .accessibilityIdentifier("empty-trips-screen")
     }
@@ -150,25 +189,25 @@ struct BuildingScreen: View {
 
             VStack(spacing: 0) {
                 ZStack {
-                    MontageView(showLabels: false)
+                    MontageView(photos: model.photos, showLabels: false)
                         .frame(width: 216, height: 290)
                         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                         .shadow(color: .black.opacity(0.56), radius: 30, y: 22)
 
-                    flyingPhoto("street-food", size: 62, x: -132, y: -94, phase: -8)
-                    flyingPhoto("golden-bridge", size: 54, x: 130, y: 6, phase: 9)
-                    flyingPhoto("night-market", size: 48, x: -114, y: 124, phase: -6)
+                    flyingPhoto(model.previewSource(at: 1), size: 62, x: -132, y: -94, phase: -8)
+                    flyingPhoto(model.previewSource(at: 2), size: 54, x: 130, y: 6, phase: 9)
+                    flyingPhoto(model.previewSource(at: 3), size: 48, x: -114, y: 124, phase: -6)
                 }
                 .padding(.bottom, 38)
 
-                MetadataText(text: "Da Nang, Vietnam", color: .white.opacity(0.58))
+                MetadataText(text: model.tripPlace, color: .white.opacity(0.58))
 
                 Text("Building your film")
                     .font(TR.display(34))
                     .padding(.top, 14)
                     .padding(.bottom, 10)
 
-                Text("\(model.buildCount) of 84 photos placed")
+                Text("\(model.buildCount) of \(model.photos.count) photos placed")
                     .font(TR.ui(15))
                     .foregroundStyle(.white.opacity(0.61))
                     .contentTransition(.numericText())
@@ -178,8 +217,8 @@ struct BuildingScreen: View {
         .accessibilityIdentifier("building-screen")
     }
 
-    private func flyingPhoto(_ imageName: String, size: CGFloat, x: CGFloat, y: CGFloat, phase: CGFloat) -> some View {
-        PhotoAssetView(imageName: imageName)
+    private func flyingPhoto(_ source: PhotoSource, size: CGFloat, x: CGFloat, y: CGFloat, phase: CGFloat) -> some View {
+        PhotoAssetView(source: source)
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .shadow(color: .black.opacity(0.34), radius: 14, y: 8)
