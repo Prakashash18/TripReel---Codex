@@ -12,8 +12,40 @@ compatibility_flags = [
 workers_dev = true
 preview_urls = false
 
+[vars]
+APP_ATTEST_APP_ID = "GT9EAB8826.com.prakashash18.tripreel"
+APP_ATTEST_ENVIRONMENT = "production"
+APP_ATTEST_ALLOWED_VALIDATION_CATEGORIES = "2,3,4"
+APP_ATTEST_MINIMUM_BUNDLE_VERSION = "1"
+
 [secrets]
-required = ["OPENAI_API_KEY", "TRIPREEL_AUTH_TOKEN"]
+required = ["OPENAI_API_KEY", "TRIPREEL_AUTH_TOKEN", "APP_ATTEST_ROUTING_SECRET"]
+
+[[durable_objects.bindings]]
+name = "APP_ATTEST_SHARDS"
+class_name = "AppAttestShard"
+
+[exports.AppAttestShard]
+type = "durable-object"
+storage = "sqlite"
+
+# These edge counters are a fast abuse guard. The Durable Object applies the
+# authoritative global-per-key assertion counter and cost quota.
+[[ratelimits]]
+name = "APP_ATTEST_ENROLL_LIMITER"
+namespace_id = "53101"
+
+[ratelimits.simple]
+limit = 10
+period = 60
+
+[[ratelimits]]
+name = "APP_ATTEST_ANALYZE_LIMITER"
+namespace_id = "53102"
+
+[ratelimits.simple]
+limit = 60
+period = 60
 
 # The Worker itself contains no console logging. Keep automatic Worker Logs off so
 # request diagnostics cannot accidentally grow into a content-logging pipeline.

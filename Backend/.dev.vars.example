@@ -1,6 +1,7 @@
 # Copy to .dev.vars for local development only. Never commit real values.
 OPENAI_API_KEY=replace-with-a-project-scoped-openai-key
 TRIPREEL_AUTH_TOKEN=replace-with-at-least-32-random-bytes
+APP_ATTEST_ROUTING_SECRET=replace-with-at-least-32-random-bytes-and-keep-it-stable
 
 # Optional. Leave unset for the native app. If a browser client is required, use
 # exactly one HTTPS origin (localhost HTTP is accepted for local development).

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AA77E57B589C4DE4A6A97102 /* AppAttestCloudPhotoAnalysisAuthorizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA77E57B589C4DE4A6A97103 /* AppAttestCloudPhotoAnalysisAuthorizer.swift */; };
 		050E6A1D8D90DF1515ABDC18 /* InstrumentSerif-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 518C1F47CD476565000F8137 /* InstrumentSerif-Italic.ttf */; };
 		06F40B34C571F4B6469E2FA5 /* SmartPhotoSelectionFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5D6F0320E51D07035AA4F6F /* SmartPhotoSelectionFlowTests.swift */; };
 		09B1F1C72A1A53AB9455EAD4 /* SmartPhotoSelectionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4F8BD3DADE8F267D386287 /* SmartPhotoSelectionViews.swift */; };
@@ -59,6 +60,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		AA77E57B589C4DE4A6A97103 /* AppAttestCloudPhotoAnalysisAuthorizer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppAttestCloudPhotoAnalysisAuthorizer.swift; path = Models/AppAttestCloudPhotoAnalysisAuthorizer.swift; sourceTree = "<group>"; };
 		06EE510F98A67B1A8E8D95C9 /* NativePhotoIntelligenceService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = NativePhotoIntelligenceService.swift; path = Models/NativePhotoIntelligenceService.swift; sourceTree = "<group>"; };
 		0A4DD0217C602F175EF78D21 /* InstrumentSerif-Regular.ttf */ = {isa = PBXFileReference; includeInIndex = 1; name = "InstrumentSerif-Regular.ttf"; path = "Resources/Fonts/InstrumentSerif-Regular.ttf"; sourceTree = "<group>"; };
 		1661F4C3BF5766186551D2A7 /* NativePhotoIntelligenceScoringTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativePhotoIntelligenceScoringTests.swift; sourceTree = "<group>"; };
@@ -84,6 +86,7 @@
 		A35C1A3C46684F9B1761B266 /* CloudPhotoAnalysisTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CloudPhotoAnalysisTests.swift; sourceTree = "<group>"; };
 		A5D6F0320E51D07035AA4F6F /* SmartPhotoSelectionFlowTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SmartPhotoSelectionFlowTests.swift; sourceTree = "<group>"; };
 		A689E9B6C2743B25AD899649 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = Resources/Info.plist; sourceTree = "<group>"; };
+		AA77E57B589C4DE4A6A97101 /* TripReel.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; name = TripReel.entitlements; path = Resources/TripReel.entitlements; sourceTree = "<group>"; };
 		B1F8E2A45D62E233FE456939 /* PhotoAnalysisThumbnailService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PhotoAnalysisThumbnailService.swift; path = Models/PhotoAnalysisThumbnailService.swift; sourceTree = "<group>"; };
 		BD5F979D31E77ACB87012D87 /* TripReelApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelApp.swift; path = App/TripReelApp.swift; sourceTree = "<group>"; };
 		BE26B8F4A694B6E15BB21FC1 /* CloudPhotoAnalysisClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CloudPhotoAnalysisClient.swift; path = Models/CloudPhotoAnalysisClient.swift; sourceTree = "<group>"; };
@@ -132,6 +135,7 @@
 				4E0CF58F9757D40B4B8B93E4 /* SharedViews.swift */,
 				E05554B9C707378C118B13B3 /* TripReelTheme.swift */,
 				BE26B8F4A694B6E15BB21FC1 /* CloudPhotoAnalysisClient.swift */,
+				AA77E57B589C4DE4A6A97103 /* AppAttestCloudPhotoAnalysisAuthorizer.swift */,
 				2257B61BB25B85B34BF9CB46 /* ManualPhotoImportService.swift */,
 				06EE510F98A67B1A8E8D95C9 /* NativePhotoIntelligenceService.swift */,
 				B1F8E2A45D62E233FE456939 /* PhotoAnalysisThumbnailService.swift */,
@@ -151,6 +155,7 @@
 				0A4DD0217C602F175EF78D21 /* InstrumentSerif-Regular.ttf */,
 				518C1F47CD476565000F8137 /* InstrumentSerif-Italic.ttf */,
 				A689E9B6C2743B25AD899649 /* Info.plist */,
+				AA77E57B589C4DE4A6A97101 /* TripReel.entitlements */,
 				CC3B475300161E9F2A7EB701 /* OFL-InstrumentSerif.txt */,
 			);
 			name = TripReel;
@@ -340,6 +345,7 @@
 				82E6B110F8E44D0475A1B1E7 /* SharedViews.swift in Sources */,
 				51915F88844C5B47A6714A9C /* TripReelTheme.swift in Sources */,
 				B776F50C273D716AF454A0DA /* CloudPhotoAnalysisClient.swift in Sources */,
+				AA77E57B589C4DE4A6A97102 /* AppAttestCloudPhotoAnalysisAuthorizer.swift in Sources */,
 				4031D0983D8C7D2B129FB59C /* ManualPhotoImportService.swift in Sources */,
 				637614BC5AAACF420A388D9A /* NativePhotoIntelligenceService.swift in Sources */,
 				F6C953390844CEDFC6C1BEC2 /* PhotoAnalysisThumbnailService.swift in Sources */,
@@ -434,6 +440,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = TripReel/Resources/TripReel.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = GT9EAB8826;
@@ -455,6 +462,7 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				TRIPREEL_PHOTO_ANALYSIS_ENDPOINT = "https://tripreel-visual-analysis.tripreel-prakashash18.workers.dev/v1/analyze";
+				TRIPREEL_APP_ATTEST_ENVIRONMENT = production;
 			};
 			name = Debug;
 		};
@@ -530,6 +538,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_ENTITLEMENTS = TripReel/Resources/TripReel.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = GT9EAB8826;
 				ENABLE_PREVIEWS = YES;
@@ -550,6 +559,7 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				TRIPREEL_PHOTO_ANALYSIS_ENDPOINT = "https://tripreel-visual-analysis.tripreel-prakashash18.workers.dev/v1/analyze";
+				TRIPREEL_APP_ATTEST_ENVIRONMENT = production;
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;

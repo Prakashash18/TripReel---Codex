@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { LIMITS, MODEL } from "../src/contract.ts";
-import { handleRequest } from "../src/index.ts";
+import { handleRequest } from "../src/handler.ts";
 import { RequestProblem, validatePayload } from "../src/validation.ts";
 
 const AUTH_TOKEN = "tripreel-test-token-that-is-at-least-32-bytes";
@@ -10,6 +10,28 @@ const ENV = Object.freeze({
   OPENAI_API_KEY: "sk-test-not-a-real-key-00000000000000000000",
   TRIPREEL_AUTH_TOKEN: AUTH_TOKEN,
 });
+
+const APP_ATTEST_KEY_ID = Buffer.alloc(32, 0x5a).toString("base64");
+const APP_ATTEST_CHALLENGE = Buffer.alloc(32, 0x31).toString("base64url");
+
+function appAttestEnvironment(stub, rateLimit = async () => ({ success: true })) {
+  return {
+    ...ENV,
+    APP_ATTEST_APP_ID: "GT9EAB8826.com.prakashash18.tripreel",
+    APP_ATTEST_ENVIRONMENT: "production",
+    APP_ATTEST_ROUTING_SECRET: "test-routing-secret-that-is-at-least-32-bytes",
+    APP_ATTEST_ALLOWED_VALIDATION_CATEGORIES: "2,3,4",
+    APP_ATTEST_MINIMUM_BUNDLE_VERSION: "1",
+    APP_ATTEST_SHARDS: {
+      getByName(name) {
+        this.lastName = name;
+        return stub;
+      },
+    },
+    APP_ATTEST_ENROLL_LIMITER: { limit: rateLimit },
+    APP_ATTEST_ANALYZE_LIMITER: { limit: rateLimit },
+  };
+}
 
 function jpegBase64(width = 320, height = 240) {
   const bytes = Uint8Array.from([
@@ -278,4 +300,119 @@ test("CORS is off by default and exact-origin when explicitly configured", async
   assert.equal(allowed.status, 204);
   assert.equal(allowed.headers.get("access-control-allow-origin"), "https://app.example");
   assert.equal(allowed.headers.get("vary"), "Origin");
+});
+
+test("issues a bounded App Attest challenge through a deterministic shard", async () => {
+  let issued;
+  const stub = {
+    async issueChallenge(input) {
+      issued = input;
+      return {
+        ok: true,
+        challenge: APP_ATTEST_CHALLENGE,
+        expiresAt: "2026-09-05T12:05:00.000Z",
+      };
+    },
+  };
+  const environment = appAttestEnvironment(stub);
+  const response = await handleRequest(
+    new Request("https://analysis.example/v1/app-attest/challenge", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ purpose: "attestation", keyId: APP_ATTEST_KEY_ID }),
+    }),
+    environment,
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    challenge: APP_ATTEST_CHALLENGE,
+    expiresAt: "2026-09-05T12:05:00.000Z",
+  });
+  assert.equal(issued.purpose, "attestation");
+  assert.deepEqual(Buffer.from(issued.keyID), Buffer.alloc(32, 0x5a));
+  assert.match(environment.APP_ATTEST_SHARDS.lastName, /^app-attest-v1-production-[0-9a-f]{2}$/u);
+});
+
+test("exposes an already-registered challenge result as a stable conflict", async () => {
+  const environment = appAttestEnvironment({
+    async issueChallenge() {
+      return { ok: false, code: "key_already_registered" };
+    },
+  });
+  const response = await handleRequest(
+    new Request("https://analysis.example/v1/app-attest/challenge", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ purpose: "attestation", keyId: APP_ATTEST_KEY_ID }),
+    }),
+    environment,
+  );
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error.code, "key_already_registered");
+});
+
+test("authorizes an exact-body App Attest assertion before calling OpenAI", async () => {
+  let authorizationInput;
+  const stub = {
+    async authorizeAnalysis(input) {
+      authorizationInput = input;
+      return { ok: true };
+    },
+  };
+  const environment = appAttestEnvironment(stub);
+  const requestBody = JSON.stringify({ photos: [{ id: "asset-1", imageBase64: jpegBase64() }] });
+  const assertion = Buffer.from("synthetic-cbor-assertion").toString("base64url");
+  const response = await handleRequest(
+    new Request("https://analysis.example/v1/analyze", {
+      method: "POST",
+      headers: {
+        authorization: `AppAttest ${APP_ATTEST_KEY_ID}`,
+        "content-type": "application/json",
+        "x-tripreel-challenge": APP_ATTEST_CHALLENGE,
+        "x-tripreel-app-attest": assertion,
+      },
+      body: requestBody,
+    }),
+    environment,
+    async () => openAISuccess([analysisPhoto("asset-1")]),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(authorizationInput.method, "POST");
+  assert.equal(authorizationInput.path, "/v1/analyze");
+  assert.equal(authorizationInput.photoCount, 1);
+  const expectedHash = Buffer.from(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(requestBody)),
+  );
+  assert.deepEqual(Buffer.from(authorizationInput.bodyHash), expectedHash);
+});
+
+test("never calls OpenAI when App Attest rejects an assertion", async () => {
+  let fetchCalls = 0;
+  const environment = appAttestEnvironment({
+    async authorizeAnalysis() {
+      return { ok: false, code: "counter_replay" };
+    },
+  });
+  const response = await handleRequest(
+    new Request("https://analysis.example/v1/analyze", {
+      method: "POST",
+      headers: {
+        authorization: `AppAttest ${APP_ATTEST_KEY_ID}`,
+        "content-type": "application/json",
+        "x-tripreel-challenge": APP_ATTEST_CHALLENGE,
+        "x-tripreel-app-attest": Buffer.from("synthetic-cbor-assertion").toString("base64url"),
+      },
+      body: JSON.stringify({ photos: [{ id: "asset-1", imageBase64: jpegBase64() }] }),
+    }),
+    environment,
+    async () => {
+      fetchCalls += 1;
+      return openAISuccess([]);
+    },
+  );
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error.code, "counter_replay");
+  assert.equal(fetchCalls, 0);
 });

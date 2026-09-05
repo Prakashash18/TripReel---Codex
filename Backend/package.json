@@ -9,7 +9,13 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
   },
+  "dependencies": {
+    "@abraham/reflection": "0.13.0",
+    "@peculiar/x509": "2.1.0",
+    "cborg": "6.1.2"
+  },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20260905.1",
     "typescript": "^5.7.0",
     "wrangler": "^4.0.0"
   }

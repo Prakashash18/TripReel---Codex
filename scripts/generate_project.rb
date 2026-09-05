@@ -39,6 +39,7 @@ target.resources_build_phase.add_file_reference(privacy_manifest)
 end
 
 app_group.new_file('Resources/Info.plist')
+app_group.new_file('Resources/TripReel.entitlements')
 app_group.new_file('Resources/Fonts/OFL-InstrumentSerif.txt')
 
 tests_group = project.main_group.new_group('TripReelTests', 'TripReelTests')
@@ -70,6 +71,7 @@ target.build_configurations.each do |configuration|
   settings['ASSETCATALOG_COMPILER_APPICON_NAME'] = 'AppIcon'
   settings['ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME'] = 'AccentColor'
   settings['CODE_SIGN_STYLE'] = 'Automatic'
+  settings['CODE_SIGN_ENTITLEMENTS'] = 'TripReel/Resources/TripReel.entitlements'
   settings['CURRENT_PROJECT_VERSION'] = '1'
   settings['DEVELOPMENT_TEAM'] = 'GT9EAB8826'
   settings['ENABLE_PREVIEWS'] = 'YES'
@@ -86,6 +88,7 @@ target.build_configurations.each do |configuration|
   settings['SWIFT_VERSION'] = '5.0'
   settings['TARGETED_DEVICE_FAMILY'] = '1'
   settings['TRIPREEL_PHOTO_ANALYSIS_ENDPOINT'] = 'https://tripreel-visual-analysis.tripreel-prakashash18.workers.dev/v1/analyze'
+  settings['TRIPREEL_APP_ATTEST_ENVIRONMENT'] = 'production'
 end
 
 unit_test_target.build_configurations.each do |configuration|

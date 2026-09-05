@@ -44,6 +44,13 @@ protocol CloudPhotoAnalysisServing: Sendable {
 protocol CloudPhotoAnalysisAuthorizing: Sendable {
     var isReady: Bool { get }
     func authorizationHeaders(for body: Data) async throws -> [String: String]
+    func recoverAuthorization(afterStatusCode statusCode: Int, responseBody: Data) async -> Bool
+}
+
+extension CloudPhotoAnalysisAuthorizing {
+    func recoverAuthorization(afterStatusCode statusCode: Int, responseBody: Data) async -> Bool {
+        false
+    }
 }
 
 struct UnavailableCloudPhotoAnalysisAuthorizer: CloudPhotoAnalysisAuthorizing {
@@ -52,8 +59,8 @@ struct UnavailableCloudPhotoAnalysisAuthorizer: CloudPhotoAnalysisAuthorizing {
 }
 
 /// Local-development bridge only. The token comes from the Run scheme's process
-/// environment and is never compiled into the app. Release/TestFlight builds
-/// always report this authorizer as unavailable.
+/// environment and is never compiled into the app. Release/TestFlight builds use
+/// App Attest instead and never enable this authorizer.
 struct DevelopmentCloudPhotoAnalysisAuthorizer: CloudPhotoAnalysisAuthorizing {
     let isReady: Bool
     private let token: String?
@@ -138,11 +145,33 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
         configuration.httpShouldSetCookies = false
         configuration.timeoutIntervalForRequest = 35
         configuration.timeoutIntervalForResource = 45
-        self.init(
-            endpoint: endpoint,
-            session: URLSession(configuration: configuration),
-            authorizer: DevelopmentCloudPhotoAnalysisAuthorizer()
-        )
+        let session = URLSession(configuration: configuration)
+        let authorizer: any CloudPhotoAnalysisAuthorizing
+#if DEBUG
+        let developmentAuthorizer = DevelopmentCloudPhotoAnalysisAuthorizer()
+        if developmentAuthorizer.isReady {
+            authorizer = developmentAuthorizer
+        } else if let endpoint,
+                  let appAttestAuthorizer = AppAttestCloudPhotoAnalysisAuthorizer(
+                      analysisEndpoint: endpoint,
+                      session: session
+                  ) {
+            authorizer = appAttestAuthorizer
+        } else {
+            authorizer = UnavailableCloudPhotoAnalysisAuthorizer()
+        }
+#else
+        if let endpoint,
+           let appAttestAuthorizer = AppAttestCloudPhotoAnalysisAuthorizer(
+               analysisEndpoint: endpoint,
+               session: session
+           ) {
+            authorizer = appAttestAuthorizer
+        } else {
+            authorizer = UnavailableCloudPhotoAnalysisAuthorizer()
+        }
+#endif
+        self.init(endpoint: endpoint, session: session, authorizer: authorizer)
     }
 
     init(
@@ -170,33 +199,49 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
                 CloudRequest.Photo(id: $0.id, imageBase64: $0.jpegData.base64EncodedString())
             }
         )
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 35
-        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("TripReel-iOS/1", forHTTPHeaderField: "X-TripReel-Client")
         let encodedBody = try JSONEncoder().encode(requestBody)
-        let authorizationHeaders = try await authorizer.authorizationHeaders(for: encodedBody)
-        guard !authorizationHeaders.isEmpty else { throw CloudPhotoAnalysisError.notConfigured }
-        for (name, value) in authorizationHeaders {
-            guard Self.allowedAuthorizationHeaderNames.contains(name.lowercased()),
-                  !value.contains("\n"), !value.contains("\r") else {
-                throw CloudPhotoAnalysisError.notConfigured
-            }
-            request.setValue(value, forHTTPHeaderField: name)
-        }
-        request.httpBody = encodedBody
+        var responseData: Data?
 
-        // Never log the request, response body, image data, or asset identifiers.
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw CloudPhotoAnalysisError.invalidResponse
-        }
-        guard (200..<300).contains(httpResponse.statusCode) else {
+        for attempt in 0..<2 {
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 35
+            request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("TripReel-iOS/1", forHTTPHeaderField: "X-TripReel-Client")
+
+            let authorizationHeaders = try await authorizer.authorizationHeaders(for: encodedBody)
+            guard !authorizationHeaders.isEmpty else { throw CloudPhotoAnalysisError.notConfigured }
+            for (name, value) in authorizationHeaders {
+                guard Self.allowedAuthorizationHeaderNames.contains(name.lowercased()),
+                      !value.contains("\n"), !value.contains("\r") else {
+                    throw CloudPhotoAnalysisError.notConfigured
+                }
+                request.setValue(value, forHTTPHeaderField: name)
+            }
+            request.httpBody = encodedBody
+
+            // Never log the request, response body, image data, or asset identifiers.
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw CloudPhotoAnalysisError.invalidResponse
+            }
+            if (200..<300).contains(httpResponse.statusCode) {
+                responseData = data
+                break
+            }
+            if attempt == 0,
+               await authorizer.recoverAuthorization(
+                   afterStatusCode: httpResponse.statusCode,
+                   responseBody: data
+               ) {
+                continue
+            }
             throw CloudPhotoAnalysisError.server(statusCode: httpResponse.statusCode)
         }
+
+        guard let data = responseData else { throw CloudPhotoAnalysisError.invalidResponse }
 
         let decoded = try JSONDecoder().decode(CloudResponse.self, from: data)
         guard decoded.model == Self.modelName,

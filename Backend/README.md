@@ -8,10 +8,16 @@ The implementation deliberately has no database, object storage, cache writes, a
 
 `POST /v1/analyze`
 
+Production iOS requests use a fresh App Attest assertion:
+
 ```http
-Authorization: Bearer <server-issued-token>
+Authorization: AppAttest <App-Attest-key-ID>
+X-TripReel-Challenge: <single-use-base64url-challenge>
+X-TripReel-App-Attest: <base64url-assertion>
 Content-Type: application/json
 ```
+
+The Worker also retains `Authorization: Bearer <development-token>` for local/private smoke tests only.
 
 ```json
 {
@@ -115,10 +121,10 @@ https://tripreel-visual-analysis.tripreel-prakashash18.workers.dev/v1/analyze
 The `workers.dev` hostname is enabled for this initial deployment and preview URLs are disabled. Before each deployment:
 
 1. Create a dedicated OpenAI project, use a project-scoped key, restrict its access, and configure spend/rate alerts.
-2. Generate `TRIPREEL_AUTH_TOKEN` with a cryptographically secure generator; use at least 32 random bytes. The reference bearer token is suitable only for local tests, a private prototype, or a server-to-server caller—never as a long-lived secret embedded in the shipped iOS binary.
-3. Store `OPENAI_API_KEY` and `TRIPREEL_AUTH_TOKEN` as encrypted Cloudflare Worker secrets, not plaintext `[vars]`. Cloudflare documents `.dev.vars` and [`wrangler secret put`](https://developers.cloudflare.com/workers/configuration/secrets/). For an atomic first deployment, `wrangler deploy --secrets-file <protected-env-file>` can upload secrets with the code; securely delete that local production file afterward.
+2. Generate `TRIPREEL_AUTH_TOKEN` and `APP_ATTEST_ROUTING_SECRET` with a cryptographically secure generator; use at least 32 random bytes for each. The bearer token is suitable only for local tests, a private prototype, or a server-to-server caller—never as a long-lived secret embedded in the shipped iOS binary. The App Attest routing secret determines the Durable Object shard for every registered device and must remain stable across deployments.
+3. Store `OPENAI_API_KEY`, `TRIPREEL_AUTH_TOKEN`, and `APP_ATTEST_ROUTING_SECRET` as encrypted Cloudflare Worker secrets, not plaintext `[vars]`. Cloudflare documents `.dev.vars` and [`wrangler secret put`](https://developers.cloudflare.com/workers/configuration/secrets/). For an atomic first deployment, `wrangler deploy --secrets-file <protected-env-file>` can upload secrets with the code; securely delete that local production file afterward.
 4. Leave `ALLOWED_ORIGIN` unset for the native iOS app. CORS is then off and browser-origin requests are rejected. If a browser client is genuinely required, configure exactly one HTTPS origin. Wildcards and comma-separated origins are rejected.
-5. Before production launch, put the Worker behind a dedicated HTTPS custom domain and enforce per-device/user plus global rate limits at the edge. The current `workers.dev` hostname is suitable for development and TestFlight integration work; preview URLs remain disabled.
+5. Before production launch, consider putting the Worker behind a dedicated HTTPS custom domain. The current `workers.dev` hostname is suitable for development and TestFlight integration work; preview URLs remain disabled. Edge rate-limit bindings provide a fast abuse guard (60 assertion-route operations per minute, covering challenge plus analysis), while the Durable Object enforces the authoritative per-key assertion counter, 30 analyses/minute quota, and 1,000-photo/UTC-day quota.
 6. Confirm Workers Logs remains disabled. The source contains no `console` statements, and `wrangler.toml` explicitly disables observability and invocation logs. Review Cloudflare's current [Workers Logs behavior](https://developers.cloudflare.com/workers/observability/logs/workers-logs/) whenever deployment configuration changes.
 7. Run `npm test`, `npm run typecheck`, a staging smoke test with synthetic/non-sensitive images, and negative tests for authorization, size limits, timeout, and rate limiting before production traffic.
 
@@ -128,21 +134,19 @@ The configuration opts in to Cloudflare's `enable_request_signal` flag so a disc
 
 ## Production mobile authentication: App Attest
 
-The included bearer check intentionally keeps this reference small, but a static token inside an iOS app can be extracted and is not production authentication. Before release, replace it with an App Attest-aware authentication gateway or add full App Attest verification ahead of `handleRequest`.
+The Worker implements Apple's [server validation procedure](https://developer.apple.com/documentation/devicecheck/validating-apps-that-connect-to-your-server). `POST /v1/app-attest/challenge` issues a random five-minute, single-use challenge for registration or assertion. `POST /v1/app-attest/register` validates Apple's pinned App Attestation certificate chain, nonce, production AAGUID, App ID/RP ID, credential ID, public key, and initial counter. Every `POST /v1/analyze` assertion is bound to its one-time challenge, method, path, and SHA-256 of the exact JSON body.
 
-A production flow should follow Apple's [server validation procedure](https://developer.apple.com/documentation/devicecheck/validating-apps-that-connect-to-your-server):
+Verification metadata is distributed across 256 secret-HMAC-selected SQLite Durable Object shards. They retain only the verified public key, opaque Apple receipt, environment, assertion counter, challenge hashes, quota counters, and timestamps. They never receive or store photo bytes, the request body, its hash, filenames, Photos identifiers, or model results. Up to four overlapping challenges per key and purpose are retained so concurrent network requests cannot invalidate each other; challenge consumption, counter advancement, and quota charging are atomic. Inactive keys are removed after 180 days.
 
-1. Issue a random, single-use server challenge. Attest an on-device key once and validate Apple's certificate chain, nonce, App ID/RP ID (`TeamID.BundleID`), environment, credential ID, and initial counter.
-2. Store only the verified public key/receipt, device association, and assertion counter. Keep development and production attestations separate. This authentication state must never contain a photo, base64 body, filename, Photos identifier, or visual-analysis result.
-3. For every analysis request, make canonical client data cover the HTTP method, path, SHA-256 of the exact bounded body, a short expiry, and the single-use challenge. Verify the assertion signature, RP ID, challenge, expiry, and strictly increasing counter before forwarding anything to OpenAI.
-4. Reject replays and rate-limit by attested key plus authenticated user. If desired, issue a very short-lived, audience-scoped token after assertion verification; never issue a reusable app-wide credential.
-5. Design an explicit, tightly limited fallback for devices where App Attest is unavailable, and roll enforcement out gradually. App Attest is one signal, not the only abuse control.
-
-App Attest requires persistent verification metadata and replay state. Keep that state in a separate authentication service or narrowly scoped Durable Object; the no-persistence guarantee in this Worker continues to apply to image and request content.
+The production app uses no shared bearer secret: the private App Attest key is created and held by the iPhone. The bearer path remains for local Debug smoke tests and must never be compiled into or configured for TestFlight. Devices where App Attest is unsupported fail closed to TripReel's on-device analysis.
 
 ## Source layout
 
-- `src/index.ts` — routing, exact-origin CORS, constant-time bearer check, security headers, and sanitized errors.
+- `src/index.ts` — Worker entry point and Durable Object export.
+- `src/handler.ts` — routing, exact-origin CORS, dual App Attest/development-bearer authentication, security headers, and sanitized errors.
+- `src/app-attest-encoding.ts` — strict base64/CBOR-adjacent encoding and canonical request bindings.
+- `src/app-attest-verifier.ts` — Apple certificate, nonce, authenticator data, and assertion verification.
+- `src/app-attest-state.ts` — sharded Durable Object challenge, key, replay, quota, and retention state.
 - `src/validation.ts` — streaming body cap, strict wire validation, base64/JPEG/dimension checks.
 - `src/openai.ts` — fixed Responses API request, timeout, bounded response read, and fail-closed parsing.
 - `src/contract.ts` — limits, public types, JSON Schema, and output validation.
