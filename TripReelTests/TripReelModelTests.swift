@@ -207,6 +207,81 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(plan.last?.asset.id, "day-two-hero")
     }
 
+    func testMontagePlannerVariesMotionInsteadOfRepeatingOneZoom() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let assets = (0..<8).map {
+            makeAsset("motion-\($0)", start: start, minutes: $0 * 12)
+        }
+
+        let plan = MontageSequencePlanner.plan(assets: assets, insights: [:])
+
+        XCTAssertGreaterThanOrEqual(Set(plan.map(\.motionStyle)).count, 5)
+        XCTAssertFalse(zip(plan, plan.dropFirst()).contains { pair in
+            pair.0.motionStyle == pair.1.motionStyle
+        })
+    }
+
+    func testHighlightTargetMakesLargeTripsConcise() {
+        XCTAssertEqual(SmartHighlightSelector.targetCount(total: 431, dayCount: 5), 64)
+        XCTAssertEqual(SmartHighlightSelector.targetCount(total: 84, dayCount: 7), 28)
+        XCTAssertEqual(SmartHighlightSelector.targetCount(total: 20, dayCount: 3), 20)
+    }
+
+    func testHighlightSelectorProtectsStrongMemoriesAndMovesDuplicateToMorePhotos() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let assets = (0..<32).map {
+            makeAsset("candidate-\($0)", start: start, minutes: $0 * 5)
+        }
+        let scenic = assets[10]
+        let group = assets[18]
+        let duplicate = assets[11]
+        let sharedPrint = NativePhotoFeaturePrint(
+            revision: 2,
+            elementTypeRawValue: 1,
+            elementCount: 3,
+            data: [Float(0.1), 0.2, 0.3].withUnsafeBytes { Data($0) }
+        )
+        let nearPrint = NativePhotoFeaturePrint(
+            revision: 2,
+            elementTypeRawValue: 1,
+            elementCount: 3,
+            data: [Float(0.11), 0.21, 0.31].withUnsafeBytes { Data($0) }
+        )
+        let results: [String: NativePhotoIntelligenceResult] = [
+            scenic.id: makeNativeResult(
+                id: scenic.id,
+                memory: 0.96,
+                aesthetic: 0.92,
+                tags: [.scenery, .strongMemory],
+                featurePrint: sharedPrint
+            ),
+            group.id: makeNativeResult(
+                id: group.id,
+                memory: 0.94,
+                aesthetic: 0.86,
+                tags: [.people, .groupPhoto, .strongMemory]
+            ),
+            duplicate.id: makeNativeResult(
+                id: duplicate.id,
+                memory: 0.12,
+                aesthetic: 0.18,
+                tags: [],
+                featurePrint: nearPrint
+            )
+        ]
+
+        let decisions = SmartHighlightSelector.decisions(
+            for: assets,
+            nativeResults: results,
+            excluding: [:]
+        )
+
+        XCTAssertFalse(decisions.contains { $0.id == scenic.id })
+        XCTAssertFalse(decisions.contains { $0.id == group.id })
+        XCTAssertEqual(decisions.first { $0.id == duplicate.id }?.reason, .similarMoment)
+        XCTAssertEqual(assets.count - decisions.count, 24)
+    }
+
     private func makeAsset(
         _ id: String,
         start: Date,
@@ -221,6 +296,37 @@ final class TripReelModelTests: XCTestCase {
             filename: "\(id).HEIC",
             pixelWidth: width,
             pixelHeight: height
+        )
+    }
+
+    private func makeNativeResult(
+        id: String,
+        memory: Double,
+        aesthetic: Double,
+        tags: [NativePhotoIntelligenceTag],
+        featurePrint: NativePhotoFeaturePrint? = nil
+    ) -> NativePhotoIntelligenceResult {
+        NativePhotoIntelligenceResult(
+            sourceIdentifier: id,
+            analyzedPixelWidth: 512,
+            analyzedPixelHeight: 384,
+            signals: NativePhotoIntelligenceSignals(
+                featurePrint: featurePrint,
+                availability: .init(featurePrint: featurePrint != nil, aesthetics: true)
+            ),
+            scores: NativePhotoIntelligenceScores(
+                memoryScore: memory,
+                utilityProbability: 0,
+                documentProbability: 0,
+                peopleScore: tags.contains(.people) ? 0.9 : 0,
+                aestheticScore: aesthetic,
+                nativeConfidence: 0.92
+            ),
+            tags: tags,
+            cloudReviewGate: NativeCloudReviewGate(
+                disposition: .unnecessary,
+                reason: .highMemoryConfidence
+            )
         )
     }
 }

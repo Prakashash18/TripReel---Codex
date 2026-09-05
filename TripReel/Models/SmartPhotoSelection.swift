@@ -23,6 +23,8 @@ enum SmartPhotoExclusionReason: String, CaseIterable, Sendable {
     case document
     case lowQuality
     case utilityImage
+    case similarMoment
+    case notAHighlight
 
     var title: String {
         switch self {
@@ -30,6 +32,8 @@ enum SmartPhotoExclusionReason: String, CaseIterable, Sendable {
         case .document: "Order or document"
         case .lowQuality: "Low quality"
         case .utilityImage: "Utility image"
+        case .similarMoment: "Similar moment"
+        case .notAHighlight: "Not in the first cut"
         }
     }
 
@@ -39,6 +43,8 @@ enum SmartPhotoExclusionReason: String, CaseIterable, Sendable {
         case .document: "doc.text.viewfinder"
         case .lowQuality: "camera.filters"
         case .utilityImage: "shippingbox"
+        case .similarMoment: "square.on.square"
+        case .notAHighlight: "photo.stack"
         }
     }
 }
@@ -130,14 +136,29 @@ enum SmartPhotoSelectionPolicy {
             )
         }
 
-        if scores.utilityProbability >= 0.96,
-           scores.nativeConfidence >= 0.90,
+        if scores.utilityProbability >= 0.91,
+           scores.nativeConfidence >= 0.82,
            !hasMemoryProtection,
-           scores.memoryScore < 0.34 {
+           scores.memoryScore < 0.38 {
             return SmartExcludedPhoto(
                 asset: asset,
                 reason: .utilityImage,
                 detail: "Looks useful for reference, but not like a film moment.",
+                confidence: scores.nativeConfidence,
+                origin: .onDevice
+            )
+        }
+
+        if let aestheticScore = scores.aestheticScore,
+           aestheticScore <= 0.18,
+           scores.nativeConfidence >= 0.68,
+           scores.peopleScore < 0.24,
+           !hasMemoryProtection,
+           scores.memoryScore < 0.28 {
+            return SmartExcludedPhoto(
+                asset: asset,
+                reason: .lowQuality,
+                detail: "A stronger frame from this part of the trip was preferred.",
                 confidence: scores.nativeConfidence,
                 origin: .onDevice
             )
@@ -207,5 +228,159 @@ enum SmartPhotoSelectionPolicy {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !singleLine.isEmpty else { return fallback }
         return String(singleLine.prefix(120))
+    }
+}
+
+/// Turns a large trip into an actual first cut instead of simply replaying the
+/// whole camera roll. The selector is deliberately local and reversible: it
+/// combines Vision memory/aesthetic scores with day, category, orientation,
+/// time, and feature-print diversity, then places every unselected asset in
+/// More Photos.
+enum SmartHighlightSelector {
+    static func decisions(
+        for assets: [TripAsset],
+        nativeResults: [String: NativePhotoIntelligenceResult],
+        excluding existing: [String: SmartExcludedPhoto],
+        calendar: Calendar = .current
+    ) -> [SmartExcludedPhoto] {
+        let candidates = assets.filter { existing[$0.id] == nil }
+        guard candidates.count > 24 else { return [] }
+
+        let grouped = Dictionary(grouping: candidates) { asset -> Date in
+            asset.creationDate.map(calendar.startOfDay(for:)) ?? .distantPast
+        }
+        let target = targetCount(total: candidates.count, dayCount: grouped.count)
+        guard target < candidates.count else { return [] }
+
+        var selected: [TripAsset] = []
+        var remaining = candidates
+        let orderedDays = grouped.keys.sorted()
+        let coverageRounds = target >= orderedDays.count * 2 ? 2 : 1
+
+        for _ in 0..<coverageRounds {
+            for day in orderedDays where selected.count < target {
+                let dayCandidates = remaining.filter {
+                    ($0.creationDate.map(calendar.startOfDay(for:)) ?? .distantPast) == day
+                }
+                guard let best = bestCandidate(
+                    from: dayCandidates,
+                    selected: selected,
+                    nativeResults: nativeResults
+                ) else { continue }
+                selected.append(best)
+                remaining.removeAll { $0.id == best.id }
+            }
+        }
+
+        while selected.count < target,
+              let best = bestCandidate(
+                from: remaining,
+                selected: selected,
+                nativeResults: nativeResults
+              ) {
+            selected.append(best)
+            remaining.removeAll { $0.id == best.id }
+        }
+
+        let selectedIDs = Set(selected.map(\.id))
+        return candidates.compactMap { asset in
+            guard !selectedIDs.contains(asset.id) else { return nil }
+            let isDuplicate = selected.contains {
+                visuallySimilar(asset, $0, nativeResults: nativeResults)
+            }
+            return SmartExcludedPhoto(
+                asset: asset,
+                reason: isDuplicate ? .similarMoment : .notAHighlight,
+                detail: isDuplicate
+                    ? "A stronger photo from the same moment is already in the film."
+                    : "Kept nearby for a shorter, more varied first cut.",
+                confidence: isDuplicate ? 0.94 : 0.72,
+                origin: .onDevice
+            )
+        }
+    }
+
+    static func targetCount(total: Int, dayCount: Int) -> Int {
+        guard total > 24 else { return max(0, total) }
+        let editorialScale = Int((sqrt(Double(total)) * 3.1).rounded())
+        let dayCoverage = max(1, dayCount) * 4
+        return min(total, max(24, min(72, max(editorialScale, dayCoverage))))
+    }
+
+    private static func bestCandidate(
+        from candidates: [TripAsset],
+        selected: [TripAsset],
+        nativeResults: [String: NativePhotoIntelligenceResult]
+    ) -> TripAsset? {
+        candidates.max { left, right in
+            score(left, selected: selected, nativeResults: nativeResults)
+                < score(right, selected: selected, nativeResults: nativeResults)
+        }
+    }
+
+    private static func score(
+        _ asset: TripAsset,
+        selected: [TripAsset],
+        nativeResults: [String: NativePhotoIntelligenceResult]
+    ) -> Double {
+        guard let result = nativeResults[asset.id] else {
+            return 0.34 + temporalDiversityBonus(for: asset, selected: selected)
+        }
+
+        let kind = contentKind(for: result)
+        let aesthetic = result.scores.aestheticScore ?? 0.52
+        var value = (0.60 * result.scores.memoryScore) + (0.30 * aesthetic)
+        if result.tags.contains(.groupPhoto) { value += 0.12 }
+        if result.tags.contains(.scenery) { value += 0.08 }
+        if result.tags.contains(.food) { value += 0.04 }
+        if !selected.contains(where: { selectedAsset in
+            nativeResults[selectedAsset.id].map(contentKind(for:)) == kind
+        }) {
+            value += 0.08
+        }
+        value += temporalDiversityBonus(for: asset, selected: selected)
+        if selected.contains(where: {
+            visuallySimilar(asset, $0, nativeResults: nativeResults)
+        }) {
+            value -= 0.72
+        }
+        return value
+    }
+
+    private static func temporalDiversityBonus(
+        for asset: TripAsset,
+        selected: [TripAsset]
+    ) -> Double {
+        guard let date = asset.creationDate,
+              let nearest = selected.compactMap(\.creationDate).map({ abs($0.timeIntervalSince(date)) }).min()
+        else { return selected.isEmpty ? 0.12 : 0 }
+        return min(0.14, nearest / (8 * 60 * 60) * 0.14)
+    }
+
+    private static func visuallySimilar(
+        _ first: TripAsset,
+        _ second: TripAsset,
+        nativeResults: [String: NativePhotoIntelligenceResult]
+    ) -> Bool {
+        guard let firstDate = first.creationDate,
+              let secondDate = second.creationDate,
+              abs(firstDate.timeIntervalSince(secondDate)) <= 10 * 60 else {
+            return false
+        }
+        guard let firstPrint = nativeResults[first.id]?.signals.featurePrint,
+              let secondPrint = nativeResults[second.id]?.signals.featurePrint,
+              let distance = try? firstPrint.distance(to: secondPrint) else {
+            return false
+        }
+        return distance < 8
+    }
+
+    private static func contentKind(
+        for result: NativePhotoIntelligenceResult
+    ) -> MontageContentKind {
+        if result.tags.contains(.groupPhoto) || result.tags.contains(.people) { return .people }
+        if result.tags.contains(.scenery) { return .scenery }
+        if result.tags.contains(.food) { return .food }
+        return .moment
     }
 }

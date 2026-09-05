@@ -4,55 +4,299 @@ struct PhotoAnalysisProgressOverlay: View {
     let progress: Double
     let status: String
     let usesCloud: Bool
+    let currentAsset: TripAsset?
+    let recentAssets: [TripAsset]
+    let processedCount: Int
+    let totalCount: Int
     let onCancel: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var glow = false
+
+    private var backdropAsset: TripAsset? {
+        currentAsset ?? recentAssets.last
+    }
+
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.76)
+        GeometryReader { proxy in
+            ZStack {
+                Color.black
+                    .ignoresSafeArea()
+
+                if let backdropAsset {
+                    PhotoAssetView(source: backdropAsset.source)
+                        .scaleEffect(1.18)
+                        .blur(radius: 42)
+                        .saturation(0.72)
+                        .opacity(0.48)
+                        .transition(.opacity)
+                }
+
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.06, green: 0.035, blue: 0.018).opacity(0.90),
+                        .black.opacity(0.80),
+                        .black.opacity(0.96)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
                 .ignoresSafeArea()
 
-            VStack(spacing: 20) {
-                ZStack {
-                    Circle()
-                        .stroke(.white.opacity(0.10), lineWidth: 5)
-                    Circle()
-                        .trim(from: 0, to: max(0.02, min(1, progress)))
-                        .stroke(TR.accent, style: StrokeStyle(lineWidth: 5, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 24, weight: .medium))
-                        .foregroundStyle(TR.accent)
-                }
-                .frame(width: 76, height: 76)
+                Circle()
+                    .fill(TR.accent.opacity(glow ? 0.16 : 0.08))
+                    .frame(width: 330, height: 330)
+                    .blur(radius: 70)
+                    .offset(y: -70)
 
-                VStack(spacing: 8) {
-                    Text("Finding the best moments")
-                        .font(TR.display(29))
-                    Text(status)
-                        .font(TR.ui(13))
-                        .foregroundStyle(.white.opacity(0.62))
-                        .multilineTextAlignment(.center)
-                    if usesCloud {
-                        Text("Consented thumbnail copies may be reviewed by GPT-5.6 Luna")
-                            .font(TR.ui(11))
-                            .foregroundStyle(.white.opacity(0.43))
-                            .multilineTextAlignment(.center)
+                VStack(spacing: 0) {
+                    HStack {
+                        MetadataText(text: "TRIPREEL · FIRST CUT", color: .white.opacity(0.60))
+                        Spacer()
+                        Label(
+                            usesCloud ? "ON-DEVICE + LUNA" : "ON THIS IPHONE",
+                            systemImage: usesCloud ? "sparkles" : "lock.fill"
+                        )
+                        .font(TR.mono(9))
+                        .tracking(0.7)
+                        .foregroundStyle(usesCloud ? TR.accent : TR.keep)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(.black.opacity(0.28))
+                        .overlay(Capsule().stroke(.white.opacity(0.13), lineWidth: 1))
+                        .clipShape(Capsule())
                     }
-                }
+                    .padding(.horizontal, 22)
+                    .padding(.top, 44)
 
-                Button("Cancel", action: onCancel)
-                    .font(TR.ui(13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.68))
-                    .buttonStyle(.plain)
+                    Spacer(minLength: 18)
+
+                    AnalysisPhotoDeck(
+                        currentAsset: currentAsset,
+                        recentAssets: recentAssets,
+                        width: min(
+                            min(274, proxy.size.width * 0.68),
+                            proxy.size.height * 0.32
+                        ),
+                        reduceMotion: reduceMotion
+                    )
+                    .frame(height: min(358, proxy.size.height * 0.41))
+
+                    VStack(spacing: 8) {
+                        Text("Finding your story")
+                            .font(TR.display(34))
+                            .multilineTextAlignment(.center)
+                        Text(status)
+                            .font(TR.ui(13, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.62))
+                            .contentTransition(.numericText())
+                    }
+                    .padding(.top, 20)
+
+                    AnalysisContactStrip(assets: recentAssets)
+                        .frame(height: 48)
+                        .padding(.top, 18)
+
+                    VStack(spacing: 9) {
+                        GeometryReader { bar in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(.white.opacity(0.12))
+                                Capsule()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [TR.accent.opacity(0.72), TR.accent],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: bar.size.width * max(0.015, min(1, progress)))
+                            }
+                        }
+                        .frame(height: 4)
+
+                        HStack {
+                            MetadataText(
+                                text: "\(processedCount) MOMENTS READ",
+                                color: .white.opacity(0.48)
+                            )
+                            Spacer()
+                            MetadataText(
+                                text: totalCount > 0 ? "\(totalCount) TOTAL" : "PREPARING",
+                                color: .white.opacity(0.48)
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 26)
+                    .padding(.top, 17)
+
+                    Spacer(minLength: 16)
+
+                    VStack(spacing: 12) {
+                        Text(privacyNote)
+                            .font(TR.ui(10))
+                            .foregroundStyle(.white.opacity(0.38))
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(3)
+
+                        Button("Cancel", action: onCancel)
+                            .font(TR.ui(13, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.66))
+                            .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 40)
+                    .padding(.bottom, 10)
+                }
+                .padding(.bottom, 14)
             }
-            .padding(28)
-            .frame(maxWidth: 330)
-            .glassCard(cornerRadius: 24)
-            .padding(.horizontal, 30)
         }
+        .ignoresSafeArea()
+        .onAppear { glow = !reduceMotion }
+        .animation(
+            reduceMotion ? nil : .easeInOut(duration: 1.8).repeatForever(autoreverses: true),
+            value: glow
+        )
+        .animation(.easeInOut(duration: 0.35), value: currentAsset?.id)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Analyzing photos, \(Int(progress * 100)) percent")
         .accessibilityIdentifier("smart-photo-analysis-progress")
+    }
+
+    private var privacyNote: String {
+        usesCloud
+            ? "Most work stays here. Only consented, uncertain thumbnail copies may be reviewed by OpenAI's GPT-5.6 Luna."
+            : "Faces, scenes, quality, and similar moments are compared privately on this iPhone."
+    }
+}
+
+private struct AnalysisPhotoDeck: View {
+    let currentAsset: TripAsset?
+    let recentAssets: [TripAsset]
+    let width: CGFloat
+    let reduceMotion: Bool
+
+    private var deckAssets: [TripAsset] {
+        var assets = recentAssets
+        if let currentAsset {
+            assets.removeAll { $0.id == currentAsset.id }
+            assets.append(currentAsset)
+        }
+        return Array(assets.suffix(3))
+    }
+
+    var body: some View {
+        ZStack {
+            if deckAssets.isEmpty {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(.white.opacity(0.055))
+                    .overlay {
+                        Image(systemName: "photo.stack")
+                            .font(.system(size: 36, weight: .light))
+                            .foregroundStyle(.white.opacity(0.26))
+                    }
+                    .frame(width: width, height: width * 1.24)
+            } else {
+                ForEach(Array(deckAssets.enumerated()), id: \.element.id) { index, asset in
+                    let depth = deckAssets.count - index - 1
+                    ProcessingPhotoCard(asset: asset, active: depth == 0, reduceMotion: reduceMotion)
+                        .frame(width: width, height: width * 1.24)
+                        .scaleEffect(1 - CGFloat(depth) * 0.055)
+                        .offset(
+                            x: CGFloat(depth) * (index.isMultiple(of: 2) ? -13 : 13),
+                            y: CGFloat(depth) * -13
+                        )
+                        .rotationEffect(.degrees(Double(depth) * (index.isMultiple(of: 2) ? -3.4 : 3.4)))
+                        .zIndex(Double(index))
+                }
+            }
+        }
+    }
+}
+
+private struct ProcessingPhotoCard: View {
+    let asset: TripAsset
+    let active: Bool
+    let reduceMotion: Bool
+    @State private var scanning = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                PhotoAssetView(source: asset.source)
+
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.08), .black.opacity(0.60)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+
+                if active {
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                colors: [.clear, TR.accent.opacity(0.82), .clear],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(height: 1.5)
+                        .shadow(color: TR.accent.opacity(0.8), radius: 8)
+                        .offset(y: scanning ? proxy.size.height * 0.43 : -proxy.size.height * 0.43)
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                        Text("READING MOMENT")
+                    }
+                    .font(TR.mono(9))
+                    .tracking(0.8)
+                    .foregroundStyle(TR.accent)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(.black.opacity(0.46))
+                    .clipShape(Capsule())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .padding(14)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(active ? TR.accent.opacity(0.34) : .white.opacity(0.16), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.64), radius: 28, y: 20)
+        }
+        .task(id: asset.id) {
+            scanning = false
+            guard active, !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
+                scanning = true
+            }
+        }
+    }
+}
+
+private struct AnalysisContactStrip: View {
+    let assets: [TripAsset]
+
+    var body: some View {
+        HStack(spacing: 7) {
+            ForEach(Array(assets.suffix(5))) { asset in
+                ZStack(alignment: .bottomTrailing) {
+                    PhotoAssetView(source: asset.source)
+                        .frame(width: 44, height: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(TR.ink)
+                        .frame(width: 14, height: 14)
+                        .background(TR.keep)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(.black.opacity(0.28), lineWidth: 1))
+                        .offset(x: 3, y: 3)
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.82)))
+            }
+        }
+        .animation(.spring(response: 0.34, dampingFraction: 0.78), value: assets.map(\.id))
     }
 }
 

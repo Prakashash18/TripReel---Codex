@@ -146,6 +146,34 @@ final class NativePhotoIntelligenceScoringTests: XCTestCase {
         XCTAssertTrue(assessment.tags.contains(.utility))
     }
 
+    func testVeryLowAestheticNonMemoryIsKeptOutLocally() {
+        let asset = TripAsset(
+            id: "accidental",
+            source: .library("accidental"),
+            creationDate: Date(),
+            filename: "IMG_0001.HEIC"
+        )
+        let signals = NativePhotoIntelligenceSignals(
+            aesthetics: NativePhotoAestheticsSignal(overallScore: -0.92, isUtility: false),
+            availability: .init(aesthetics: true)
+        )
+        let scored = NativePhotoIntelligenceScorer.score(signals: signals)
+        let result = NativePhotoIntelligenceResult(
+            sourceIdentifier: asset.id,
+            analyzedPixelWidth: 512,
+            analyzedPixelHeight: 384,
+            signals: signals,
+            scores: scored.scores,
+            tags: scored.tags,
+            cloudReviewGate: scored.cloudReviewGate
+        )
+
+        let decision = SmartPhotoSelectionPolicy.nativeDecision(for: asset, result: result)
+
+        XCTAssertEqual(decision?.reason, .lowQuality)
+        XCTAssertEqual(decision?.origin, .onDevice)
+    }
+
     func testMalformedSignalValuesCannotEscapeNormalizedScoreRanges() {
         let signals = NativePhotoIntelligenceSignals(
             classifications: [

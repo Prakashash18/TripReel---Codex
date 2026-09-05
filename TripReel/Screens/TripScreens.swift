@@ -199,7 +199,13 @@ struct BuildingScreen: View {
 
             VStack(spacing: 0) {
                 ZStack {
-                    MontageView(photos: model.photos, showLabels: false)
+                    MontageView(
+                        photos: model.photos,
+                        showLabels: false,
+                        look: model.montageLook,
+                        motionIntensity: model.montageMotionIntensity,
+                        secondsPerSlide: 1.15
+                    )
                         .frame(width: 216, height: 290)
                         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                         .shadow(color: .black.opacity(0.56), radius: 30, y: 22)

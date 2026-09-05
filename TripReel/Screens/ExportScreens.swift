@@ -255,7 +255,14 @@ struct PaywallScreen: View {
 
     var body: some View {
         ZStack {
-            MontageView(photos: model.keptPhotos, dim: true, watermark: true)
+            MontageView(
+                photos: model.keptPhotos,
+                dim: true,
+                watermark: true,
+                look: model.montageLook,
+                motionIntensity: model.montageMotionIntensity,
+                secondsPerSlide: model.secondsPerPhoto
+            )
                 .ignoresSafeArea()
 
             LinearGradient(colors: [.clear, .black.opacity(0.94)], startPoint: .center, endPoint: .bottom)
@@ -332,7 +339,13 @@ struct RenderingScreen: View {
             WarmBackground(variant: .rendering)
 
             VStack(spacing: 0) {
-                MontageView(photos: model.keptPhotos, showLabels: false)
+                MontageView(
+                    photos: model.keptPhotos,
+                    showLabels: false,
+                    look: model.montageLook,
+                    motionIntensity: model.montageMotionIntensity,
+                    secondsPerSlide: model.secondsPerPhoto
+                )
                     .frame(width: 172, height: 230)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .shadow(color: .black.opacity(0.56), radius: 26, y: 20)
@@ -395,7 +408,10 @@ struct FilmReadyScreen: View {
             MontageView(
                 photos: model.keptPhotos,
                 watermark: model.exportQuality.includesWatermark,
-                showLabels: false
+                showLabels: false,
+                look: model.montageLook,
+                motionIntensity: model.montageMotionIntensity,
+                secondsPerSlide: model.secondsPerPhoto
             )
                 .frame(width: previewWidth, height: previewWidth * 14 / 9)
                 .clipShape(RoundedRectangle(cornerRadius: compact ? 18 : 22, style: .continuous))

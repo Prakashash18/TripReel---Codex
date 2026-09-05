@@ -139,6 +139,7 @@ struct ReelPhoto: Identifiable, Hashable, Sendable {
     let pixelWidth: Int
     let pixelHeight: Int
     let frameStyle: MontageFrameStyle
+    let motionStyle: MontageMotionStyle
 
     var aspectRatio: Double {
         guard pixelWidth > 0, pixelHeight > 0 else { return 4.0 / 3.0 }
@@ -151,6 +152,75 @@ enum MontageFrameStyle: String, Hashable, Sendable {
     case portraitMatte
     case cinematic
     case postcard
+}
+
+enum MontageMotionStyle: String, CaseIterable, Hashable, Sendable {
+    case zoomIn
+    case zoomOut
+    case panLeft
+    case panRight
+    case rise
+    case settle
+}
+
+enum MontageLook: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case story
+    case cinema
+    case journal
+    case clean
+
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .story: "Story"
+        case .cinema: "Cinema"
+        case .journal: "Journal"
+        case .clean: "Clean"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .story: "An automatic mix matched to each photo"
+        case .cinema: "Wide frames, soft mattes, and quieter cuts"
+        case .journal: "Warm prints and tactile postcard moments"
+        case .clean: "Simple full-bleed photos with minimal framing"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .story: "wand.and.stars"
+        case .cinema: "film"
+        case .journal: "rectangle.stack"
+        case .clean: "rectangle.inset.filled"
+        }
+    }
+}
+
+enum MontageMotionIntensity: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case still
+    case gentle
+    case expressive
+
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .still: "Still"
+        case .gentle: "Gentle"
+        case .expressive: "Expressive"
+        }
+    }
+
+    var amplitude: Double {
+        switch self {
+        case .still: 0
+        case .gentle: 0.62
+        case .expressive: 1
+        }
+    }
 }
 
 enum MontageContentKind: String, Hashable, Sendable {
@@ -201,6 +271,7 @@ struct MontagePhotoInsight: Hashable, Sendable {
 struct MontagePlanItem: Hashable, Sendable {
     let asset: TripAsset
     let frameStyle: MontageFrameStyle
+    let motionStyle: MontageMotionStyle
     let isSimilar: Bool
 }
 
@@ -241,6 +312,11 @@ enum MontageSequencePlanner {
             return MontagePlanItem(
                 asset: asset,
                 frameStyle: style,
+                motionStyle: motionStyle(
+                    at: index,
+                    asset: asset,
+                    insight: insights[asset.id]
+                ),
                 isSimilar: previous.map {
                     areVisuallySimilar($0, asset, insights: insights)
                 } ?? false
@@ -326,6 +402,24 @@ enum MontageSequencePlanner {
     private static func aspectRatio(of asset: TripAsset) -> Double {
         guard asset.pixelWidth > 0, asset.pixelHeight > 0 else { return 4.0 / 3.0 }
         return Double(asset.pixelWidth) / Double(asset.pixelHeight)
+    }
+
+    private static func motionStyle(
+        at index: Int,
+        asset: TripAsset,
+        insight: MontagePhotoInsight?
+    ) -> MontageMotionStyle {
+        let ratio = aspectRatio(of: asset)
+        if ratio < 0.88 {
+            return index.isMultiple(of: 2) ? .rise : .settle
+        }
+        if insight?.contentKind == .people {
+            return index.isMultiple(of: 2) ? .zoomIn : .zoomOut
+        }
+        if ratio >= 1.72 {
+            return index.isMultiple(of: 2) ? .panLeft : .panRight
+        }
+        return MontageMotionStyle.allCases[index % MontageMotionStyle.allCases.count]
     }
 
     private static func chronologicalOrder(_ lhs: TripAsset, _ rhs: TripAsset) -> Bool {
@@ -417,6 +511,8 @@ final class TripReelModel: ObservableObject {
     @Published var cleanupShowsGrid = false
     @Published var selectedPhotoCount = 0
     @Published var exportQuality: ExportQuality = .standard
+    @Published var montageLook: MontageLook = .story
+    @Published var montageMotionIntensity: MontageMotionIntensity = .gentle
     @Published private(set) var trips: [Trip] = []
     @Published private(set) var selectedTrip: Trip?
     @Published private(set) var photos: [ReelPhoto] = []
@@ -430,6 +526,10 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var isAnalyzingPhotos = false
     @Published private(set) var photoAnalysisProgress = 0.0
     @Published private(set) var photoAnalysisStatus = "Preparing smart selection"
+    @Published private(set) var photoAnalysisCurrentAsset: TripAsset?
+    @Published private(set) var photoAnalysisRecentAssets: [TripAsset] = []
+    @Published private(set) var photoAnalysisProcessedCount = 0
+    @Published private(set) var photoAnalysisTotalCount = 0
     @Published private(set) var excludedPhotos: [SmartExcludedPhoto] = []
     @Published var isSmartSelectionReviewPresented = false
 
@@ -516,6 +616,15 @@ final class TripReelModel: ObservableObject {
         }
         if arguments.contains("-qaNoHint") {
             showCutHint = false
+        }
+        if arguments.contains("-qaPhotoAnalysis"), let trip = trips.first {
+            isAnalyzingPhotos = true
+            photoAnalysisProgress = 0.48
+            photoAnalysisStatus = "Comparing similar frames"
+            photoAnalysisProcessedCount = 41
+            photoAnalysisTotalCount = trip.assets.count
+            photoAnalysisRecentAssets = Array(trip.assets.prefix(5))
+            photoAnalysisCurrentAsset = trip.assets.dropFirst(5).first
         }
 #endif
     }
@@ -681,6 +790,10 @@ final class TripReelModel: ObservableObject {
         isAnalyzingPhotos = false
         photoAnalysisProgress = 0
         photoAnalysisStatus = "Preparing smart selection"
+        photoAnalysisCurrentAsset = nil
+        photoAnalysisRecentAssets = []
+        photoAnalysisProcessedCount = 0
+        photoAnalysisTotalCount = 0
     }
 
     func includeExcludedPhoto(id: String) {
@@ -707,7 +820,11 @@ final class TripReelModel: ObservableObject {
         photoAnalysisGeneration = generation
         excludedPhotos = []
         photoAnalysisProgress = 0
-        photoAnalysisStatus = "Preparing smart selection"
+        photoAnalysisStatus = "Gathering your moments"
+        photoAnalysisCurrentAsset = nil
+        photoAnalysisRecentAssets = []
+        photoAnalysisProcessedCount = 0
+        photoAnalysisTotalCount = trip.assets.count
         activePhotoInsights = [:]
 
         // The analysis coordinator is installed below; keeping this launch in a
@@ -729,6 +846,7 @@ final class TripReelModel: ObservableObject {
         var cloudFailureMessage: String?
         var cloudFailed = false
         var montageInsights: [String: MontagePhotoInsight] = [:]
+        var nativeResults: [String: NativePhotoIntelligenceResult] = [:]
 
         for (index, asset) in trip.assets.enumerated() {
             guard photoAnalysisGeneration == generation, !Task.isCancelled else {
@@ -736,9 +854,11 @@ final class TripReelModel: ObservableObject {
                 return
             }
 
+            photoAnalysisCurrentAsset = asset
+
             if let metadataDecision = SmartPhotoSelectionPolicy.metadataDecision(for: asset) {
                 decisions[asset.id] = metadataDecision
-                updatePhotoAnalysisProgress(index: index, total: trip.assets.count)
+                recordProcessedPhoto(asset, index: index, total: trip.assets.count)
                 continue
             }
 
@@ -753,6 +873,7 @@ final class TripReelModel: ObservableObject {
                     )
                 )
                 analyzedCount += 1
+                nativeResults[asset.id] = nativeResult
                 montageInsights[asset.id] = MontagePhotoInsight(result: nativeResult)
 
                 if let localDecision = SmartPhotoSelectionPolicy.nativeDecision(
@@ -791,14 +912,13 @@ final class TripReelModel: ObservableObject {
                 unavailableCount += 1
             }
 
-            updatePhotoAnalysisProgress(index: index, total: trip.assets.count)
+            recordProcessedPhoto(asset, index: index, total: trip.assets.count)
         }
 
         guard photoAnalysisGeneration == generation, !Task.isCancelled else {
             finishPhotoAnalysisCancellation(generation: generation)
             return
         }
-
         if !pendingCloudBatch.isEmpty, !cloudFailed {
             photoAnalysisStatus = "Reviewing uncertain photos with GPT-5.6 Luna"
             do {
@@ -821,6 +941,22 @@ final class TripReelModel: ObservableObject {
             return
         }
 
+        photoAnalysisStatus = "Shaping the strongest story"
+        let contextualDecisions = await Task.detached(priority: .userInitiated) {
+            SmartHighlightSelector.decisions(
+                for: trip.assets,
+                nativeResults: nativeResults,
+                excluding: decisions
+            )
+        }.value
+        guard photoAnalysisGeneration == generation, !Task.isCancelled else {
+            finishPhotoAnalysisCancellation(generation: generation)
+            return
+        }
+        for decision in contextualDecisions where decisions[decision.id] == nil {
+            decisions[decision.id] = decision
+        }
+
         // Never allow automation to create an empty film. If every image was a
         // high-confidence utility photo, keep the middle one and let the user
         // decide in the regular cut flow.
@@ -841,6 +977,7 @@ final class TripReelModel: ObservableObject {
             ? "Smart selection complete · \(cloudReviewedCount) cloud reviewed"
             : "Smart selection complete on this iPhone"
         isAnalyzingPhotos = false
+        photoAnalysisCurrentAsset = nil
         photoAnalysisTask = nil
         activePhotoInsights = montageInsights
 
@@ -879,10 +1016,21 @@ final class TripReelModel: ObservableObject {
         }
     }
 
-    private func updatePhotoAnalysisProgress(index: Int, total: Int) {
+    private func recordProcessedPhoto(_ asset: TripAsset, index: Int, total: Int) {
+        photoAnalysisRecentAssets.removeAll { $0.id == asset.id }
+        photoAnalysisRecentAssets.append(asset)
+        if photoAnalysisRecentAssets.count > 6 {
+            photoAnalysisRecentAssets.removeFirst(photoAnalysisRecentAssets.count - 6)
+        }
+        photoAnalysisProcessedCount = index + 1
         let completed = Double(index + 1)
         photoAnalysisProgress = total == 0 ? 1 : min(0.92, completed / Double(total) * 0.92)
-        photoAnalysisStatus = "Analyzing \(index + 1) of \(total) on this iPhone"
+        switch (index / 7) % 4 {
+        case 0: photoAnalysisStatus = "Reading light and composition"
+        case 1: photoAnalysisStatus = "Finding faces and shared moments"
+        case 2: photoAnalysisStatus = "Comparing similar frames"
+        default: photoAnalysisStatus = "Building the rhythm of your trip"
+        }
     }
 
     private func finishPhotoAnalysisCancellation(generation: UUID) {
@@ -890,6 +1038,10 @@ final class TripReelModel: ObservableObject {
         isAnalyzingPhotos = false
         photoAnalysisProgress = 0
         photoAnalysisStatus = "Preparing smart selection"
+        photoAnalysisCurrentAsset = nil
+        photoAnalysisRecentAssets = []
+        photoAnalysisProcessedCount = 0
+        photoAnalysisTotalCount = 0
         photoAnalysisTask = nil
     }
 
@@ -1538,7 +1690,8 @@ final class TripReelModel: ObservableObject {
                 }(),
                 pixelWidth: asset.pixelWidth,
                 pixelHeight: asset.pixelHeight,
-                frameStyle: item.frameStyle
+                frameStyle: item.frameStyle,
+                motionStyle: item.motionStyle
             )
         }
     }
@@ -1613,7 +1766,8 @@ final class TripReelModel: ObservableObject {
         isSimilar: false,
         pixelWidth: 1_024,
         pixelHeight: 1_536,
-        frameStyle: .portraitMatte
+        frameStyle: .portraitMatte,
+        motionStyle: .rise
     )
 
     private static let timeFormatter: DateFormatter = {

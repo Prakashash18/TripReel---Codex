@@ -35,6 +35,11 @@ final class TripReelFlowUITests: XCTestCase {
         app.buttons["Watch it"].tap()
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
 
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Style")).firstMatch.tap()
+        XCTAssertTrue(screen("film-style-sheet").waitForExistence(timeout: 3))
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Journal")).firstMatch.tap()
+        app.buttons["Done"].tap()
+
         app.buttons["Export"].tap()
         XCTAssertTrue(screen("export-screen").waitForExistence(timeout: 3))
 

@@ -91,6 +91,10 @@ struct RootView: View {
                     progress: model.photoAnalysisProgress,
                     status: model.photoAnalysisStatus,
                     usesCloud: model.cloudAnalysisIsEnabled && model.cloudAnalysisIsConfigured,
+                    currentAsset: model.photoAnalysisCurrentAsset,
+                    recentAssets: model.photoAnalysisRecentAssets,
+                    processedCount: model.photoAnalysisProcessedCount,
+                    totalCount: model.photoAnalysisTotalCount,
                     onCancel: model.cancelPhotoAnalysis
                 )
                 .transition(.opacity)

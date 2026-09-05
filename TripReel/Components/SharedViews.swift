@@ -64,6 +64,9 @@ struct MontageView: View {
     var dim = false
     var watermark = false
     var showLabels = true
+    var look: MontageLook = .story
+    var motionIntensity: MontageMotionIntensity = .gentle
+    var secondsPerSlide = 2.2
     @State private var currentIndex = 0
     @State private var motionPhase = false
 
@@ -82,7 +85,12 @@ struct MontageView: View {
                 source: photo.source,
                 label: photo.label,
                 aspectRatio: photo.aspectRatio,
-                frameStyle: photo.frameStyle
+                frameStyle: resolvedFrameStyle(
+                    planned: photo.frameStyle,
+                    aspectRatio: photo.aspectRatio,
+                    index: index
+                ),
+                motionStyle: photo.motionStyle
             )
         }
 
@@ -92,7 +100,8 @@ struct MontageView: View {
             source: .bundled(imageName),
             label: TripReelModel.photoLabels[index],
             aspectRatio: 2.0 / 3.0,
-            frameStyle: index % 3 == 1 ? .postcard : .portraitMatte
+            frameStyle: index % 3 == 1 ? .postcard : .portraitMatte,
+            motionStyle: MontageMotionStyle.allCases[index % MontageMotionStyle.allCases.count]
         )
     }
 
@@ -100,7 +109,9 @@ struct MontageView: View {
         MontageContentKey(
             count: slideCount,
             firstID: photos.first?.id ?? (usesBundledFallback ? TripReelModel.assetNames.first : nil),
-            lastID: photos.last?.id ?? (usesBundledFallback ? TripReelModel.assetNames.last : nil)
+            lastID: photos.last?.id ?? (usesBundledFallback ? TripReelModel.assetNames.last : nil),
+            look: look,
+            motionIntensity: motionIntensity
         )
     }
 
@@ -111,10 +122,11 @@ struct MontageView: View {
                     slide: slide,
                     showLabel: showLabels,
                     motionPhase: motionPhase,
-                    reduceMotion: reduceMotion
+                    reduceMotion: reduceMotion,
+                    motionIntensity: motionIntensity
                 )
                 .id(slide.id)
-                .transition(.opacity)
+                .transition(slide.motionStyle.transition)
             } else {
                 ZStack {
                     Color.white.opacity(0.045)
@@ -154,11 +166,11 @@ struct MontageView: View {
         }
         .background(Color(red: 0.051, green: 0.035, blue: 0.024))
         .accessibilityHidden(true)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.72), value: currentIndex)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.58), value: currentIndex)
         .onChange(of: currentIndex, initial: true) { _, _ in
             motionPhase = false
             guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 2.15)) {
+            withAnimation(.easeInOut(duration: max(0.7, secondsPerSlide * 0.92))) {
                 motionPhase = true
             }
         }
@@ -166,10 +178,28 @@ struct MontageView: View {
             currentIndex = 0
             guard !reduceMotion, slideCount > 0 else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 2_200_000_000)
+                let delay = UInt64(max(0.6, secondsPerSlide) * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: delay)
                 guard !Task.isCancelled else { return }
                 currentIndex = (currentIndex + 1) % slideCount
             }
+        }
+    }
+
+    private func resolvedFrameStyle(
+        planned: MontageFrameStyle,
+        aspectRatio: Double,
+        index: Int
+    ) -> MontageFrameStyle {
+        switch look {
+        case .story:
+            return planned
+        case .cinema:
+            return aspectRatio < 0.88 ? .portraitMatte : .cinematic
+        case .journal:
+            return index.isMultiple(of: 3) && aspectRatio >= 0.88 ? .fullBleed : .postcard
+        case .clean:
+            return aspectRatio < 0.88 ? .portraitMatte : .fullBleed
         }
     }
 }
@@ -180,6 +210,30 @@ private struct MontageSlide {
     let label: String
     let aspectRatio: Double
     let frameStyle: MontageFrameStyle
+    let motionStyle: MontageMotionStyle
+}
+
+private extension MontageMotionStyle {
+    var transition: AnyTransition {
+        switch self {
+        case .panLeft:
+            return .asymmetric(
+                insertion: .opacity.combined(with: .offset(x: 14, y: 0)),
+                removal: .opacity.combined(with: .offset(x: -10, y: 0))
+            )
+        case .panRight:
+            return .asymmetric(
+                insertion: .opacity.combined(with: .offset(x: -14, y: 0)),
+                removal: .opacity.combined(with: .offset(x: 10, y: 0))
+            )
+        case .rise:
+            return .opacity.combined(with: .offset(x: 0, y: 12))
+        case .settle:
+            return .opacity.combined(with: .scale(scale: 1.025))
+        case .zoomIn, .zoomOut:
+            return .opacity.combined(with: .scale(scale: 0.985))
+        }
+    }
 }
 
 private struct MontageSlideArtwork: View {
@@ -187,6 +241,7 @@ private struct MontageSlideArtwork: View {
     let showLabel: Bool
     let motionPhase: Bool
     let reduceMotion: Bool
+    let motionIntensity: MontageMotionIntensity
 
     var body: some View {
         GeometryReader { proxy in
@@ -205,11 +260,8 @@ private struct MontageSlideArtwork: View {
 
     private func fullBleed(size: CGSize) -> some View {
         PhotoAssetView(source: slide.source, label: showLabel ? slide.label : nil)
-            .scaleEffect(reduceMotion ? 1 : (motionPhase ? 1.09 : 1.015))
-            .offset(
-                x: reduceMotion ? 0 : (motionPhase ? -size.width * 0.014 : size.width * 0.01),
-                y: reduceMotion ? 0 : (motionPhase ? -size.height * 0.012 : size.height * 0.008)
-            )
+            .scaleEffect(fullBleedScale)
+            .offset(motionOffset(in: size))
     }
 
     private func portraitMatte(size: CGSize) -> some View {
@@ -239,7 +291,8 @@ private struct MontageSlideArtwork: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
             .shadow(color: .black.opacity(0.62), radius: 26, y: 16)
-            .scaleEffect(reduceMotion ? 1 : (motionPhase ? 1.025 : 0.99))
+            .scaleEffect(framedScale)
+            .offset(framedOffset(in: size))
         }
     }
 
@@ -248,7 +301,8 @@ private struct MontageSlideArtwork: View {
             Color(red: 0.035, green: 0.027, blue: 0.021)
             PhotoAssetView(source: slide.source, contentMode: .fit)
                 .frame(height: size.height * 0.62)
-                .scaleEffect(reduceMotion ? 1 : (motionPhase ? 1.035 : 1))
+                .scaleEffect(framedScale)
+                .offset(framedOffset(in: size))
 
             VStack {
                 filmEdge
@@ -291,9 +345,75 @@ private struct MontageSlideArtwork: View {
             .frame(width: size.width * 0.82)
             .padding(8)
             .background(TR.cream)
-            .rotationEffect(.degrees(reduceMotion ? -1.2 : (motionPhase ? 1.1 : -1.6)))
-            .scaleEffect(reduceMotion ? 1 : (motionPhase ? 1.025 : 0.98))
+            .rotationEffect(.degrees(postcardRotation))
+            .scaleEffect(framedScale)
+            .offset(framedOffset(in: size))
             .shadow(color: .black.opacity(0.62), radius: 24, y: 17)
+        }
+    }
+
+    private var amplitude: CGFloat {
+        reduceMotion ? 0 : CGFloat(motionIntensity.amplitude)
+    }
+
+    private var fullBleedScale: CGFloat {
+        let wide = 0.085 * amplitude
+        let quiet = 0.018 * amplitude
+        switch slide.motionStyle {
+        case .zoomIn:
+            return motionPhase ? 1 + wide : 1 + quiet
+        case .zoomOut:
+            return motionPhase ? 1 + quiet : 1 + wide
+        case .panLeft, .panRight:
+            return 1 + (0.075 * amplitude)
+        case .rise:
+            return motionPhase ? 1 + (0.065 * amplitude) : 1 + (0.025 * amplitude)
+        case .settle:
+            return motionPhase ? 1 + quiet : 1 + (0.065 * amplitude)
+        }
+    }
+
+    private var framedScale: CGFloat {
+        let amount = 0.028 * amplitude
+        switch slide.motionStyle {
+        case .zoomOut, .settle:
+            return motionPhase ? 1 : 1 + amount
+        default:
+            return motionPhase ? 1 + amount : 1
+        }
+    }
+
+    private func motionOffset(in size: CGSize) -> CGSize {
+        let horizontal = size.width * 0.038 * amplitude
+        let vertical = size.height * 0.025 * amplitude
+        switch slide.motionStyle {
+        case .panLeft:
+            return CGSize(width: motionPhase ? -horizontal : horizontal, height: 0)
+        case .panRight:
+            return CGSize(width: motionPhase ? horizontal : -horizontal, height: 0)
+        case .rise:
+            return CGSize(width: 0, height: motionPhase ? -vertical : vertical)
+        case .settle:
+            return CGSize(width: 0, height: motionPhase ? 0 : -vertical * 0.45)
+        case .zoomIn:
+            return CGSize(width: motionPhase ? -horizontal * 0.30 : horizontal * 0.20, height: 0)
+        case .zoomOut:
+            return CGSize(width: motionPhase ? 0 : -horizontal * 0.25, height: 0)
+        }
+    }
+
+    private func framedOffset(in size: CGSize) -> CGSize {
+        let full = motionOffset(in: size)
+        return CGSize(width: full.width * 0.30, height: full.height * 0.30)
+    }
+
+    private var postcardRotation: Double {
+        let amount = Double(amplitude) * 1.5
+        switch slide.motionStyle {
+        case .panRight, .zoomOut, .settle:
+            return motionPhase ? -0.35 : -0.35 - amount
+        default:
+            return motionPhase ? -0.35 + amount : -0.35
         }
     }
 
@@ -323,6 +443,8 @@ private struct MontageContentKey: Hashable {
     let count: Int
     let firstID: String?
     let lastID: String?
+    let look: MontageLook
+    let motionIntensity: MontageMotionIntensity
 }
 
 private struct PhotoSourceImage: View {
@@ -462,9 +584,21 @@ private final class PhotoAssetImageLoader: ObservableObject {
         options.resizeMode = .fast
         options.isNetworkAccessAllowed = true
 
+        // A full-screen @3x request can otherwise make PhotoKit fetch a much
+        // larger iCloud original. Start screen-sized but bounded, then retry at
+        // progressively smaller thumbnail sizes so the film rarely lands on a
+        // blank cloud frame on a slow connection.
+        let requestedLongestSide = max(key.pixelWidth, key.pixelHeight)
+        let retryBound = max(480, 1_600 / max(1, 1 << retryCount))
+        let scale = min(1, CGFloat(retryBound) / CGFloat(max(1, requestedLongestSide)))
+        let targetSize = CGSize(
+            width: max(160, CGFloat(key.pixelWidth) * scale),
+            height: max(160, CGFloat(key.pixelHeight) * scale)
+        )
+
         requestID = Self.manager.requestImage(
             for: asset,
-            targetSize: CGSize(width: key.pixelWidth, height: key.pixelHeight),
+            targetSize: targetSize,
             contentMode: key.contentMode == .fit ? .aspectFit : .aspectFill,
             options: options
         ) { [weak self] image, info in

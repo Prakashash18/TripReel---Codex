@@ -5,7 +5,12 @@ struct FirstWatchScreen: View {
 
     var body: some View {
         ZStack {
-            MontageView(photos: model.photos)
+            MontageView(
+                photos: model.photos,
+                look: model.montageLook,
+                motionIntensity: model.montageMotionIntensity,
+                secondsPerSlide: 4.0 / 3.0
+            )
                 .ignoresSafeArea()
 
             LinearGradient(
@@ -473,11 +478,17 @@ struct SecondWatchScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @State private var showTitles = false
     @State private var showMusic = false
+    @State private var showStyle = false
     @StateObject private var soundtrack = LocalSoundtrackPlayer()
 
     var body: some View {
         ZStack {
-            MontageView(photos: model.keptPhotos)
+            MontageView(
+                photos: model.keptPhotos,
+                look: model.montageLook,
+                motionIntensity: model.montageMotionIntensity,
+                secondsPerSlide: model.secondsPerPhoto
+            )
                 .ignoresSafeArea()
 
             LinearGradient(
@@ -529,7 +540,11 @@ struct SecondWatchScreen: View {
                         .font(TR.display(29))
                         .fixedSize(horizontal: false, vertical: true)
 
-                    HStack(spacing: 8) {
+                    HStack(spacing: 7) {
+                        EditOptionButton(symbol: "wand.and.stars", label: "Style", badge: model.montageLook.name.uppercased(), badgeColor: TR.accent) {
+                            showStyle = true
+                        }
+                        .accessibilityIdentifier("film-style-button")
                         EditOptionButton(symbol: "textformat", label: "Titles", badge: titleBadge, badgeColor: model.titleCards.isEmpty ? .white.opacity(0.46) : TR.keep) {
                             showTitles = true
                         }
@@ -573,6 +588,14 @@ struct SecondWatchScreen: View {
                 .presentationDetents([.fraction(0.76)])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(26)
+            .presentationBackground(TR.sheet)
+        }
+        .sheet(isPresented: $showStyle) {
+            FilmStyleSheet()
+                .environmentObject(model)
+                .presentationDetents([.fraction(0.78)])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(26)
                 .presentationBackground(TR.sheet)
         }
         .task(id: model.selectedTrackID) {
@@ -591,6 +614,111 @@ struct SecondWatchScreen: View {
 
     private var titleBadge: String {
         model.titleCards.isEmpty ? "NONE" : "\(model.titleCards.count) ON"
+    }
+}
+
+private struct FilmStyleSheet: View {
+    @EnvironmentObject private var model: TripReelModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                SheetHeader(title: "Film style") { dismiss() }
+
+                Text("Choose the mood, not every tiny transition. TripReel still adapts portrait and landscape photos automatically.")
+                    .font(TR.ui(13))
+                    .foregroundStyle(.white.opacity(0.57))
+                    .lineSpacing(4)
+
+                VStack(spacing: 9) {
+                    ForEach(MontageLook.allCases) { look in
+                        lookRow(look)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 11) {
+                    MetadataText(text: "MOTION", color: .white.opacity(0.43))
+
+                    HStack(spacing: 7) {
+                        ForEach(MontageMotionIntensity.allCases) { intensity in
+                            Button {
+                                model.montageMotionIntensity = intensity
+                            } label: {
+                                Text(intensity.name)
+                                    .font(TR.ui(12, weight: .semibold))
+                                    .foregroundStyle(
+                                        model.montageMotionIntensity == intensity
+                                            ? TR.ink
+                                            : .white.opacity(0.64)
+                                    )
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 11)
+                                    .background(
+                                        model.montageMotionIntensity == intensity
+                                            ? TR.cream
+                                            : .white.opacity(0.055)
+                                    )
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityValue(
+                                model.montageMotionIntensity == intensity ? "Selected" : "Not selected"
+                            )
+                        }
+                    }
+
+                    Text("Reduce Motion in iOS Settings always overrides this choice.")
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.40))
+                }
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 20)
+            .padding(.bottom, 34)
+        }
+        .accessibilityIdentifier("film-style-sheet")
+    }
+
+    private func lookRow(_ look: MontageLook) -> some View {
+        let selected = model.montageLook == look
+        return Button {
+            model.montageLook = look
+        } label: {
+            HStack(spacing: 13) {
+                Image(systemName: look.symbol)
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(selected ? TR.accent : .white.opacity(0.58))
+                    .frame(width: 34, height: 34)
+                    .background(selected ? TR.accent.opacity(0.12) : .white.opacity(0.045))
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(look.name)
+                        .font(TR.ui(14, weight: .semibold))
+                    Text(look.detail)
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.50))
+                        .multilineTextAlignment(.leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selected ? TR.keep : .white.opacity(0.24))
+            }
+            .foregroundStyle(TR.cream)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(selected ? TR.accent.opacity(0.07) : .white.opacity(0.035))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(selected ? TR.accent.opacity(0.40) : .white.opacity(0.10), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(selected ? "Selected" : "Not selected")
+        .accessibilityIdentifier("film-look-\(look.rawValue)")
     }
 }
 

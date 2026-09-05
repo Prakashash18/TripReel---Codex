@@ -133,6 +133,31 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         model.go(.trips)
     }
 
+    func testLargeOnDeviceTripBecomesAConciseRecoverableFirstCut() async throws {
+        let preferences = makePreferences()
+        preferences.set("onDeviceOnly", forKey: "tripreel.cloud-photo-analysis-preference.v1")
+        defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: StubPhotoLibraryForSelection(),
+            cloudPhotoAnalysis: CloudAnalysisSpy(results: []),
+            photoAnalysisThumbnails: ThumbnailStub(),
+            nativePhotoIntelligence: NativeIntelligenceStub(),
+            preferenceStore: preferences
+        )
+
+        model.requestBuild(trip: makeTrip(count: 40))
+        try await waitUntil { model.screen == .building }
+
+        XCTAssertEqual(model.photos.count, 24)
+        XCTAssertEqual(model.excludedPhotos.count, 16)
+        XCTAssertTrue(model.excludedPhotos.allSatisfy { $0.reason == .notAHighlight })
+        XCTAssertEqual(model.photoAnalysisProcessedCount, 40)
+        XCTAssertEqual(model.photoAnalysisRecentAssets.count, 6)
+        model.go(.trips)
+    }
+
     func testAuthorizationLossCancelsAnalysisAndClearsPendingFilm() async throws {
         let preferences = makePreferences()
         preferences.set("onDeviceOnly", forKey: "tripreel.cloud-photo-analysis-preference.v1")
