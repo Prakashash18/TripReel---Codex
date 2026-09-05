@@ -1,0 +1,31 @@
+name = "tripreel-visual-analysis"
+main = "src/index.ts"
+compatibility_date = "2026-09-05"
+compatibility_flags = [
+  "enable_request_signal",
+  "disallow_importable_env",
+  "no_nodejs_compat",
+  "no_nodejs_compat_v2",
+]
+# Use the account's dedicated workers.dev hostname for the first deployment.
+# Preview URLs remain disabled so only the stable production URL is exposed.
+workers_dev = true
+preview_urls = false
+
+[secrets]
+required = ["OPENAI_API_KEY", "TRIPREEL_AUTH_TOKEN"]
+
+# The Worker itself contains no console logging. Keep automatic Worker Logs off so
+# request diagnostics cannot accidentally grow into a content-logging pipeline.
+[observability]
+enabled = false
+redact_query_string = true
+
+[observability.logs]
+enabled = false
+invocation_logs = false
+persist = false
+
+[observability.traces]
+enabled = false
+persist = false

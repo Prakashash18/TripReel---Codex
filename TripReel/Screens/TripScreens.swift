@@ -29,9 +29,19 @@ struct TripsScreen: View {
                         } else {
                             ForEach(model.trips) { trip in
                                 TripRow(trip: trip) {
-                                    model.startBuild(trip: trip)
+                                    model.requestBuild(trip: trip)
                                 }
                             }
+                        }
+
+                        if !model.usesDemoData {
+                            CloudAnalysisSettingsCard(
+                                isEnabled: model.cloudAnalysisIsEnabled,
+                                isAvailable: model.cloudAnalysisIsConfigured
+                            ) {
+                                model.presentCloudAnalysisSettings()
+                            }
+                            .padding(.top, 8)
                         }
 
                         if model.usesDemoData {

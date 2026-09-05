@@ -60,5 +60,43 @@ struct RootView: View {
         } message: {
             Text(model.libraryErrorMessage ?? "")
         }
+        .sheet(isPresented: $model.isCloudAnalysisConsentPresented) {
+            CloudAnalysisConsentView(
+                context: model.cloudConsentIsSettings ? .settings : .firstUse,
+                cloudServiceAvailable: model.cloudAnalysisIsConfigured,
+                onUseCloudEnhancement: {
+                    model.useCloudEnhancement()
+                },
+                onKeepOnDevice: {
+                    model.keepAnalysisOnDevice()
+                }
+            )
+            .interactiveDismissDisabled()
+            .presentationDetents([.large])
+            .presentationDragIndicator(.hidden)
+            .presentationCornerRadius(26)
+            .presentationBackground(TR.sheet)
+        }
+        .sheet(isPresented: $model.isSmartSelectionReviewPresented) {
+            SmartSelectionReviewView()
+                .environmentObject(model)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(26)
+                .presentationBackground(TR.sheet)
+        }
+        .overlay {
+            if model.isAnalyzingPhotos {
+                PhotoAnalysisProgressOverlay(
+                    progress: model.photoAnalysisProgress,
+                    status: model.photoAnalysisStatus,
+                    usesCloud: model.cloudAnalysisIsEnabled && model.cloudAnalysisIsConfigured,
+                    onCancel: model.cancelPhotoAnalysis
+                )
+                .transition(.opacity)
+                .zIndex(20)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: model.isAnalyzingPhotos)
     }
 }

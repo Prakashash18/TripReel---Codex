@@ -28,8 +28,10 @@ struct DetectedTrip: Identifiable, Hashable, Sendable {
 
 /// Groups photo-library metadata into stable, chronological destination visits.
 ///
-/// The detector deliberately works only with metadata. Screenshots and other image
-/// subtypes are retained, while assets without a creation date cannot be grouped.
+/// The detector deliberately works only with metadata. Screenshots never make a
+/// collection qualify as a trip, but screenshots captured during an already-
+/// detected trip remain attached so Smart Selection can show (and restore) them.
+/// Assets without a creation date cannot be grouped automatically.
 enum TripDetector {
     private static let minimumPhotoCount = 15
     private static let minimumDuration: TimeInterval = 18 * 60 * 60
@@ -52,15 +54,18 @@ enum TripDetector {
             .sorted(by: chronologicalOrder)
 
         guard !normalized.isEmpty, !shouldCancel() else { return [] }
+        let screenshotPhotos = normalized.filter(\.isScreenshot)
+        let groupingPhotos = normalized.filter { !$0.isScreenshot }
+        guard !groupingPhotos.isEmpty else { return [] }
 
         let habitualPlaces = habitualPlaceCentroids(
-            in: normalized,
+            in: groupingPhotos,
             calendar: calendar,
             shouldCancel: shouldCancel
         )
         guard !shouldCancel() else { return [] }
         var trips: [DetectedTrip] = []
-        for bucket in temporalBuckets(from: normalized) {
+        for bucket in temporalBuckets(from: groupingPhotos) {
             guard !shouldCancel() else { return [] }
             trips.append(contentsOf: detectedTrips(
                 in: bucket,
@@ -69,7 +74,7 @@ enum TripDetector {
             ))
         }
 
-        return trips
+        let filteredTrips = trips
             .filter { trip in
                 guard let centroid = trip.centroid else { return true }
                 return !habitualPlaces.contains {
@@ -80,6 +85,57 @@ enum TripDetector {
             if lhs.endDate != rhs.endDate { return lhs.endDate > rhs.endDate }
             if lhs.startDate != rhs.startDate { return lhs.startDate > rhs.startDate }
             return lhs.id < rhs.id
+        }
+        return attachScreenshots(screenshotPhotos, to: filteredTrips)
+    }
+
+    private static func attachScreenshots(
+        _ screenshots: [PhotoMetadata],
+        to trips: [DetectedTrip]
+    ) -> [DetectedTrip] {
+        guard !screenshots.isEmpty, !trips.isEmpty else { return trips }
+        var attachments = Array(repeating: [PhotoMetadata](), count: trips.count)
+
+        for screenshot in screenshots {
+            guard let date = screenshot.creationDate else { continue }
+            let candidate = trips.enumerated()
+                .compactMap { index, trip -> (index: Int, distance: TimeInterval)? in
+                    let lowerBound = trip.startDate.addingTimeInterval(-maximumInterPhotoGap)
+                    let upperBound = trip.endDate.addingTimeInterval(maximumInterPhotoGap)
+                    guard (lowerBound...upperBound).contains(date) else { return nil }
+                    let distance: TimeInterval
+                    if date < trip.startDate {
+                        distance = trip.startDate.timeIntervalSince(date)
+                    } else if date > trip.endDate {
+                        distance = date.timeIntervalSince(trip.endDate)
+                    } else {
+                        distance = 0
+                    }
+                    return (index, distance)
+                }
+                .min {
+                    if $0.distance != $1.distance { return $0.distance < $1.distance }
+                    if trips[$0.index].startDate != trips[$1.index].startDate {
+                        return trips[$0.index].startDate < trips[$1.index].startDate
+                    }
+                    return trips[$0.index].id < trips[$1.index].id
+                }
+
+            if let candidate {
+                attachments[candidate.index].append(screenshot)
+            }
+        }
+
+        return trips.enumerated().map { index, trip in
+            guard !attachments[index].isEmpty else { return trip }
+            return DetectedTrip(
+                id: trip.id,
+                photos: (trip.photos + attachments[index]).sorted(by: chronologicalOrder),
+                startDate: trip.startDate,
+                endDate: trip.endDate,
+                centroid: trip.centroid,
+                coverID: trip.coverID
+            )
         }
     }
 

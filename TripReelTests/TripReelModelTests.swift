@@ -118,7 +118,7 @@ final class TripReelModelTests: XCTestCase {
 
     func testLibraryScanGroupsAssetsAndBuildUsesTheirIdentifiers() async throws {
         let start = Calendar.current.startOfDay(for: Date()).addingTimeInterval(8 * 60 * 60)
-        let metadata = (0..<15).map { index in
+        let metadata = (0..<16).map { index in
             PhotoMetadata(
                 id: "library-\(index)",
                 creationDate: start.addingTimeInterval(Double(index) * 20 * 60 * 60 / 14),
@@ -138,8 +138,8 @@ final class TripReelModelTests: XCTestCase {
 
         await model.scanPhotoLibrary(navigateToResults: true)
 
-        XCTAssertEqual(model.libraryPhotoCount, 15)
-        XCTAssertEqual(model.selectedPhotoCount, 15)
+        XCTAssertEqual(model.libraryPhotoCount, 16)
+        XCTAssertEqual(model.selectedPhotoCount, 16)
         XCTAssertEqual(model.trips.count, 1)
         XCTAssertEqual(model.screen, .trips)
         XCTAssertEqual(model.libraryPreviewPhotos.count, 6)

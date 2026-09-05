@@ -1,0 +1,232 @@
+import Foundation
+import XCTest
+@testable import TripReel
+
+final class NativePhotoIntelligenceScoringTests: XCTestCase {
+    func testAppealingGroupPhotoRanksAsStrongMemoryWithoutCloudReview() {
+        let signals = NativePhotoIntelligenceSignals(
+            classifications: [
+                NativePhotoClassification(identifier: "outdoor landscape", confidence: 0.88)
+            ],
+            faces: NativePhotoFaceSignal(
+                count: 4,
+                averageCaptureQuality: 0.84,
+                bestCaptureQuality: 0.94
+            ),
+            aesthetics: NativePhotoAestheticsSignal(overallScore: 0.62, isUtility: false),
+            availability: .init(featurePrint: true, aesthetics: true)
+        )
+
+        let assessment = NativePhotoIntelligenceScorer.score(signals: signals)
+
+        XCTAssertGreaterThan(assessment.scores.memoryScore, 0.80)
+        XCTAssertLessThan(assessment.scores.utilityProbability, 0.20)
+        XCTAssertEqual(assessment.cloudReviewGate.disposition, .unnecessary)
+        XCTAssertEqual(assessment.cloudReviewGate.reason, .highMemoryConfidence)
+        XCTAssertTrue(assessment.tags.contains(.groupPhoto))
+        XCTAssertTrue(assessment.tags.contains(.scenery))
+        XCTAssertTrue(assessment.tags.contains(.strongMemory))
+    }
+
+    func testScreenshotMetadataOverridesOtherwiseAttractivePixels() {
+        let signals = NativePhotoIntelligenceSignals(
+            isScreenshot: true,
+            classifications: [
+                NativePhotoClassification(identifier: "beach sunset", confidence: 0.95)
+            ],
+            text: NativePhotoTextSignal(
+                lineCount: 18,
+                characterCount: 520,
+                coverage: 0.31,
+                averageConfidence: 0.91
+            ),
+            aesthetics: NativePhotoAestheticsSignal(overallScore: 0.80, isUtility: false),
+            availability: .init(aesthetics: true)
+        )
+
+        let assessment = NativePhotoIntelligenceScorer.score(signals: signals)
+
+        XCTAssertEqual(assessment.scores.utilityProbability, 1, accuracy: 0.000_1)
+        XCTAssertLessThanOrEqual(assessment.scores.memoryScore, 0.06)
+        XCTAssertEqual(assessment.cloudReviewGate.disposition, .blockedSensitiveContent)
+        XCTAssertEqual(assessment.cloudReviewGate.reason, .screenshot)
+        XCTAssertTrue(assessment.tags.contains(.screenshot))
+        XCTAssertTrue(assessment.tags.contains(.utility))
+    }
+
+    func testPhotographedOrderIsRecognizedAsSensitiveDocument() {
+        let signals = NativePhotoIntelligenceSignals(
+            classifications: [
+                NativePhotoClassification(identifier: "menu document", confidence: 0.87)
+            ],
+            text: NativePhotoTextSignal(
+                lineCount: 28,
+                characterCount: 1_100,
+                coverage: 0.38,
+                averageConfidence: 0.89
+            ),
+            document: NativePhotoDocumentSignal(
+                detected: true,
+                confidence: 0.93,
+                coverage: 0.78
+            )
+        )
+
+        let assessment = NativePhotoIntelligenceScorer.score(signals: signals)
+
+        XCTAssertGreaterThan(assessment.scores.documentProbability, 0.75)
+        XCTAssertGreaterThan(assessment.scores.utilityProbability, 0.70)
+        XCTAssertLessThan(assessment.scores.memoryScore, 0.25)
+        XCTAssertEqual(assessment.cloudReviewGate.disposition, .blockedSensitiveContent)
+        XCTAssertEqual(assessment.cloudReviewGate.reason, .documentOrTextHeavy)
+        XCTAssertTrue(assessment.tags.contains(.likelyDocument))
+        XCTAssertTrue(assessment.tags.contains(.textHeavy))
+    }
+
+    func testScenicPhotoWithDocumentInFrameStaysInFilm() {
+        let signals = NativePhotoIntelligenceSignals(
+            classifications: [
+                NativePhotoClassification(identifier: "outdoor landscape", confidence: 0.91),
+                NativePhotoClassification(identifier: "document sign", confidence: 0.88)
+            ],
+            text: NativePhotoTextSignal(
+                lineCount: 24,
+                characterCount: 900,
+                coverage: 0.34,
+                averageConfidence: 0.90
+            ),
+            document: NativePhotoDocumentSignal(
+                detected: true,
+                confidence: 0.95,
+                coverage: 0.72
+            )
+        )
+        let assessment = NativePhotoIntelligenceScorer.score(signals: signals)
+        let result = NativePhotoIntelligenceResult(
+            sourceIdentifier: "landmark-sign",
+            analyzedPixelWidth: 512,
+            analyzedPixelHeight: 384,
+            signals: signals,
+            scores: assessment.scores,
+            tags: assessment.tags,
+            cloudReviewGate: assessment.cloudReviewGate
+        )
+        let asset = TripAsset(
+            id: "landmark-sign",
+            source: .library("landmark-sign"),
+            creationDate: Date(),
+            filename: "IMG_1234.HEIC"
+        )
+
+        XCTAssertTrue(result.tags.contains(.scenery))
+        XCTAssertNil(SmartPhotoSelectionPolicy.nativeDecision(for: asset, result: result))
+    }
+
+    func testUnclearPhotoRequiresExplicitConsentBeforeCloudEligibility() {
+        let signals = NativePhotoIntelligenceSignals()
+
+        let assessment = NativePhotoIntelligenceScorer.score(signals: signals)
+
+        XCTAssertEqual(assessment.cloudReviewGate.disposition, .eligibleAfterExplicitConsent)
+        XCTAssertEqual(assessment.cloudReviewGate.reason, .ambiguousNativeResult)
+        XCTAssertTrue(assessment.tags.contains(.cloudReviewCandidate))
+    }
+
+    func testAestheticsUtilityFlagCanResolveNonDocumentUtilityImageLocally() {
+        let signals = NativePhotoIntelligenceSignals(
+            aesthetics: NativePhotoAestheticsSignal(overallScore: 0, isUtility: true),
+            availability: .init(aesthetics: true)
+        )
+
+        let assessment = NativePhotoIntelligenceScorer.score(signals: signals)
+
+        XCTAssertGreaterThanOrEqual(assessment.scores.utilityProbability, 0.90)
+        XCTAssertEqual(assessment.cloudReviewGate.disposition, .unnecessary)
+        XCTAssertEqual(assessment.cloudReviewGate.reason, .highUtilityConfidence)
+        XCTAssertTrue(assessment.tags.contains(.utility))
+    }
+
+    func testMalformedSignalValuesCannotEscapeNormalizedScoreRanges() {
+        let signals = NativePhotoIntelligenceSignals(
+            classifications: [
+                NativePhotoClassification(identifier: "LANDSCAPE", confidence: 3)
+            ],
+            text: NativePhotoTextSignal(
+                lineCount: -1,
+                characterCount: -50,
+                coverage: .infinity,
+                averageConfidence: -.infinity
+            ),
+            faces: NativePhotoFaceSignal(
+                count: 2,
+                averageCaptureQuality: 4,
+                bestCaptureQuality: 4
+            ),
+            document: NativePhotoDocumentSignal(
+                detected: true,
+                confidence: -2,
+                coverage: -.infinity
+            ),
+            aesthetics: NativePhotoAestheticsSignal(overallScore: .nan, isUtility: false),
+            availability: .init(aesthetics: true)
+        )
+
+        let scores = NativePhotoIntelligenceScorer.score(signals: signals).scores
+
+        XCTAssertTrue((0...1).contains(scores.memoryScore))
+        XCTAssertTrue((0...1).contains(scores.utilityProbability))
+        XCTAssertTrue((0...1).contains(scores.documentProbability))
+        XCTAssertTrue((0...1).contains(scores.peopleScore))
+        XCTAssertTrue((0...1).contains(scores.nativeConfidence))
+        XCTAssertEqual(scores.aestheticScore, 0)
+    }
+
+    func testFeaturePrintDistanceIsValueOnlyAndDeterministic() throws {
+        let first = NativePhotoFeaturePrint(
+            revision: 2,
+            elementTypeRawValue: 1,
+            elementCount: 3,
+            data: data(for: [Float(0), 1, 2])
+        )
+        let second = NativePhotoFeaturePrint(
+            revision: 2,
+            elementTypeRawValue: 1,
+            elementCount: 3,
+            data: data(for: [Float(0), 4, 6])
+        )
+
+        XCTAssertEqual(try first.distance(to: second), 5, accuracy: 0.000_1)
+        XCTAssertThrowsError(try first.distance(to: NativePhotoFeaturePrint(
+            revision: 1,
+            elementTypeRawValue: 1,
+            elementCount: 3,
+            data: data(for: [Float(0), 1, 2])
+        ))) { error in
+            XCTAssertEqual(error as? NativePhotoFeaturePrintError, .incompatiblePrints)
+        }
+    }
+
+    func testConfigurationEnforcesBoundedImageAndOutputSizes() {
+        let tooSmall = NativePhotoIntelligenceConfiguration(
+            maximumImageDimension: 1,
+            maximumClassifications: 0,
+            maximumTextObservations: 0
+        )
+        let tooLarge = NativePhotoIntelligenceConfiguration(
+            maximumImageDimension: 20_000,
+            maximumClassifications: 1_000,
+            maximumTextObservations: 1_000
+        )
+
+        XCTAssertEqual(tooSmall.maximumImageDimension, 256)
+        XCTAssertEqual(tooSmall.maximumClassifications, 1)
+        XCTAssertEqual(tooSmall.maximumTextObservations, 1)
+        XCTAssertEqual(tooLarge.maximumImageDimension, 2_048)
+        XCTAssertEqual(tooLarge.maximumClassifications, 24)
+        XCTAssertEqual(tooLarge.maximumTextObservations, 256)
+    }
+
+    private func data(for values: [Float]) -> Data {
+        values.withUnsafeBytes { Data($0) }
+    }
+}

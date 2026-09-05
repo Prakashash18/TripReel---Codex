@@ -7,6 +7,7 @@ PROJECT_PATH = File.join(ROOT, 'TripReel.xcodeproj')
 
 project = Xcodeproj::Project.new(PROJECT_PATH, false, 60)
 project.root_object.compatibility_version = 'Xcode 15.0'
+project.root_object.attributes['BuildIndependentTargetsInParallel'] = 'YES'
 project.root_object.attributes['LastSwiftUpdateCheck'] = '2660'
 project.root_object.attributes['LastUpgradeCheck'] = '2660'
 
@@ -28,6 +29,9 @@ end
 
 assets = app_group.new_file('Resources/Assets.xcassets')
 target.resources_build_phase.add_file_reference(assets)
+
+privacy_manifest = app_group.new_file('Resources/PrivacyInfo.xcprivacy')
+target.resources_build_phase.add_file_reference(privacy_manifest)
 
 %w[InstrumentSerif-Regular.ttf InstrumentSerif-Italic.ttf].each do |font_name|
   font = app_group.new_file("Resources/Fonts/#{font_name}")
@@ -54,8 +58,10 @@ end
 project.build_configurations.each do |configuration|
   settings = configuration.build_settings
   settings['CLANG_ENABLE_MODULES'] = 'YES'
+  settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'YES'
   settings['IPHONEOS_DEPLOYMENT_TARGET'] = '17.0'
   settings['SDKROOT'] = 'iphoneos'
+  settings['STRING_CATALOG_GENERATE_SYMBOLS'] = 'YES'
   settings['SWIFT_VERSION'] = '5.0'
 end
 
@@ -79,6 +85,7 @@ target.build_configurations.each do |configuration|
   settings['SWIFT_EMIT_LOC_STRINGS'] = 'YES'
   settings['SWIFT_VERSION'] = '5.0'
   settings['TARGETED_DEVICE_FAMILY'] = '1'
+  settings['TRIPREEL_PHOTO_ANALYSIS_ENDPOINT'] = 'https://tripreel-visual-analysis.tripreel-prakashash18.workers.dev/v1/analyze'
 end
 
 unit_test_target.build_configurations.each do |configuration|
@@ -111,6 +118,7 @@ scheme.add_build_target(target)
 scheme.set_launch_target(target)
 scheme.add_test_target(unit_test_target)
 scheme.add_test_target(ui_test_target)
+scheme.doc.root.attributes['LastUpgradeVersion'] = '2660'
 scheme.save_as(project.path, 'TripReel', true)
 
 puts "Generated #{PROJECT_PATH}"

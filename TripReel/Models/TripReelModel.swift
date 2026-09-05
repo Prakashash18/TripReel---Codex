@@ -32,6 +32,21 @@ struct TripAsset: Identifiable, Hashable, Sendable {
     let source: PhotoSource
     let creationDate: Date?
     let filename: String
+    let isScreenshot: Bool
+
+    init(
+        id: String,
+        source: PhotoSource,
+        creationDate: Date?,
+        filename: String,
+        isScreenshot: Bool = false
+    ) {
+        self.id = id
+        self.source = source
+        self.creationDate = creationDate
+        self.filename = filename
+        self.isScreenshot = isScreenshot
+    }
 }
 
 struct Trip: Identifiable, Hashable, Sendable {
@@ -78,6 +93,33 @@ struct Trip: Identifiable, Hashable, Sendable {
             endDate: endDate,
             assets: retained,
             coverID: identifiers.contains(coverID) ? coverID : retained[retained.count / 2].id
+        )
+    }
+
+    func replacingAssets(_ replacement: [TripAsset]) -> Trip? {
+        guard !replacement.isEmpty else { return nil }
+        let sorted = replacement.sorted {
+            switch ($0.creationDate, $1.creationDate) {
+            case let (left?, right?) where left != right:
+                return left < right
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                return $0.id < $1.id
+            }
+        }
+        return Trip(
+            id: id,
+            place: place,
+            dates: dates,
+            startDate: startDate,
+            endDate: endDate,
+            assets: sorted,
+            coverID: sorted.contains(where: { $0.id == coverID })
+                ? coverID
+                : sorted[sorted.count / 2].id
         )
     }
 }
@@ -170,12 +212,26 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var libraryPhotoCount = 0
     @Published private(set) var isScanningLibrary = false
     @Published private(set) var libraryErrorMessage: String?
+    @Published private(set) var cloudAnalysisPreference: CloudAnalysisPreference
+    @Published var isCloudAnalysisConsentPresented = false
+    @Published private(set) var cloudConsentIsSettings = false
+    @Published private(set) var isAnalyzingPhotos = false
+    @Published private(set) var photoAnalysisProgress = 0.0
+    @Published private(set) var photoAnalysisStatus = "Preparing smart selection"
+    @Published private(set) var excludedPhotos: [SmartExcludedPhoto] = []
+    @Published var isSmartSelectionReviewPresented = false
 
     let usesDemoData: Bool
 
     private let photoLibrary: any PhotoLibraryServing
+    private let cloudPhotoAnalysis: any CloudPhotoAnalysisServing
+    private let photoAnalysisThumbnails: any PhotoAnalysisThumbnailServing
+    private let nativePhotoIntelligence: any NativePhotoIntelligenceServing
+    private let preferenceStore: UserDefaults
     private let manualPhotoImporter = ManualPhotoImportService()
     private var workTask: Task<Void, Never>?
+    private var photoAnalysisTask: Task<Void, Never>?
+    private var photoAnalysisGeneration = UUID()
     private var placeTask: Task<Void, Never>?
     private var detectorTask: Task<[DetectedTrip], Never>?
     private var scanGeneration = UUID()
@@ -191,15 +247,29 @@ final class TripReelModel: ObservableObject {
     private let placeResolver = TripPlaceResolver()
     private var resolvedCoordinates: [String: PhotoCoordinate] = [:]
     private var activeImportedPhotos: [ManualImportedPhoto] = []
+    private var pendingBuildTrip: Trip?
+
+    private static let cloudPreferenceKey = "tripreel.cloud-photo-analysis-preference.v1"
 
     init(
         arguments: [String] = ProcessInfo.processInfo.arguments,
         useDemoData: Bool? = nil,
-        photoLibrary: (any PhotoLibraryServing)? = nil
+        photoLibrary: (any PhotoLibraryServing)? = nil,
+        cloudPhotoAnalysis: (any CloudPhotoAnalysisServing)? = nil,
+        photoAnalysisThumbnails: (any PhotoAnalysisThumbnailServing)? = nil,
+        nativePhotoIntelligence: (any NativePhotoIntelligenceServing)? = nil,
+        preferenceStore: UserDefaults = .standard
     ) {
         let demoMode = useDemoData ?? arguments.contains("-qaScreen")
         usesDemoData = demoMode
         self.photoLibrary = photoLibrary ?? PhotoLibraryService()
+        self.cloudPhotoAnalysis = cloudPhotoAnalysis ?? CloudPhotoAnalysisClient()
+        self.photoAnalysisThumbnails = photoAnalysisThumbnails ?? PhotoAnalysisThumbnailService()
+        self.nativePhotoIntelligence = nativePhotoIntelligence ?? NativePhotoIntelligenceService()
+        self.preferenceStore = preferenceStore
+        cloudAnalysisPreference = CloudAnalysisPreference(
+            rawValue: preferenceStore.string(forKey: Self.cloudPreferenceKey) ?? ""
+        ) ?? .undecided
 
         if demoMode {
             let fixtures = Self.makeDemoTrips()
@@ -333,6 +403,277 @@ final class TripReelModel: ObservableObject {
 
     func dismissLibraryMessage() {
         libraryErrorMessage = nil
+    }
+
+    var cloudAnalysisIsEnabled: Bool {
+        cloudAnalysisPreference == .enabled
+    }
+
+    var cloudAnalysisIsConfigured: Bool {
+        cloudPhotoAnalysis.isConfigured
+    }
+
+    var smartSelectionSummary: String? {
+        guard !excludedPhotos.isEmpty else { return nil }
+        let count = excludedPhotos.count
+        return "\(count) photo\(count == 1 ? "" : "s") left in More Photos"
+    }
+
+    /// Entry point used by the trip list. It is the only path that can begin an
+    /// optional upload, and first use always pauses for explicit consent.
+    func requestBuild(trip: Trip) {
+        guard !trip.assets.isEmpty else { return }
+        if usesDemoData {
+            startBuild(trip: trip)
+            return
+        }
+
+        pendingBuildTrip = trip
+        if cloudAnalysisPreference == .undecided {
+            cloudConsentIsSettings = false
+            isCloudAnalysisConsentPresented = true
+        } else {
+            beginSmartPhotoSelection(for: trip)
+        }
+    }
+
+    func presentCloudAnalysisSettings() {
+        pendingBuildTrip = nil
+        cloudConsentIsSettings = true
+        isCloudAnalysisConsentPresented = true
+    }
+
+    func useCloudEnhancement() {
+        setCloudAnalysisPreference(.enabled)
+        isCloudAnalysisConsentPresented = false
+        if let trip = pendingBuildTrip {
+            pendingBuildTrip = nil
+            beginSmartPhotoSelection(for: trip)
+        }
+    }
+
+    func keepAnalysisOnDevice() {
+        setCloudAnalysisPreference(.onDeviceOnly)
+        isCloudAnalysisConsentPresented = false
+        if let trip = pendingBuildTrip {
+            pendingBuildTrip = nil
+            beginSmartPhotoSelection(for: trip)
+        }
+    }
+
+    func cancelPhotoAnalysis() {
+        photoAnalysisGeneration = UUID()
+        photoAnalysisTask?.cancel()
+        photoAnalysisTask = nil
+        isAnalyzingPhotos = false
+        photoAnalysisProgress = 0
+        photoAnalysisStatus = "Preparing smart selection"
+    }
+
+    func includeExcludedPhoto(id: String) {
+        guard let excludedIndex = excludedPhotos.firstIndex(where: { $0.id == id }),
+              let selectedTrip else { return }
+        let restored = excludedPhotos.remove(at: excludedIndex)
+        guard let updatedTrip = selectedTrip.replacingAssets(selectedTrip.assets + [restored.asset]) else {
+            return
+        }
+        self.selectedTrip = updatedTrip
+        photos = Self.makeReelPhotos(from: updatedTrip)
+        cutPhotoIDs.formIntersection(Set(photos.map(\.id)))
+        currentPhotoIndex = min(currentPhotoIndex, max(0, photos.count - 1))
+    }
+
+    private func setCloudAnalysisPreference(_ preference: CloudAnalysisPreference) {
+        cloudAnalysisPreference = preference
+        preferenceStore.set(preference.rawValue, forKey: Self.cloudPreferenceKey)
+    }
+
+    private func beginSmartPhotoSelection(for trip: Trip) {
+        photoAnalysisTask?.cancel()
+        let generation = UUID()
+        photoAnalysisGeneration = generation
+        excludedPhotos = []
+        photoAnalysisProgress = 0
+        photoAnalysisStatus = "Preparing smart selection"
+
+        // The analysis coordinator is installed below; keeping this launch in a
+        // cancellable task prevents a second trip tap from racing the first.
+        photoAnalysisTask = Task { [weak self] in
+            guard let self else { return }
+            await self.analyzeAndBuild(trip: trip, generation: generation)
+        }
+    }
+
+    private func analyzeAndBuild(trip: Trip, generation: UUID) async {
+        guard photoAnalysisGeneration == generation else { return }
+        isAnalyzingPhotos = true
+        var decisions: [String: SmartExcludedPhoto] = [:]
+        var pendingCloudBatch: [(asset: TripAsset, jpegData: Data)] = []
+        var analyzedCount = 0
+        var unavailableCount = 0
+        var cloudReviewedCount = 0
+        var cloudFailureMessage: String?
+        var cloudFailed = false
+
+        for (index, asset) in trip.assets.enumerated() {
+            guard photoAnalysisGeneration == generation, !Task.isCancelled else {
+                finishPhotoAnalysisCancellation(generation: generation)
+                return
+            }
+
+            if let metadataDecision = SmartPhotoSelectionPolicy.metadataDecision(for: asset) {
+                decisions[asset.id] = metadataDecision
+                updatePhotoAnalysisProgress(index: index, total: trip.assets.count)
+                continue
+            }
+
+            do {
+                let thumbnail = try await photoAnalysisThumbnails.prepare(asset: asset)
+                let nativeResult = try await nativePhotoIntelligence.analyze(
+                    cgImage: thumbnail.cgImage,
+                    orientation: .up,
+                    metadata: NativePhotoIntelligenceMetadata(
+                        sourceIdentifier: asset.id,
+                        isScreenshot: asset.isScreenshot
+                    )
+                )
+                analyzedCount += 1
+
+                if let localDecision = SmartPhotoSelectionPolicy.nativeDecision(
+                    for: asset,
+                    result: nativeResult
+                ) {
+                    decisions[asset.id] = localDecision
+                } else if cloudAnalysisPreference == .enabled,
+                          cloudPhotoAnalysis.isConfigured,
+                          !cloudFailed,
+                          nativeResult.cloudReviewGate.disposition == .eligibleAfterExplicitConsent {
+                    pendingCloudBatch.append((asset, thumbnail.jpegData))
+
+                    if pendingCloudBatch.count == CloudPhotoAnalysisClient.maximumBatchSize {
+                        do {
+                            let reviewed = try await reviewCloudBatch(pendingCloudBatch)
+                            cloudReviewedCount += pendingCloudBatch.count
+                            for decision in reviewed { decisions[decision.id] = decision }
+                            pendingCloudBatch.removeAll(keepingCapacity: false)
+                        } catch is CancellationError {
+                            finishPhotoAnalysisCancellation(generation: generation)
+                            return
+                        } catch {
+                            cloudFailed = true
+                            cloudFailureMessage = "Cloud enhancement wasn't available, so TripReel finished safely on this iPhone."
+                            pendingCloudBatch.removeAll(keepingCapacity: false)
+                        }
+                    }
+                }
+            } catch is CancellationError {
+                finishPhotoAnalysisCancellation(generation: generation)
+                return
+            } catch {
+                // A missing iCloud thumbnail or unsupported image should never
+                // remove a memory. It stays in the film by default.
+                unavailableCount += 1
+            }
+
+            updatePhotoAnalysisProgress(index: index, total: trip.assets.count)
+        }
+
+        guard photoAnalysisGeneration == generation, !Task.isCancelled else {
+            finishPhotoAnalysisCancellation(generation: generation)
+            return
+        }
+
+        if !pendingCloudBatch.isEmpty, !cloudFailed {
+            photoAnalysisStatus = "Reviewing uncertain photos with GPT-5.6 Luna"
+            do {
+                let reviewed = try await reviewCloudBatch(pendingCloudBatch)
+                cloudReviewedCount += pendingCloudBatch.count
+                for decision in reviewed { decisions[decision.id] = decision }
+            } catch is CancellationError {
+                finishPhotoAnalysisCancellation(generation: generation)
+                return
+            } catch {
+                cloudFailureMessage = "Cloud enhancement wasn't available, so TripReel finished safely on this iPhone."
+            }
+            pendingCloudBatch.removeAll(keepingCapacity: false)
+        } else if cloudAnalysisPreference == .enabled, !cloudPhotoAnalysis.isConfigured {
+            cloudFailureMessage = "Cloud enhancement needs a secure service endpoint. TripReel kept this analysis on your iPhone."
+        }
+
+        guard photoAnalysisGeneration == generation, !Task.isCancelled else {
+            finishPhotoAnalysisCancellation(generation: generation)
+            return
+        }
+
+        // Never allow automation to create an empty film. If every image was a
+        // high-confidence utility photo, keep the middle one and let the user
+        // decide in the regular cut flow.
+        var includedAssets = trip.assets.filter { decisions[$0.id] == nil }
+        if includedAssets.isEmpty, !trip.assets.isEmpty {
+            let fallback = trip.assets[trip.assets.count / 2]
+            decisions.removeValue(forKey: fallback.id)
+            includedAssets = [fallback]
+        }
+        guard let selected = trip.replacingAssets(includedAssets) else {
+            finishPhotoAnalysisCancellation(generation: generation)
+            return
+        }
+
+        excludedPhotos = trip.assets.compactMap { decisions[$0.id] }
+        photoAnalysisProgress = 1
+        photoAnalysisStatus = cloudReviewedCount > 0
+            ? "Smart selection complete · \(cloudReviewedCount) cloud reviewed"
+            : "Smart selection complete on this iPhone"
+        isAnalyzingPhotos = false
+        photoAnalysisTask = nil
+
+        if let cloudFailureMessage {
+            libraryErrorMessage = cloudFailureMessage
+        } else if unavailableCount > 0 {
+            libraryErrorMessage = "\(unavailableCount) photo\(unavailableCount == 1 ? " was" : "s were") unavailable for analysis and stayed in your film."
+        }
+
+        _ = SmartPhotoSelectionOutcome(
+            includedAssets: includedAssets,
+            excludedPhotos: excludedPhotos,
+            analyzedCount: analyzedCount,
+            cloudReviewedCount: cloudReviewedCount,
+            unavailableCount: unavailableCount
+        )
+        startBuild(trip: selected)
+    }
+
+    private func reviewCloudBatch(
+        _ batch: [(asset: TripAsset, jpegData: Data)]
+    ) async throws -> [SmartExcludedPhoto] {
+        guard !batch.isEmpty else { return [] }
+        // Local PhotoKit identifiers and filenames are never sent. Ephemeral
+        // per-request IDs are enough to correlate this one in-memory response.
+        let wireItems = batch.enumerated().map { index, item in
+            (id: "p\(index)", asset: item.asset, jpegData: item.jpegData)
+        }
+        let results = try await cloudPhotoAnalysis.analyze(
+            wireItems.map { CloudPhotoAnalysisInput(id: $0.id, jpegData: $0.jpegData) }
+        )
+        let assetsByID = Dictionary(uniqueKeysWithValues: wireItems.map { ($0.id, $0.asset) })
+        return results.compactMap { result in
+            guard let asset = assetsByID[result.id] else { return nil }
+            return SmartPhotoSelectionPolicy.cloudDecision(for: asset, result: result)
+        }
+    }
+
+    private func updatePhotoAnalysisProgress(index: Int, total: Int) {
+        let completed = Double(index + 1)
+        photoAnalysisProgress = total == 0 ? 1 : min(0.92, completed / Double(total) * 0.92)
+        photoAnalysisStatus = "Analyzing \(index + 1) of \(total) on this iPhone"
+    }
+
+    private func finishPhotoAnalysisCancellation(generation: UUID) {
+        guard photoAnalysisGeneration == generation else { return }
+        isAnalyzingPhotos = false
+        photoAnalysisProgress = 0
+        photoAnalysisStatus = "Preparing smart selection"
+        photoAnalysisTask = nil
     }
 
     func scanPhotoLibrary(navigateToResults: Bool) async {
@@ -500,7 +841,8 @@ final class TripReelModel: ObservableObject {
                 id: $0.id,
                 source: .library($0.id),
                 creationDate: $0.creationDate,
-                filename: $0.filename
+                filename: $0.filename,
+                isScreenshot: $0.isScreenshot
             )
         }
         let coordinate = sorted.compactMap(\.coordinate).first
@@ -759,7 +1101,13 @@ final class TripReelModel: ObservableObject {
         }
     }
 
-    private func clearLibraryState(afterAuthorizationChangedTo status: PHAuthorizationStatus) {
+    func clearLibraryState(afterAuthorizationChangedTo status: PHAuthorizationStatus) {
+        cancelPhotoAnalysis()
+        pendingBuildTrip = nil
+        isCloudAnalysisConsentPresented = false
+        cloudConsentIsSettings = false
+        isSmartSelectionReviewPresented = false
+        excludedPhotos = []
         scanGeneration = UUID()
         pendingResultNavigation = false
         scanAgainRequested = false
@@ -903,7 +1251,8 @@ final class TripReelModel: ObservableObject {
                 id: $0.id,
                 source: .library($0.id),
                 creationDate: $0.creationDate,
-                filename: $0.filename
+                filename: $0.filename,
+                isScreenshot: $0.isScreenshot
             )
         }
         let fallbackPlace = detected.centroid == nil
@@ -922,7 +1271,13 @@ final class TripReelModel: ObservableObject {
 
     private static func makePreviewPhotos(from metadata: [PhotoMetadata]) -> [ReelPhoto] {
         let assets = metadata.suffix(6).map {
-            TripAsset(id: $0.id, source: .library($0.id), creationDate: $0.creationDate, filename: $0.filename)
+            TripAsset(
+                id: $0.id,
+                source: .library($0.id),
+                creationDate: $0.creationDate,
+                filename: $0.filename,
+                isScreenshot: $0.isScreenshot
+            )
         }
         return makeReelPhotos(
             from: Trip(

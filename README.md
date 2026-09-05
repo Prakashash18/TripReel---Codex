@@ -4,7 +4,7 @@ TripReel is a native SwiftUI app that turns detected photo trips into controllab
 
 ## Requirements
 
-- Xcode 15 or newer
+- Xcode 16 or newer
 - iOS 17 or newer
 
 ## Run
@@ -13,9 +13,28 @@ Open `TripReel.xcodeproj`, select an iPhone simulator, and run the shared `TripR
 
 On a normal launch, TripReel scans every non-hidden image available under the user's Full or Limited Photos permission (including bursts, synced photos, and Shared Albums), groups trips locally from capture dates and embedded locations, reverse-geocodes one representative coordinate per trip, and loads visible PhotoKit thumbnails on demand. iCloud-backed thumbnails are network-enabled. Limited access can only include the photos selected in Apple's permission UI. “Select photos instead” also works without broad library permission by copying only the chosen files into TripReel's private cache for the current editing session.
 
+Before building a film, Smart Selection runs on the iPhone with Apple Vision. It combines Apple's screenshot subtype, image classification, OCR coverage (recognized text itself is not retained), faces, document segmentation, feature prints, and iOS 18+ aesthetics. Screenshots do not make a photo collection qualify as a trip. High-confidence utility images are moved to a recoverable **More Photos** list and are never deleted; group, scenic, food, people, and uncertain images stay in the film by default.
+
 Trips currently need at least 15 photos across at least 18 hours and two calendar dates. A gap over 48 hours starts a new time window, repeated locations more than 120 km apart form separate destinations, and candidates longer than 45 days are rejected instead of becoming giant false trips. A location seen during at least eight weeks over 90 days is treated as habitual/home and filtered from trip results. The final video-render/save actions remain prototype simulations; the app never deletes originals.
 
 Bundled travel photos are used only before permission is granted and by deterministic UI-test launches using `-qaScreen`.
+
+## Optional GPT-5.6 Luna enhancement
+
+Cloud visual analysis is explicit opt-in and fail-closed. Before the first possible upload, the app explains that some uncertain photos may be sent as reduced 512px JPEG thumbnail copies to TripReel's service and then to OpenAI's `gpt-5.6-luna`. The copies are re-encoded without EXIF, GPS, filenames, or stable PhotoKit identifiers. Known screenshots and sensitive/document-like images are blocked from cloud review. Closing or declining the consent screen means no upload.
+
+TripReel and the reference proxy do not persist thumbnails and discard their in-memory copies after each foreground classification request. The proxy uses OpenAI Responses with `store: false`. This is not the same as Zero Data Retention: under OpenAI's default API controls, API content may be retained in abuse-monitoring logs for up to 30 days, or longer when legally or safety-required. ZDR removes that default storage for eligible organizations, but image inputs flagged by OpenAI's child-safety classifier may still be retained for manual review. API data is not used to train OpenAI models by default unless the organization opts in. The in-app disclosure states this distinction and links to [OpenAI's API data controls](https://developers.openai.com/api/docs/guides/your-data).
+
+The cloud option remains unavailable until both pieces below are configured:
+
+1. The fail-closed reference Worker in [`Backend`](Backend) is deployed at `https://tripreel-visual-analysis.tripreel-prakashash18.workers.dev/v1/analyze`; that public, non-secret endpoint is configured in both app build configurations.
+2. Supply a `CloudPhotoAnalysisAuthorizing` implementation backed by App Attest or a server-issued, short-lived token. Do not embed `OPENAI_API_KEY`, `TRIPREEL_AUTH_TOKEN`, or any long-lived shared secret in the app or an Xcode Cloud environment variable that is compiled into the binary.
+
+The deployed Worker requires authentication, validates every image and model response, disables request logging/storage, caps batches at 12 thumbnails and 256 KiB per thumbnail, and calls exactly `gpt-5.6-luna` with low-detail images, no reasoning, strict structured output, and `store: false`.
+
+For a local Debug smoke test only, set `TRIPREEL_DEVELOPMENT_AUTH_TOKEN` in an unshared Xcode Run environment. It must match the Worker's development bearer token and is read at runtime; it is never available in Release/TestFlight builds. Debug may override `TRIPREEL_PHOTO_ANALYSIS_ENDPOINT` at runtime when testing another deployment. Replace this development bridge with App Attest before enabling cloud analysis in TestFlight.
+
+Before enabling the cloud option for testers, publish [`PRIVACY.md`](PRIVACY.md), use its public URL for App Store Connect, update the App Privacy answers for the deployed data flow, and verify the disclosure against the backend's actual logging and OpenAI retention configuration.
 
 For a physical iPhone, keep the configured Apple Development Team in Signing & Capabilities and make sure the `com.prakashash18.tripreel` bundle identifier belongs to that team.
 
@@ -29,6 +48,13 @@ xcodebuild -project TripReel.xcodeproj \
   -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest' \
   -derivedDataPath /tmp/TripReelTestDerivedData \
   test
+```
+
+Validate the backend without making a network request:
+
+```sh
+cd Backend
+npm test
 ```
 
 Instrument Serif is bundled under the SIL Open Font License; its license is included in `TripReel/Resources/Fonts`.

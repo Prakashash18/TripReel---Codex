@@ -2,7 +2,7 @@ import CoreLocation
 import Foundation
 import Photos
 
-protocol PhotoLibraryServing: AnyObject {
+protocol PhotoLibraryServing: AnyObject, Sendable {
     var onLibraryChange: (@Sendable () -> Void)? { get set }
     func fetchAllPhotos() async -> [PhotoMetadata]
     func fetchPhotos(withLocalIdentifiers identifiers: [String]) async -> [PhotoMetadata]

@@ -30,6 +30,8 @@
 	<string>TripReel uses photo dates and locations on your device to find trips and build your film.</string>
 	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
 	<true/>
+	<key>TRIPREEL_PHOTO_ANALYSIS_ENDPOINT</key>
+	<string>$(TRIPREEL_PHOTO_ANALYSIS_ENDPOINT)</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>InstrumentSerif-Regular.ttf</string>

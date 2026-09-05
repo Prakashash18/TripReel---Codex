@@ -18,7 +18,7 @@ struct FirstWatchScreen: View {
             VStack(spacing: 0) {
                 VStack(spacing: 7) {
                     MetadataText(text: model.tripPlace, color: .white.opacity(0.82))
-                    Text("\(model.tripDates) · the raw cut")
+                    Text("\(model.tripDates) · \(model.excludedPhotos.isEmpty ? "the raw cut" : "smart first cut")")
                         .font(TR.ui(12))
                         .foregroundStyle(.white.opacity(0.52))
                 }
@@ -39,9 +39,33 @@ struct FirstWatchScreen: View {
                         }
                     }
 
-                    Text("Here's the whole trip, uncut.")
+                    Text(model.excludedPhotos.isEmpty ? "Here's the whole trip, uncut." : "Here's your smart first cut.")
                         .font(TR.display(29))
                         .fixedSize(horizontal: false, vertical: true)
+
+                    if let summary = model.smartSelectionSummary {
+                        Button {
+                            model.isSmartSelectionReviewPresented = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "sparkles")
+                                Text(summary)
+                                Spacer()
+                                Text("Review")
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                            .font(TR.ui(12, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.76))
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 11)
+                            .background(.black.opacity(0.30))
+                            .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("smart-selection-review-button")
+                    }
 
                     VStack(spacing: 11) {
                         Button("Refine it") {

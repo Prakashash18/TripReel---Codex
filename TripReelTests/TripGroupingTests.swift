@@ -59,9 +59,9 @@ final class TripGroupingTests: XCTestCase {
     }
 
     func testNoLocationPhotosAttachToNearestDestinationAndScreenshotsRemain() throws {
-        let singapore = photos(prefix: "sg", count: 14, hours: 20, coordinate: .singapore)
+        let singapore = photos(prefix: "sg", count: 15, hours: 20, coordinate: .singapore)
         let tokyoStart = singapore.last!.creationDate!.addingTimeInterval(2 * 60 * 60)
-        let tokyo = photos(prefix: "jp", count: 14, hours: 20, coordinate: .tokyo, start: tokyoStart)
+        let tokyo = photos(prefix: "jp", count: 15, hours: 20, coordinate: .tokyo, start: tokyoStart)
         let nearSingapore = photo(
             id: "sg-screen",
             date: singapore.last!.creationDate!.addingTimeInterval(5 * 60),
@@ -83,6 +83,20 @@ final class TripGroupingTests: XCTestCase {
         let screenshotTrip = try XCTUnwrap(trips.first { $0.photos.contains(where: { $0.id == "sg-screen" }) })
         XCTAssertTrue(screenshotTrip.photos.first(where: { $0.id == "sg-screen" })!.isScreenshot)
         XCTAssertTrue(trips.contains { $0.photos.contains(where: { $0.id == "jp-noloc" }) })
+    }
+
+    func testScreenshotsDoNotMakeAnUndersizedCollectionQualifyAsATrip() {
+        let cameraPhotos = photos(prefix: "camera", count: 14, hours: 20, coordinate: .singapore)
+        let screenshot = photo(
+            id: "order-screen",
+            date: cameraPhotos[7].creationDate!,
+            coordinate: nil,
+            isScreenshot: true
+        )
+
+        XCTAssertTrue(
+            TripDetector.detect(in: cameraPhotos + [screenshot], calendar: utcCalendar).isEmpty
+        )
     }
 
     func testSingleBogusCoordinateDoesNotSplitOrMoveCentroid() throws {
