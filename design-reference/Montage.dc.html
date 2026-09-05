@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap">
+<style>
+@keyframes trFade{0%{opacity:0}2%{opacity:1}16.6%{opacity:1}20%{opacity:0}100%{opacity:0}}
+@keyframes trPan{0%{transform:scale(1.02) translate3d(0,0,0)}100%{transform:scale(1.14) translate3d(-1.5%,-1%,0)}}
+</style>
+</helmet>
+<div style="position:absolute;inset:0;overflow:hidden;background:#0d0906">
+  <div style="position:absolute;inset:0;opacity:0;animation:trFade 13.2s linear infinite,trPan 13.2s linear infinite;animation-delay:0s,0s;background:repeating-linear-gradient(128deg,rgba(255,255,255,.05) 0 9px,rgba(0,0,0,0) 9px 18px),linear-gradient(155deg,#8a5a2e,#2c1810)"><span style="position:absolute;left:18px;bottom:18px;font:500 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;color:rgba(255,255,255,.42)">MY KHE BEACH</span></div>
+  <div style="position:absolute;inset:0;opacity:0;animation:trFade 13.2s linear infinite,trPan 13.2s linear infinite;animation-delay:2.2s,2.2s;background:repeating-linear-gradient(128deg,rgba(255,255,255,.05) 0 9px,rgba(0,0,0,0) 9px 18px),linear-gradient(200deg,#3e5c63,#111d22)"><span style="position:absolute;left:18px;bottom:18px;font:500 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;color:rgba(255,255,255,.42)">STREET FOOD, 8PM</span></div>
+  <div style="position:absolute;inset:0;opacity:0;animation:trFade 13.2s linear infinite,trPan 13.2s linear infinite;animation-delay:4.4s,4.4s;background:repeating-linear-gradient(128deg,rgba(255,255,255,.05) 0 9px,rgba(0,0,0,0) 9px 18px),linear-gradient(140deg,#a8703a,#33200f)"><span style="position:absolute;left:18px;bottom:18px;font:500 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;color:rgba(255,255,255,.42)">GOLDEN BRIDGE</span></div>
+  <div style="position:absolute;inset:0;opacity:0;animation:trFade 13.2s linear infinite,trPan 13.2s linear infinite;animation-delay:6.6s,6.6s;background:repeating-linear-gradient(128deg,rgba(255,255,255,.05) 0 9px,rgba(0,0,0,0) 9px 18px),linear-gradient(170deg,#6b7a42,#1a2012)"><span style="position:absolute;left:18px;bottom:18px;font:500 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;color:rgba(255,255,255,.42)">HOI AN LANES</span></div>
+  <div style="position:absolute;inset:0;opacity:0;animation:trFade 13.2s linear infinite,trPan 13.2s linear infinite;animation-delay:8.8s,8.8s;background:repeating-linear-gradient(128deg,rgba(255,255,255,.05) 0 9px,rgba(0,0,0,0) 9px 18px),linear-gradient(190deg,#8e4550,#22111a)"><span style="position:absolute;left:18px;bottom:18px;font:500 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;color:rgba(255,255,255,.42)">NIGHT MARKET</span></div>
+  <div style="position:absolute;inset:0;opacity:0;animation:trFade 13.2s linear infinite,trPan 13.2s linear infinite;animation-delay:11s,11s;background:repeating-linear-gradient(128deg,rgba(255,255,255,.05) 0 9px,rgba(0,0,0,0) 9px 18px),linear-gradient(160deg,#2f4a6b,#0f1824)"><span style="position:absolute;left:18px;bottom:18px;font:500 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;color:rgba(255,255,255,.42)">HAN RIVER BOAT</span></div>
+  <sc-if value="{{ dim }}">
+    <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,6,3,.72) 0%,rgba(10,6,3,.45) 38%,rgba(10,6,3,.86) 100%)"></div>
+  </sc-if>
+  <sc-if value="{{ watermark }}">
+    <div style="position:absolute;right:14px;top:14px;padding:6px 10px;border-radius:6px;background:rgba(0,0,0,.4);font:600 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:.06em;color:rgba(255,255,255,.85)">TripReel</div>
+  </sc-if>
+  <div style="position:absolute;inset:0;pointer-events:none;background:radial-gradient(120% 90% at 50% 50%,rgba(0,0,0,0) 45%,rgba(0,0,0,.35) 100%)"></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:320,&quot;height&quot;:480},&quot;dim&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;watermark&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}"></script>
+</body>
+</html>

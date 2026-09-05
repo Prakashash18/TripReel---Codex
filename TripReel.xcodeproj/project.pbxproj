@@ -1,0 +1,622 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		09FCA813CC6F66FA7CF72563 /* SharedViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = D41FD1CB452EA664AADCA413 /* SharedViews.swift */; };
+		16775CE8921A1C975E6AB0C8 /* TripReelModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1234F0F1E044033AC9B1F9CB /* TripReelModel.swift */; };
+		195D37ECB1E25C2B9AFBE5B7 /* EditingScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AC88EC76075854F8A3C00D6 /* EditingScreens.swift */; };
+		1D4F9B6D48EC16BACEB005A5 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6209A73B0A254D6C91443085 /* Foundation.framework */; };
+		2745219E557DFC9CE415B9A2 /* TripReelFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF8BE19CB5B567E0BE9E6033 /* TripReelFlowUITests.swift */; };
+		33380C6E52378BFD210EC3E3 /* InstrumentSerif-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AC2C40812DCDFAB14912FCF1 /* InstrumentSerif-Italic.ttf */; };
+		641C090014F425E519FA624E /* TripReelTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B91C5921938D47CF8CB970B /* TripReelTheme.swift */; };
+		840039E011EBE64B2532C431 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6209A73B0A254D6C91443085 /* Foundation.framework */; };
+		8B3A7AAAB7EFDFF37E759D69 /* TripReelApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BD11D68AE9E5E34227B2377 /* TripReelApp.swift */; };
+		987A69DE7315FB5F15511F0F /* InstrumentSerif-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 225AE85EF2AEBAFAE4B4B1DE /* InstrumentSerif-Regular.ttf */; };
+		AEDE992148CBCD983E5A2E0D /* TripReelModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB0BA881FA7AA6E32CDC6B49 /* TripReelModelTests.swift */; };
+		BB6F2596D9843E277F89C91B /* ExportScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1167D34469AD988E42041C2 /* ExportScreens.swift */; };
+		C9D0F1289B20FADB9DB67E61 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BBBC639C252A8BEE12DE838 /* RootView.swift */; };
+		CDF795B2706B033117CAF886 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6209A73B0A254D6C91443085 /* Foundation.framework */; };
+		DA237CD16DB7147A8148D68A /* OnboardingScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CF9079ACB85C5B013FADE35 /* OnboardingScreens.swift */; };
+		F4EC6F0DA062D583830C079C /* TripScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = D48441AB3986DB547EE11DE8 /* TripScreens.swift */; };
+		F981C694E15C607C1FFACC98 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AF9F0013E463BF2230F5B988 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B97D7B8E09C512ED801BC3A5 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6332735E1A4FFF79C0D1C653 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6A2CB68010DB7B899382E27B;
+			remoteInfo = TripReel;
+		};
+		F3AC67F5E4E65D493DE5ABC2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6332735E1A4FFF79C0D1C653 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6A2CB68010DB7B899382E27B;
+			remoteInfo = TripReel;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		00F6BAEE2C5DBF8EB5C3CDBD /* TripReelTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripReelTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		1234F0F1E044033AC9B1F9CB /* TripReelModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelModel.swift; path = Models/TripReelModel.swift; sourceTree = "<group>"; };
+		1CF9079ACB85C5B013FADE35 /* OnboardingScreens.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = OnboardingScreens.swift; path = Screens/OnboardingScreens.swift; sourceTree = "<group>"; };
+		225AE85EF2AEBAFAE4B4B1DE /* InstrumentSerif-Regular.ttf */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; name = "InstrumentSerif-Regular.ttf"; path = "Resources/Fonts/InstrumentSerif-Regular.ttf"; sourceTree = "<group>"; };
+		2AC88EC76075854F8A3C00D6 /* EditingScreens.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EditingScreens.swift; path = Screens/EditingScreens.swift; sourceTree = "<group>"; };
+		54382A48C98432BEBF7EDCA3 /* OFL-InstrumentSerif.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = "OFL-InstrumentSerif.txt"; path = "Resources/Fonts/OFL-InstrumentSerif.txt"; sourceTree = "<group>"; };
+		5BD11D68AE9E5E34227B2377 /* TripReelApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelApp.swift; path = App/TripReelApp.swift; sourceTree = "<group>"; };
+		6209A73B0A254D6C91443085 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS14.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		70BD73E1F33139D6E683D00B /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = Resources/Info.plist; sourceTree = "<group>"; };
+		7BBBC639C252A8BEE12DE838 /* RootView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RootView.swift; path = App/RootView.swift; sourceTree = "<group>"; };
+		8062C3E0948EA837E35775A0 /* TripReel.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TripReel.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9B91C5921938D47CF8CB970B /* TripReelTheme.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelTheme.swift; path = DesignSystem/TripReelTheme.swift; sourceTree = "<group>"; };
+		AC2C40812DCDFAB14912FCF1 /* InstrumentSerif-Italic.ttf */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; name = "InstrumentSerif-Italic.ttf"; path = "Resources/Fonts/InstrumentSerif-Italic.ttf"; sourceTree = "<group>"; };
+		AF9F0013E463BF2230F5B988 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = Resources/Assets.xcassets; sourceTree = "<group>"; };
+		BF8BE19CB5B567E0BE9E6033 /* TripReelFlowUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TripReelFlowUITests.swift; sourceTree = "<group>"; };
+		D41FD1CB452EA664AADCA413 /* SharedViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SharedViews.swift; path = Components/SharedViews.swift; sourceTree = "<group>"; };
+		D48441AB3986DB547EE11DE8 /* TripScreens.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripScreens.swift; path = Screens/TripScreens.swift; sourceTree = "<group>"; };
+		DB0BA881FA7AA6E32CDC6B49 /* TripReelModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TripReelModelTests.swift; sourceTree = "<group>"; };
+		EB3EFBA44D62A391191E64C7 /* TripReelUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripReelUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F1167D34469AD988E42041C2 /* ExportScreens.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExportScreens.swift; path = Screens/ExportScreens.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		965CCA669FBCE1C102611DD3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				840039E011EBE64B2532C431 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D3CF6355705FDC1DF4F9FA9F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CDF795B2706B033117CAF886 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DD0268A2F0377CE59ACAC0FF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1D4F9B6D48EC16BACEB005A5 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		072DD6E564F881BC20B0CC0D /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				28E50DC634D64D4991CE85AA /* iOS */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		0DF11E31D221305E9B715D09 = {
+			isa = PBXGroup;
+			children = (
+				6638A6ADEA0EED67D28F6E58 /* Products */,
+				072DD6E564F881BC20B0CC0D /* Frameworks */,
+				786420F5CD06CF02E21140C2 /* TripReel */,
+				4B2A58A52425A9E0391D13B7 /* TripReelTests */,
+				8AA99579697BC95D7958209D /* TripReelUITests */,
+			);
+			sourceTree = "<group>";
+		};
+		28E50DC634D64D4991CE85AA /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				6209A73B0A254D6C91443085 /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
+		4B2A58A52425A9E0391D13B7 /* TripReelTests */ = {
+			isa = PBXGroup;
+			children = (
+				DB0BA881FA7AA6E32CDC6B49 /* TripReelModelTests.swift */,
+			);
+			path = TripReelTests;
+			sourceTree = "<group>";
+		};
+		6638A6ADEA0EED67D28F6E58 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				8062C3E0948EA837E35775A0 /* TripReel.app */,
+				00F6BAEE2C5DBF8EB5C3CDBD /* TripReelTests.xctest */,
+				EB3EFBA44D62A391191E64C7 /* TripReelUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		786420F5CD06CF02E21140C2 /* TripReel */ = {
+			isa = PBXGroup;
+			children = (
+				7BBBC639C252A8BEE12DE838 /* RootView.swift */,
+				5BD11D68AE9E5E34227B2377 /* TripReelApp.swift */,
+				D41FD1CB452EA664AADCA413 /* SharedViews.swift */,
+				9B91C5921938D47CF8CB970B /* TripReelTheme.swift */,
+				1234F0F1E044033AC9B1F9CB /* TripReelModel.swift */,
+				2AC88EC76075854F8A3C00D6 /* EditingScreens.swift */,
+				F1167D34469AD988E42041C2 /* ExportScreens.swift */,
+				1CF9079ACB85C5B013FADE35 /* OnboardingScreens.swift */,
+				D48441AB3986DB547EE11DE8 /* TripScreens.swift */,
+				AF9F0013E463BF2230F5B988 /* Assets.xcassets */,
+				225AE85EF2AEBAFAE4B4B1DE /* InstrumentSerif-Regular.ttf */,
+				AC2C40812DCDFAB14912FCF1 /* InstrumentSerif-Italic.ttf */,
+				70BD73E1F33139D6E683D00B /* Info.plist */,
+				54382A48C98432BEBF7EDCA3 /* OFL-InstrumentSerif.txt */,
+			);
+			path = TripReel;
+			sourceTree = "<group>";
+		};
+		8AA99579697BC95D7958209D /* TripReelUITests */ = {
+			isa = PBXGroup;
+			children = (
+				BF8BE19CB5B567E0BE9E6033 /* TripReelFlowUITests.swift */,
+			);
+			path = TripReelUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		6A2CB68010DB7B899382E27B /* TripReel */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 23087B2BAC3071FE92F2D3CA /* Build configuration list for PBXNativeTarget "TripReel" */;
+			buildPhases = (
+				FFC16EE02B812B351B3712EE /* Sources */,
+				965CCA669FBCE1C102611DD3 /* Frameworks */,
+				828492D8AD22A7C0C6C00085 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TripReel;
+			productName = TripReel;
+			productReference = 8062C3E0948EA837E35775A0 /* TripReel.app */;
+			productType = "com.apple.product-type.application";
+		};
+		BC1F7D86E2C23081FFFECE17 /* TripReelTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A4396ED0FC0A801B10C3AC3C /* Build configuration list for PBXNativeTarget "TripReelTests" */;
+			buildPhases = (
+				E18F3AB448879D3A4D238338 /* Sources */,
+				DD0268A2F0377CE59ACAC0FF /* Frameworks */,
+				5A04CA602EF139BF958647C6 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				6E8A63354CA709323A523386 /* PBXTargetDependency */,
+			);
+			name = TripReelTests;
+			productName = TripReelTests;
+			productReference = 00F6BAEE2C5DBF8EB5C3CDBD /* TripReelTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		F52A130C0FDD3FBF1FCACC47 /* TripReelUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C386C96DC4347185D4D8A197 /* Build configuration list for PBXNativeTarget "TripReelUITests" */;
+			buildPhases = (
+				807C869D258027E92377809F /* Sources */,
+				D3CF6355705FDC1DF4F9FA9F /* Frameworks */,
+				6478C827BD7EE41133FC22F2 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				BE6359101CB80CDEFF039821 /* PBXTargetDependency */,
+			);
+			name = TripReelUITests;
+			productName = TripReelUITests;
+			productReference = EB3EFBA44D62A391191E64C7 /* TripReelUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		6332735E1A4FFF79C0D1C653 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+			};
+			buildConfigurationList = F7A50E22CA254749FC06ACB4 /* Build configuration list for PBXProject "TripReel" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 0DF11E31D221305E9B715D09;
+			productRefGroup = 6638A6ADEA0EED67D28F6E58 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				6A2CB68010DB7B899382E27B /* TripReel */,
+				BC1F7D86E2C23081FFFECE17 /* TripReelTests */,
+				F52A130C0FDD3FBF1FCACC47 /* TripReelUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		5A04CA602EF139BF958647C6 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6478C827BD7EE41133FC22F2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		828492D8AD22A7C0C6C00085 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F981C694E15C607C1FFACC98 /* Assets.xcassets in Resources */,
+				987A69DE7315FB5F15511F0F /* InstrumentSerif-Regular.ttf in Resources */,
+				33380C6E52378BFD210EC3E3 /* InstrumentSerif-Italic.ttf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		807C869D258027E92377809F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2745219E557DFC9CE415B9A2 /* TripReelFlowUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E18F3AB448879D3A4D238338 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AEDE992148CBCD983E5A2E0D /* TripReelModelTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FFC16EE02B812B351B3712EE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C9D0F1289B20FADB9DB67E61 /* RootView.swift in Sources */,
+				8B3A7AAAB7EFDFF37E759D69 /* TripReelApp.swift in Sources */,
+				09FCA813CC6F66FA7CF72563 /* SharedViews.swift in Sources */,
+				641C090014F425E519FA624E /* TripReelTheme.swift in Sources */,
+				16775CE8921A1C975E6AB0C8 /* TripReelModel.swift in Sources */,
+				195D37ECB1E25C2B9AFBE5B7 /* EditingScreens.swift in Sources */,
+				BB6F2596D9843E277F89C91B /* ExportScreens.swift in Sources */,
+				DA237CD16DB7147A8148D68A /* OnboardingScreens.swift in Sources */,
+				F4EC6F0DA062D583830C079C /* TripScreens.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		6E8A63354CA709323A523386 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = TripReel;
+			target = 6A2CB68010DB7B899382E27B /* TripReel */;
+			targetProxy = B97D7B8E09C512ED801BC3A5 /* PBXContainerItemProxy */;
+		};
+		BE6359101CB80CDEFF039821 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = TripReel;
+			target = 6A2CB68010DB7B899382E27B /* TripReel */;
+			targetProxy = F3AC67F5E4E65D493DE5ABC2 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		20ACE168F74E63F821AA5F5A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tripreel.uitests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = TripReel;
+			};
+			name = Debug;
+		};
+		3A8F14F51F896C5282118C8A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GT9EAB8826;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TripReel/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.prakashash18.tripreel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		50F6DCD3DE80F4904B4C26FD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tripreel.uitests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = TripReel;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		62CBC56E7968D57578241DDC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		78217A7B39D2C98D7C424B93 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		917341A428D43429A8B894DB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GT9EAB8826;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TripReel/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.prakashash18.tripreel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		B9C241226302A826C8444A28 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tripreel.tests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TripReel.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TripReel";
+			};
+			name = Debug;
+		};
+		E675394D1B4BBC0450CCA406 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tripreel.tests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TripReel.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TripReel";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		23087B2BAC3071FE92F2D3CA /* Build configuration list for PBXNativeTarget "TripReel" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3A8F14F51F896C5282118C8A /* Release */,
+				917341A428D43429A8B894DB /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A4396ED0FC0A801B10C3AC3C /* Build configuration list for PBXNativeTarget "TripReelTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E675394D1B4BBC0450CCA406 /* Release */,
+				B9C241226302A826C8444A28 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C386C96DC4347185D4D8A197 /* Build configuration list for PBXNativeTarget "TripReelUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				50F6DCD3DE80F4904B4C26FD /* Release */,
+				20ACE168F74E63F821AA5F5A /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F7A50E22CA254749FC06ACB4 /* Build configuration list for PBXProject "TripReel" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				62CBC56E7968D57578241DDC /* Debug */,
+				78217A7B39D2C98D7C424B93 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 6332735E1A4FFF79C0D1C653 /* Project object */;
+}

@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap">
+<style>
+body{margin:0;background:#08070a}
+a{color:#f0b45e;text-decoration:none}a:hover{color:#ffd39a}
+@keyframes trRise{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
+@keyframes trFly{0%{opacity:0;transform:translate(var(--fx),var(--fy)) scale(.7) rotate(var(--fr))}55%{opacity:1}100%{opacity:.9;transform:translate(0,0) scale(1) rotate(0deg)}}
+@keyframes trPulse{0%,100%{opacity:.35}50%{opacity:.9}}
+@keyframes trBar{0%{width:0}100%{width:100%}}
+</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:24px;padding:32px 20px 48px;box-sizing:border-box">
+<div style="display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center">
+<span style="font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.18em;color:rgba(255,255,255,.4);white-space:nowrap;flex:none">TRIPREEL · IOS PROTOTYPE</span>
+<span style="font:400 15px/1.4 'Instrument Serif',Georgia,serif;color:rgba(255,255,255,.6)">Tap through it. Swipe the cut screen with your mouse.</span>
+</div>
+
+<x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" hint-size="402px,874px">
+
+<sc-if value="{{ isWelcome }}" hint-placeholder-val="{{ true }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;color:#fdfaf5;font-family:-apple-system,system-ui,sans-serif;background:#150b06">
+  <dc-import name="Montage" dim="{{ true }}" hint-size="100%,100%"></dc-import>
+  <div style="position:relative;flex:1;display:flex;flex-direction:column;justify-content:flex-end;padding:0 30px 46px;gap:30px">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <span style="font:500 12px/1 ui-monospace,Menlo,monospace;letter-spacing:.2em;color:rgba(255,255,255,.62)">TRIPREEL</span>
+      <h1 style="margin:0;font:400 44px/1.03 'Instrument Serif',Georgia,serif;letter-spacing:-.015em;text-wrap:pretty">Turn your trip photos into a film you <span style="font-style:italic">actually control</span></h1>
+    </div>
+    <button onClick="{{ toAccess }}" style="appearance:none;border:none;cursor:pointer;background:#fdfaf5;color:#17110c;font:600 17px/1 -apple-system,system-ui,sans-serif;padding:19px 34px;border-radius:999px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.4)">Get started</button>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isAccess }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;color:#fdfaf5;font-family:-apple-system,system-ui,sans-serif;background:radial-gradient(120% 85% at 12% 6%,#c9922f 0%,rgba(201,146,47,0) 52%),radial-gradient(105% 75% at 88% 22%,#b8541f 0%,rgba(184,84,31,0) 58%),radial-gradient(150% 105% at 50% 104%,#5d1c08 0%,rgba(93,28,8,0) 62%),#150b06">
+  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:96px 30px 0;gap:26px;text-align:center">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:11px">
+      <div style="width:20px;height:16px;border:1.6px solid rgba(255,255,255,.72);border-radius:4px;position:relative"><div style="position:absolute;left:3px;bottom:3px;width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.72)"></div></div>
+      <span style="font:500 13px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.62)">Photo access</span>
+    </div>
+    <h1 style="margin:0;font:400 38px/1.06 'Instrument Serif',Georgia,serif;letter-spacing:-.01em">Let TripReel find your trips</h1>
+    <div style="width:184px;height:232px;border-radius:22px;overflow:hidden;position:relative;box-shadow:0 20px 50px rgba(0,0,0,.5)"><dc-import name="Montage" hint-size="100%,100%"></dc-import></div>
+    <p style="margin:0;max-width:290px;font:400 15px/1.5 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.72);text-wrap:pretty">We look at where and when your photos were taken to find your trips. Nothing leaves your phone.</p>
+  </div>
+  <div style="padding:0 30px 44px;display:flex;flex-direction:column;align-items:center;gap:16px">
+    <button onClick="{{ toTrips }}" style="appearance:none;border:none;cursor:pointer;background:#fdfaf5;color:#17110c;font:600 17px/1 -apple-system,system-ui,sans-serif;padding:19px 34px;border-radius:999px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.4)">Allow photo access</button>
+    <button onClick="{{ toLimited }}" style="appearance:none;border:none;background:none;cursor:pointer;font:500 14px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.55)">Select photos instead</button>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isLimited }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;color:#fdfaf5;font-family:-apple-system,system-ui,sans-serif;background:radial-gradient(120% 85% at 12% 6%,#c9922f 0%,rgba(201,146,47,0) 52%),radial-gradient(150% 105% at 50% 104%,#5d1c08 0%,rgba(93,28,8,0) 62%),#150b06">
+  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:96px 30px 0;gap:24px;text-align:center">
+    <span style="font:500 13px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.62)">Limited access</span>
+    <h1 style="margin:0;font:400 36px/1.07 'Instrument Serif',Georgia,serif;letter-spacing:-.01em">You'll only see the photos you picked</h1>
+    <div style="display:grid;grid-template-columns:repeat(3,58px);gap:7px">
+      <div style="height:58px;border-radius:10px;background:repeating-linear-gradient(128deg,rgba(255,255,255,.06) 0 8px,rgba(0,0,0,0) 8px 16px),linear-gradient(155deg,#8a5a2e,#2c1810)"></div>
+      <div style="height:58px;border-radius:10px;background:repeating-linear-gradient(128deg,rgba(255,255,255,.06) 0 8px,rgba(0,0,0,0) 8px 16px),linear-gradient(200deg,#3e5c63,#111d22)"></div>
+      <div style="height:58px;border-radius:10px;background:repeating-linear-gradient(128deg,rgba(255,255,255,.06) 0 8px,rgba(0,0,0,0) 8px 16px),linear-gradient(140deg,#a8703a,#33200f)"></div>
+      <div style="height:58px;border-radius:10px;border:1px dashed rgba(255,255,255,.22)"></div>
+      <div style="height:58px;border-radius:10px;border:1px dashed rgba(255,255,255,.22)"></div>
+      <div style="height:58px;border-radius:10px;border:1px dashed rgba(255,255,255,.22)"></div>
+    </div>
+    <p style="margin:0;max-width:296px;font:400 15px/1.5 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.72);text-wrap:pretty">TripReel can't look for trips in the rest of your library, so some films will be missing.</p>
+  </div>
+  <div style="padding:0 30px 44px;display:flex;flex-direction:column;align-items:center;gap:16px">
+    <button onClick="{{ toTrips }}" style="appearance:none;border:none;cursor:pointer;background:#fdfaf5;color:#17110c;font:600 17px/1 -apple-system,system-ui,sans-serif;padding:19px 34px;border-radius:999px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.4)">Expand access</button>
+    <button onClick="{{ toTrips }}" style="appearance:none;border:none;background:none;cursor:pointer;font:500 14px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.55)">Continue with 3 photos</button>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isTrips }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;color:#fdfaf5;font-family:-apple-system,system-ui,sans-serif;background:radial-gradient(120% 60% at 15% 0%,#a8712a 0%,rgba(168,113,42,0) 55%),radial-gradient(120% 80% at 90% 12%,#8f3d17 0%,rgba(143,61,23,0) 60%),#120a06">
+  <div style="padding:64px 24px 16px;display:flex;flex-direction:column;gap:6px">
+    <span style="font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.18em;color:rgba(255,255,255,.5)">4 TRIPS FOUND</span>
+    <h1 style="margin:0;font:400 40px/1.05 'Instrument Serif',Georgia,serif;letter-spacing:-.015em">Your trips</h1>
+  </div>
+  <div style="flex:1;overflow:auto;padding:10px 16px 40px;display:flex;flex-direction:column;gap:10px">
+    <sc-for list="{{ trips }}" as="t" hint-placeholder-count="4">
+      <button onClick="{{ t.pick }}" style="appearance:none;cursor:pointer;text-align:left;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.05);border-radius:18px;padding:11px;display:flex;align-items:center;gap:14px;backdrop-filter:blur(18px)" style-hover="background:rgba(255,255,255,.11)">
+        <div style="width:76px;height:76px;border-radius:13px;flex:none;position:relative;overflow:hidden;background:repeating-linear-gradient(128deg,rgba(255,255,255,.05) 0 9px,rgba(0,0,0,0) 9px 18px),{{ t.g }}"><span style="position:absolute;left:6px;bottom:5px;font:500 7px/1 ui-monospace,Menlo,monospace;letter-spacing:.1em;color:rgba(255,255,255,.45)">COVER</span></div>
+        <div style="display:flex;flex-direction:column;gap:5px;min-width:0;flex:1">
+          <span style="font:600 17px/1.15 -apple-system,system-ui,sans-serif;color:#fdfaf5">{{ t.place }}</span>
+          <span style="font:400 13px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.6)">{{ t.dates }}</span>
+          <span style="font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.08em;color:rgba(255,255,255,.4)">{{ t.count }} PHOTOS</span>
+        </div>
+        <span style="font:300 22px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.35);padding-right:6px">›</span>
+      </button>
+    </sc-for>
+    <button onClick="{{ toEmpty }}" style="appearance:none;border:none;background:none;cursor:pointer;font:500 13px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.4);padding:14px 0">See the empty state</button>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isEmpty }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;color:#fdfaf5;font-family:-apple-system,system-ui,sans-serif;background:radial-gradient(120% 60% at 15% 0%,#8a6224 0%,rgba(138,98,36,0) 55%),#120a06">
+  <div style="padding:64px 24px 0"><h1 style="margin:0;font:400 40px/1.05 'Instrument Serif',Georgia,serif;letter-spacing:-.015em">Your trips</h1></div>
+  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:0 34px;text-align:center">
+    <div style="display:flex;gap:6px;align-items:flex-end;opacity:.5">
+      <div style="width:26px;height:26px;border-radius:7px;border:1px dashed rgba(255,255,255,.4)"></div>
+      <div style="width:38px;height:38px;border-radius:9px;border:1px dashed rgba(255,255,255,.4)"></div>
+      <div style="width:26px;height:26px;border-radius:7px;border:1px dashed rgba(255,255,255,.4)"></div>
+    </div>
+    <p style="margin:0;font:400 20px/1.42 'Instrument Serif',Georgia,serif;color:rgba(255,255,255,.85);text-wrap:pretty">We couldn't find any trips yet — trips need at least 15 photos taken in one place over a day or more.</p>
+  </div>
+  <div style="padding:0 30px 44px;display:flex;flex-direction:column;gap:14px">
+    <button onClick="{{ startBuild }}" style="appearance:none;border:none;cursor:pointer;background:#fdfaf5;color:#17110c;font:600 17px/1 -apple-system,system-ui,sans-serif;padding:19px 34px;border-radius:999px;width:100%">Pick photos manually</button>
+    <button onClick="{{ toTrips }}" style="appearance:none;border:none;background:none;cursor:pointer;font:500 14px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.5)">Back to trips</button>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isBuilding }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;color:#fdfaf5;font-family:-apple-system,system-ui,sans-serif;background:radial-gradient(110% 70% at 50% 30%,#b06a1f 0%,rgba(176,106,31,0) 60%),#100803">
+  <div style="position:relative;width:216px;height:290px;margin-bottom:38px">
+    <div style="position:absolute;inset:0;border-radius:20px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.55)"><dc-import name="Montage" hint-size="100%,100%"></dc-import></div>
+    <div style="position:absolute;left:-46px;top:24px;width:62px;height:62px;border-radius:12px;--fx:-70px;--fy:120px;--fr:-18deg;animation:trFly 1.5s ease-out infinite;background:repeating-linear-gradient(128deg,rgba(255,255,255,.06) 0 8px,rgba(0,0,0,0) 8px 16px),linear-gradient(200deg,#3e5c63,#111d22)"></div>
+    <div style="position:absolute;right:-44px;top:118px;width:54px;height:54px;border-radius:12px;--fx:80px;--fy:60px;--fr:14deg;animation:trFly 1.5s ease-out .5s infinite;background:repeating-linear-gradient(128deg,rgba(255,255,255,.06) 0 8px,rgba(0,0,0,0) 8px 16px),linear-gradient(140deg,#a8703a,#33200f)"></div>
+    <div style="position:absolute;left:-30px;bottom:6px;width:48px;height:48px;border-radius:11px;--fx:-60px;--fy:-70px;--fr:22deg;animation:trFly 1.5s ease-out 1s infinite;background:repeating-linear-gradient(128deg,rgba(255,255,255,.06) 0 8px,rgba(0,0,0,0) 8px 16px),linear-gradient(190deg,#8e4550,#22111a)"></div>
+  </div>
+  <span style="font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.2em;color:rgba(255,255,255,.55);animation:trPulse 2s ease-in-out infinite">DA NANG, VIETNAM</span>
+  <h1 style="margin:14px 0 10px;font:400 34px/1.08 'Instrument Serif',Georgia,serif">Building your film</h1>
+  <span style="font:400 15px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.6)">{{ buildCount }} of 84 photos placed</span>
+</div>
+</sc-if>
+
+<sc-if value="{{ isWatch1 }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;color:#fdfaf5;font-family:-apple-system,system-ui,sans-serif;background:#0b0705">
+  <dc-import name="Montage" hint-size="100%,100%"></dc-import>
+  <div style="position:relative;flex:1;display:flex;flex-direction:column;justify-content:space-between;background:linear-gradient(180deg,rgba(10,6,3,.6) 0%,rgba(10,6,3,0) 26%,rgba(10,6,3,0) 46%,rgba(10,6,3,.92) 88%)">
+    <div style="padding:60px 22px 0;display:flex;flex-direction:column;align-items:center;gap:7px">
+      <span style="font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.18em;color:rgba(255,255,255,.8)">DA NANG, VIETNAM</span>
+      <span style="font:400 12px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.5)">Aug 2 – Aug 9, 2026 · the raw cut</span>
+    </div>
+    <div style="padding:0 24px 44px;display:flex;flex-direction:column;gap:20px">
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div style="height:2px;background:rgba(255,255,255,.18);border-radius:2px;overflow:hidden"><div style="height:100%;background:#fdfaf5;animation:trBar 13.2s linear infinite"></div></div>
+        <div style="display:flex;justify-content:space-between;font:500 12px/1 ui-monospace,Menlo,monospace;letter-spacing:.08em;color:rgba(255,255,255,.62)"><span>84 PHOTOS</span><span>1:52</span></div>
+      </div>
+      <h2 style="margin:0;font:400 28px/1.12 'Instrument Serif',Georgia,serif;text-wrap:pretty">Here's the whole trip, uncut.</h2>
+      <div style="display:flex;flex-direction:column;gap:11px">
+        <button onClick="{{ toSwipe }}" style="appearance:none;border:none;cursor:pointer;background:#fdfaf5;color:#17110c;font:600 17px/1 -apple-system,system-ui,sans-serif;padding:19px 34px;border-radius:999px;width:100%">Refine it</button>
+        <button onClick="{{ toExport }}" style="appearance:none;cursor:pointer;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.1);color:#fdfaf5;font:600 16px/1 -apple-system,system-ui,sans-serif;padding:17px 34px;border-radius:999px;width:100%;backdrop-filter:blur(16px)">Looks good, export</button>
+      </div>
+    </div>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isSwipe }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;color:#fdfaf5;font-family:-apple-system,system-ui,sans-serif;background:radial-gradient(90% 50% at 50% 0%,#3a1c08 0%,rgba(58,28,8,0) 60%),#0a0705">
+  <div style="padding:58px 20px 0;display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <span style="font:500 12px/1 ui-monospace,Menlo,monospace;letter-spacing:.1em;color:rgba(255,255,255,.55);width:74px">{{ cutLabel }}</span>
+      <span style="font:600 14px/1 -apple-system,system-ui,sans-serif;color:#fdfaf5">{{ progressText }}</span>
+      <button onClick="{{ doneCutting }}" style="appearance:none;border:none;background:none;cursor:pointer;font:600 13px/1 -apple-system,system-ui,sans-serif;color:#f0b45e;width:92px;text-align:right;white-space:nowrap">Done cutting</button>
+    </div>
+    <div style="height:2px;background:rgba(255,255,255,.12);border-radius:2px;overflow:hidden"><div style="height:100%;background:#f0b45e;transition:width .25s ease;width:{{ swipePct }}%"></div></div>
+  </div>
+
+  <div style="flex:1;position:relative;display:flex;align-items:center;justify-content:center;padding:20px 22px">
+    <div style="position:absolute;left:34px;right:34px;top:36px;bottom:36px;border-radius:24px;background:rgba(255,255,255,.05)"></div>
+    <div ref="{{ cardRef }}" onPointerDown="{{ onDown }}" onPointerMove="{{ onMove }}" onPointerUp="{{ onUp }}" onPointerCancel="{{ onUp }}" style="position:relative;width:100%;height:100%;border-radius:24px;overflow:hidden;cursor:grab;touch-action:none;box-shadow:0 26px 60px rgba(0,0,0,.6);background:#1a120c">
+      <div style="position:absolute;inset:0;background:repeating-linear-gradient(128deg,rgba(255,255,255,.05) 0 10px,rgba(0,0,0,0) 10px 20px),{{ curG }}"></div>
+      <div style="position:absolute;left:0;right:0;bottom:0;padding:16px 18px;display:flex;justify-content:space-between;align-items:flex-end;background:linear-gradient(180deg,rgba(0,0,0,0),rgba(0,0,0,.6))">
+        <span style="font:500 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;color:rgba(255,255,255,.7)">{{ curL }}</span>
+        <span style="font:500 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;color:rgba(255,255,255,.5)">{{ curTime }}</span>
+      </div>
+      <sc-if value="{{ curSimilar }}">
+        <div style="position:absolute;left:14px;top:14px;display:flex;align-items:center;gap:6px;padding:7px 11px;border-radius:999px;background:rgba(12,8,5,.62);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.14)">
+          <div style="width:9px;height:9px;border-radius:2px;border:1.4px solid rgba(255,255,255,.7)"></div>
+          <span style="font:600 11px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.86)">Similar to last shot</span>
+        </div>
+      </sc-if>
+      <div ref="{{ cutStamp }}" style="position:absolute;left:18px;top:60px;opacity:0;padding:9px 16px;border:2px solid #ff6b57;border-radius:10px;transform:rotate(-11deg);font:700 20px/1 -apple-system,system-ui,sans-serif;letter-spacing:.06em;color:#ff6b57;background:rgba(20,6,4,.35)">CUT</div>
+      <div ref="{{ keepStamp }}" style="position:absolute;right:18px;top:60px;opacity:0;padding:9px 16px;border:2px solid #8fdc9b;border-radius:10px;transform:rotate(11deg);font:700 20px/1 -apple-system,system-ui,sans-serif;letter-spacing:.06em;color:#8fdc9b;background:rgba(6,20,10,.35)">KEEP</div>
+    </div>
+  </div>
+
+  <div style="padding:0 30px 40px;display:flex;flex-direction:column;gap:16px;align-items:center">
+    <div style="display:flex;align-items:center;justify-content:center;gap:34px;width:100%">
+      <button onClick="{{ doCut }}" style="appearance:none;cursor:pointer;width:66px;height:66px;border-radius:50%;border:1px solid rgba(255,107,87,.45);background:rgba(255,107,87,.12);color:#ff6b57;font:300 26px/1 -apple-system,system-ui,sans-serif;display:flex;align-items:center;justify-content:center" style-hover="background:rgba(255,107,87,.22)">✕</button>
+      <button onClick="{{ undo }}" style="appearance:none;cursor:pointer;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:rgba(255,255,255,.7);font:600 12px/1 -apple-system,system-ui,sans-serif;padding:11px 15px;border-radius:999px">Undo</button>
+      <button onClick="{{ doKeep }}" style="appearance:none;cursor:pointer;width:66px;height:66px;border-radius:50%;border:1px solid rgba(143,220,155,.45);background:rgba(143,220,155,.12);color:#8fdc9b;font:300 26px/1 -apple-system,system-ui,sans-serif;display:flex;align-items:center;justify-content:center" style-hover="background:rgba(143,220,155,.22)">✓</button>
+    </div>
+    <span style="font:400 12px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.42)">Cutting only removes it from the film.</span>
+  </div>
+
+  <sc-if value="{{ showHint }}">
+    <div onClick="{{ dismissHint }}" style="position:absolute;inset:0;background:rgba(8,5,3,.82);backdrop-filter:blur(6px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:0 40px;text-align:center;cursor:pointer;animation:trRise .4s ease-out">
+      <div style="display:flex;align-items:center;gap:16px;color:rgba(255,255,255,.75);font:500 13px/1 -apple-system,system-ui,sans-serif"><span>← Cut</span><span style="width:1px;height:16px;background:rgba(255,255,255,.2)"></span><span>Keep →</span></div>
+      <h2 style="margin:0;font:400 30px/1.14 'Instrument Serif',Georgia,serif">Swipe left to cut it from the film. Right to keep.</h2>
+      <p style="margin:0;font:400 14px/1.5 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.6)">Nothing is deleted from your phone.</p>
+      <span style="margin-top:8px;font:600 13px/1 -apple-system,system-ui,sans-serif;color:#f0b45e">Tap to start</span>
+    </div>
+  </sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{ isPace }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;color:#fdfaf5;font-family:-apple-system,system-ui,sans-serif;background:radial-gradient(110% 60% at 20% 0%,#a8712a 0%,rgba(168,113,42,0) 58%),radial-gradient(120% 70% at 85% 100%,#7d2f12 0%,rgba(125,47,18,0) 62%),#100803">
+  <div style="padding:60px 26px 0;display:flex;flex-direction:column;gap:8px">
+    <span style="font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.18em;color:rgba(255,255,255,.5)">{{ keptText }} PHOTOS IN THE CUT</span>
+    <h1 style="margin:0;font:400 40px/1.05 'Instrument Serif',Georgia,serif;letter-spacing:-.015em">Set the pace</h1>
+  </div>
+
+  <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-start;gap:30px;padding:34px 26px 0">
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <span style="font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;color:rgba(255,255,255,.42)">LIVE PREVIEW</span>
+      <div style="display:flex;gap:3px;height:78px;border-radius:12px;overflow:hidden">
+        <sc-for list="{{ strip }}" as="st" hint-placeholder-count="8">
+          <div style="height:100%;flex:0 0 auto;transition:width .18s ease;width:{{ st.w }}px;background:repeating-linear-gradient(128deg,rgba(255,255,255,.06) 0 8px,rgba(0,0,0,0) 8px 16px),{{ st.g }}"></div>
+        </sc-for>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <span style="font:400 13px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.55)">{{ perPhotoText }} per photo</span>
+        <span style="font:400 34px/1 'Instrument Serif',Georgia,serif;color:#fdfaf5">{{ durText }}</span>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div ref="{{ sliderRef }}" onPointerDown="{{ padDown }}" onPointerMove="{{ padMove }}" onPointerUp="{{ padUp }}" style="position:relative;height:52px;display:flex;align-items:center;cursor:pointer;touch-action:none">
+        <div style="position:absolute;left:0;right:0;height:6px;border-radius:6px;background:rgba(255,255,255,.14)"></div>
+        <div style="position:absolute;left:0;height:6px;border-radius:6px;background:#f0b45e;width:{{ pacePct }}%"></div>
+        <div style="position:absolute;top:50%;width:34px;height:34px;margin-left:-17px;margin-top:-17px;border-radius:50%;background:#fdfaf5;box-shadow:0 6px 18px rgba(0,0,0,.5);left:{{ pacePct }}%"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font:500 12px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.6)"><span>Slow and cinematic</span><span>Fast and punchy</span></div>
+    </div>
+  </div>
+
+  <div style="padding:0 26px 42px;display:flex;flex-direction:column;gap:14px;align-items:center">
+    <button onClick="{{ toWatch2 }}" style="appearance:none;border:none;cursor:pointer;background:#fdfaf5;color:#17110c;font:600 17px/1 -apple-system,system-ui,sans-serif;padding:19px 34px;border-radius:999px;width:100%">Watch it</button>
+    <button onClick="{{ openAdv }}" style="appearance:none;border:none;background:none;cursor:pointer;font:500 13px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.45)">Advanced · per-photo timing</button>
+  </div>
+
+  <sc-if value="{{ adv }}">
+    <div style="position:absolute;inset:0;background:rgba(6,4,2,.66);display:flex;flex-direction:column;justify-content:flex-end">
+      <div style="background:#1b120b;border-radius:26px 26px 0 0;padding:22px 24px 40px;display:flex;flex-direction:column;gap:16px;border-top:1px solid rgba(255,255,255,.1)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font:600 17px/1 -apple-system,system-ui,sans-serif">Per-photo timing</span>
+          <button onClick="{{ closeAdv }}" style="appearance:none;border:none;background:none;cursor:pointer;font:600 15px/1 -apple-system,system-ui,sans-serif;color:#f0b45e">Done</button>
+        </div>
+        <sc-for list="{{ advRows }}" as="r" hint-placeholder-count="4">
+          <div style="display:flex;align-items:center;gap:14px">
+            <div style="width:44px;height:44px;border-radius:9px;flex:none;background:repeating-linear-gradient(128deg,rgba(255,255,255,.06) 0 8px,rgba(0,0,0,0) 8px 16px),{{ r.g }}"></div>
+            <span style="flex:1;font:500 13px/1 ui-monospace,Menlo,monospace;color:rgba(255,255,255,.6)">{{ r.l }}</span>
+            <span style="font:500 13px/1 ui-monospace,Menlo,monospace;color:#fdfaf5">{{ r.d }}</span>
+          </div>
+        </sc-for>
+        <span style="font:400 12px/1.5 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.42)">Most people never need this. The pace slider sets everything at once.</span>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{ isWatch2 }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;color:#fdfaf5;font-family:-apple-system,system-ui,sans-serif;background:#0b0705">
+  <dc-import name="Montage" hint-size="100%,100%"></dc-import>
+  <div style="position:relative;flex:1;display:flex;flex-direction:column;justify-content:space-between;background:linear-gradient(180deg,rgba(10,6,3,.55) 0%,rgba(10,6,3,0) 24%,rgba(10,6,3,0) 44%,rgba(10,6,3,.93) 86%)">
+    <div style="padding:60px 22px 0;display:flex;flex-direction:column;align-items:center;gap:7px">
+      <span style="font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.18em;color:rgba(255,255,255,.8)">YOUR CUT · DA NANG</span>
+      <span style="font:400 12px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.5)">{{ keptText }} photos · {{ durText }}{{ trackSuffix }}</span>
+    </div>
+    <div style="padding:0 24px 44px;display:flex;flex-direction:column;gap:18px">
+      <div style="height:2px;background:rgba(255,255,255,.18);border-radius:2px;overflow:hidden"><div style="height:100%;background:#fdfaf5;animation:trBar 13.2s linear infinite"></div></div>
+      <h2 style="margin:0;font:400 28px/1.12 'Instrument Serif',Georgia,serif;text-wrap:pretty">{{ cutText }}</h2>
+      <div style="display:flex;gap:8px">
+        <button onClick="{{ openTitles }}" style="flex:1;appearance:none;cursor:pointer;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.08);border-radius:16px;padding:13px 8px;display:flex;flex-direction:column;align-items:center;gap:7px;backdrop-filter:blur(16px)" style-hover="background:rgba(255,255,255,.16)">
+          <span style="font:400 17px/1 'Instrument Serif',Georgia,serif;color:#fdfaf5">Aa</span>
+          <span style="font:600 11px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.8)">Titles</span>
+          <span style="font:500 9px/1 ui-monospace,Menlo,monospace;letter-spacing:.08em;color:{{ titlesTint }}">{{ titlesBadge }}</span>
+        </button>
+        <button onClick="{{ openMusic }}" style="flex:1;appearance:none;cursor:pointer;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.08);border-radius:16px;padding:13px 8px;display:flex;flex-direction:column;align-items:center;gap:7px;backdrop-filter:blur(16px)" style-hover="background:rgba(255,255,255,.16)">
+          <span style="font:400 15px/1 -apple-system,system-ui,sans-serif;color:#fdfaf5">♪</span>
+          <span style="font:600 11px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.8)">Music</span>
+          <span style="font:500 9px/1 ui-monospace,Menlo,monospace;letter-spacing:.08em;color:{{ musicTint }}">{{ musicBadge }}</span>
+        </button>
+        <button onClick="{{ toPace }}" style="flex:1;appearance:none;cursor:pointer;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.08);border-radius:16px;padding:13px 8px;display:flex;flex-direction:column;align-items:center;gap:7px;backdrop-filter:blur(16px)" style-hover="background:rgba(255,255,255,.16)">
+          <span style="font:400 15px/1 -apple-system,system-ui,sans-serif;color:#fdfaf5">⇥</span>
+          <span style="font:600 11px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.8)">Pace</span>
+          <span style="font:500 9px/1 ui-monospace,Menlo,monospace;letter-spacing:.08em;color:rgba(255,255,255,.45)">{{ perPhotoText }}</span>
+        </button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:11px">
+        <button onClick="{{ toExport }}" style="appearance:none;border:none;cursor:pointer;background:#fdfaf5;color:#17110c;font:600 17px/1 -apple-system,system-ui,sans-serif;padding:19px 34px;border-radius:999px;width:100%">Export</button>
+        <button onClick="{{ toSwipe }}" style="appearance:none;border:none;background:none;cursor:pointer;font:500 14px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.5);padding:2px">Back to cutting</button>
+      </div>
+    </div>
+  </div>
+
+  <sc-if value="{{ sheetTitles }}">
+    <div style="position:absolute;inset:0;background:rgba(6,4,2,.7);display:flex;flex-direction:column;justify-content:flex-end">
+      <div onClick="{{ closeSheet }}" style="flex:1;cursor:pointer"></div>
+      <div style="background:#170f09;border-top:1px solid rgba(255,255,255,.1);border-radius:26px 26px 0 0;padding:20px 22px 38px;display:flex;flex-direction:column;gap:18px;animation:trRise .28s ease-out;max-height:82%;overflow:auto">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <span style="font:400 26px/1 'Instrument Serif',Georgia,serif;color:#fdfaf5">Titles</span>
+          <button onClick="{{ closeSheet }}" style="appearance:none;border:none;background:none;cursor:pointer;font:600 15px/1 -apple-system,system-ui,sans-serif;color:#f0b45e">Done</button>
+        </div>
+        <span style="font:400 13px/1.45 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.55)">Three cards, filled in from your photos. Tap one to add or remove it.</span>
+        <div style="display:flex;flex-direction:column;gap:11px">
+          <sc-for list="{{ titleCards }}" as="tc" hint-placeholder-count="3">
+            <button onClick="{{ tc.toggle }}" style="appearance:none;cursor:pointer;text-align:left;padding:0;border-radius:16px;overflow:hidden;border:1px solid {{ tc.border }};background:{{ tc.bg }};display:flex;align-items:stretch;gap:0">
+              <div style="width:96px;flex:none;position:relative;display:flex;align-items:{{ tc.align }};justify-content:center;padding:12px 8px;background:repeating-linear-gradient(128deg,rgba(255,255,255,.05) 0 9px,rgba(0,0,0,0) 9px 18px),{{ tc.g }}">
+                <span style="font:400 {{ tc.previewSize }} 'Instrument Serif',Georgia,serif;color:#fdfaf5;text-align:center;line-height:1.1;text-shadow:0 1px 6px rgba(0,0,0,.6)">{{ tc.text }}</span>
+              </div>
+              <div style="flex:1;padding:13px 15px;display:flex;flex-direction:column;gap:5px;justify-content:center">
+                <span style="font:600 15px/1 -apple-system,system-ui,sans-serif;color:#fdfaf5">{{ tc.name }}</span>
+                <span style="font:400 12px/1.4 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.55)">{{ tc.where }}</span>
+                <span style="font:500 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.1em;color:{{ tc.tint }}">{{ tc.state }}</span>
+              </div>
+            </button>
+          </sc-for>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:9px;padding-top:2px">
+          <span style="font:500 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)">OPENING TITLE TEXT</span>
+          <input value="{{ titleText }}" onChange="{{ setTitleText }}" placeholder="Da Nang" style="width:100%;box-sizing:border-box;appearance:none;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);border-radius:13px;padding:14px 15px;font:400 20px/1.2 'Instrument Serif',Georgia,serif;color:#fdfaf5;outline:none">
+          <span style="font:400 12px/1.4 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.4)">Type is set by the film. No font or colour to pick.</span>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ sheetMusic }}">
+    <div style="position:absolute;inset:0;background:rgba(6,4,2,.7);display:flex;flex-direction:column;justify-content:flex-end">
+      <div onClick="{{ closeSheet }}" style="flex:1;cursor:pointer"></div>
+      <div style="background:#170f09;border-top:1px solid rgba(255,255,255,.1);border-radius:26px 26px 0 0;padding:20px 22px 38px;display:flex;flex-direction:column;gap:16px;animation:trRise .28s ease-out;max-height:82%;overflow:auto">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <span style="font:400 26px/1 'Instrument Serif',Georgia,serif;color:#fdfaf5">Music</span>
+          <button onClick="{{ closeSheet }}" style="appearance:none;border:none;background:none;cursor:pointer;font:600 15px/1 -apple-system,system-ui,sans-serif;color:#f0b45e">Done</button>
+        </div>
+        <span style="font:400 13px/1.45 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.55)">Matched to your {{ perPhotoText }} pace. Picking a track re-cuts the film to its beats.</span>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <sc-for list="{{ tracks }}" as="tk" hint-placeholder-count="5">
+            <button onClick="{{ tk.pick }}" style="appearance:none;cursor:pointer;text-align:left;border:1px solid {{ tk.border }};background:{{ tk.bg }};border-radius:15px;padding:13px 15px;display:flex;align-items:center;gap:13px">
+              <span style="width:36px;height:36px;flex:none;border-radius:9px;display:flex;align-items:center;justify-content:center;background:{{ tk.swatch }};font:400 14px/1 -apple-system,system-ui,sans-serif;color:#17110c">{{ tk.icon }}</span>
+              <span style="flex:1;display:flex;flex-direction:column;gap:4px;min-width:0">
+                <span style="font:600 15px/1 -apple-system,system-ui,sans-serif;color:#fdfaf5">{{ tk.name }}</span>
+                <span style="font:400 12px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.55)">{{ tk.mood }}</span>
+              </span>
+              <span style="display:flex;align-items:flex-end;gap:2px;height:22px;flex:none">
+                <sc-for list="{{ tk.bars }}" as="bh" hint-placeholder-count="5">
+                  <span style="width:2px;border-radius:2px;background:{{ tk.wave }};height:{{ bh }}px"></span>
+                </sc-for>
+              </span>
+              <span style="font:500 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.08em;color:rgba(255,255,255,.42);flex:none;width:34px;text-align:right">{{ tk.bpm }}</span>
+            </button>
+          </sc-for>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 2px 0;border-top:1px solid rgba(255,255,255,.08)">
+          <span style="display:flex;flex-direction:column;gap:4px">
+            <span style="font:600 14px/1 -apple-system,system-ui,sans-serif;color:#fdfaf5">Cut to the beat</span>
+            <span style="font:400 12px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.5)">{{ beatNote }}</span>
+          </span>
+          <button onClick="{{ toggleBeat }}" style="appearance:none;border:none;cursor:pointer;width:50px;height:30px;border-radius:999px;padding:3px;display:flex;justify-content:{{ beatJustify }};background:{{ beatBg }};transition:background .18s ease">
+            <span style="width:24px;height:24px;border-radius:50%;background:#fdfaf5;box-shadow:0 2px 6px rgba(0,0,0,.4)"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{ isExport }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;color:#fdfaf5;font-family:-apple-system,system-ui,sans-serif;background:radial-gradient(110% 55% at 18% 0%,#a8712a 0%,rgba(168,113,42,0) 58%),#0f0803">
+  <div style="padding:60px 26px 0;display:flex;flex-direction:column;gap:8px">
+    <span style="font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.18em;color:rgba(255,255,255,.5)">{{ keptText }} PHOTOS · {{ durText }}</span>
+    <h1 style="margin:0;font:400 38px/1.05 'Instrument Serif',Georgia,serif;letter-spacing:-.015em">Export your film</h1>
+  </div>
+  <div style="flex:1;padding:26px;display:flex;flex-direction:column;gap:14px;justify-content:center">
+    <button onClick="{{ startRender }}" style="appearance:none;cursor:pointer;text-align:left;padding:14px;border-radius:20px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);display:flex;gap:14px;align-items:center" style-hover="background:rgba(255,255,255,.12)">
+      <div style="width:74px;height:96px;border-radius:12px;overflow:hidden;position:relative;flex:none"><dc-import name="Montage" watermark="{{ wmStd }}" hint-size="100%,100%"></dc-import></div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex:1">
+        <span style="font:600 18px/1 -apple-system,system-ui,sans-serif;color:#fdfaf5">Standard</span>
+        <span style="font:400 13px/1.4 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.62)">720p · watermarked</span>
+        <span style="font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.1em;color:#8fdc9b">FREE</span>
+      </div>
+    </button>
+    <button onClick="{{ toPaywall }}" style="appearance:none;cursor:pointer;text-align:left;padding:14px;border-radius:20px;border:1px solid rgba(240,180,94,.4);background:linear-gradient(140deg,rgba(240,180,94,.16),rgba(240,180,94,.04));display:flex;gap:14px;align-items:center" style-hover="border-color:rgba(240,180,94,.7)">
+      <div style="width:74px;height:96px;border-radius:12px;overflow:hidden;position:relative;flex:none"><dc-import name="Montage" hint-size="100%,100%"></dc-import></div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex:1">
+        <span style="font:600 18px/1 -apple-system,system-ui,sans-serif;color:#fdfaf5">HD</span>
+        <span style="font:400 13px/1.4 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.62)">1080p · no watermark</span>
+        <span style="font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.1em;color:#f0b45e">PRO</span>
+      </div>
+      <span style="font:300 22px/1 -apple-system,system-ui,sans-serif;color:rgba(240,180,94,.7);padding-right:6px">›</span>
+    </button>
+    <button onClick="{{ openProject }}" style="appearance:none;cursor:pointer;text-align:left;padding:14px;border-radius:20px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);display:flex;gap:14px;align-items:center" style-hover="background:rgba(255,255,255,.1)">
+      <div style="width:74px;height:96px;border-radius:12px;flex:none;display:flex;flex-direction:column;gap:3px;padding:9px 8px;box-sizing:border-box;justify-content:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1)">
+        <span style="height:9px;border-radius:2px;background:linear-gradient(155deg,#8a5a2e,#2c1810)"></span>
+        <span style="height:9px;border-radius:2px;background:linear-gradient(200deg,#3e5c63,#111d22)"></span>
+        <span style="height:9px;border-radius:2px;background:linear-gradient(140deg,#a8703a,#33200f)"></span>
+        <span style="height:1px;background:rgba(255,255,255,.18);margin:2px 0"></span>
+        <span style="font:500 7px/1 ui-monospace,Menlo,monospace;letter-spacing:.06em;color:rgba(255,255,255,.45)">TIMELINE</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex:1">
+        <span style="font:600 18px/1 -apple-system,system-ui,sans-serif;color:#fdfaf5">Project file</span>
+        <span style="font:400 13px/1.4 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.62)">Keep editing in CapCut, Premiere or Final Cut</span>
+        <span style="font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.1em;color:#8fdc9b">FREE</span>
+      </div>
+      <span style="font:300 22px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.35);padding-right:6px">›</span>
+    </button>
+    <span style="font:400 12px/1.5 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.42);text-align:center;padding:0 14px">The watermark sits in the top-right corner, as shown.</span>
+  </div>
+  <div style="padding:0 26px 42px"><button onClick="{{ toWatch2 }}" style="appearance:none;border:none;background:none;cursor:pointer;font:500 14px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.5);width:100%">Back</button></div>
+
+  <sc-if value="{{ sheetProject }}">
+    <div style="position:absolute;inset:0;background:rgba(6,4,2,.72);display:flex;flex-direction:column;justify-content:flex-end">
+      <div onClick="{{ closeSheet }}" style="flex:1;cursor:pointer"></div>
+      <div style="background:#170f09;border-top:1px solid rgba(255,255,255,.1);border-radius:26px 26px 0 0;padding:20px 22px 38px;display:flex;flex-direction:column;gap:16px;animation:trRise .28s ease-out;max-height:86%;overflow:auto">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <span style="font:400 26px/1 'Instrument Serif',Georgia,serif;color:#fdfaf5">Project file</span>
+          <button onClick="{{ closeSheet }}" style="appearance:none;border:none;background:none;cursor:pointer;font:600 15px/1 -apple-system,system-ui,sans-serif;color:#f0b45e">Close</button>
+        </div>
+        <span style="font:400 13px/1.45 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.55)">Your cut, order and timing travel with the file. Full-resolution photos come along — nothing is re-compressed.</span>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <sc-for list="{{ formats }}" as="f" hint-placeholder-count="3">
+            <button onClick="{{ f.pick }}" style="appearance:none;cursor:pointer;text-align:left;border:1px solid {{ f.border }};background:{{ f.bg }};border-radius:15px;padding:14px 15px;display:flex;align-items:center;gap:13px">
+              <span style="flex:1;display:flex;flex-direction:column;gap:5px;min-width:0">
+                <span style="font:600 15px/1 -apple-system,system-ui,sans-serif;color:#fdfaf5">{{ f.name }}</span>
+                <span style="font:400 12px/1.4 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.55)">{{ f.apps }}</span>
+              </span>
+              <span style="font:500 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.08em;color:{{ f.tint }};flex:none">{{ f.ext }}</span>
+            </button>
+          </sc-for>
+        </div>
+        <div style="display:flex;gap:11px;padding:13px 14px;border-radius:14px;background:rgba(240,180,94,.09);border:1px solid rgba(240,180,94,.25)">
+          <span style="font:600 13px/1.4 -apple-system,system-ui,sans-serif;color:#f0b45e;flex:none">CapCut</span>
+          <span style="font:400 12px/1.45 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.72)">CapCut can't read timeline files. Choose the photo sequence — it imports in order, and the timing sheet tells you where the cuts go.</span>
+        </div>
+        <button onClick="{{ closeSheet }}" style="appearance:none;border:none;cursor:pointer;background:#fdfaf5;color:#17110c;font:600 16px/1 -apple-system,system-ui,sans-serif;padding:18px;border-radius:999px">{{ exportLabel }}</button>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{ isPaywall }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;color:#fdfaf5;font-family:-apple-system,system-ui,sans-serif;background:#0b0705">
+  <dc-import name="Montage" dim="{{ true }}" watermark="{{ true }}" hint-size="100%,100%"></dc-import>
+  <div style="position:relative;flex:1;display:flex;flex-direction:column;justify-content:flex-end;padding:0 24px 42px;gap:22px">
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <span style="font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.18em;color:rgba(255,255,255,.62)">TRIPREEL PRO</span>
+      <h1 style="margin:0;font:400 36px/1.06 'Instrument Serif',Georgia,serif;letter-spacing:-.01em">Lose the watermark on this film</h1>
+      <p style="margin:0;font:400 14px/1.5 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.68)">Free is 1 film a month, watermarked, 720p. Pro is unlimited films, 1080p, no watermark, and the full music library.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <button onClick="{{ startRender }}" style="appearance:none;cursor:pointer;text-align:left;border:1px solid rgba(240,180,94,.55);background:rgba(240,180,94,.14);border-radius:18px;padding:16px 18px;display:flex;justify-content:space-between;align-items:center">
+        <span style="display:flex;flex-direction:column;gap:4px"><span style="font:600 16px/1 -apple-system,system-ui,sans-serif;color:#fdfaf5">Yearly</span><span style="font:400 12px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.6)">$24.99/yr · 2 months free</span></span>
+        <span style="font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.08em;color:#f0b45e">BEST VALUE</span>
+      </button>
+      <button onClick="{{ startRender }}" style="appearance:none;cursor:pointer;text-align:left;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.07);border-radius:18px;padding:16px 18px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font:600 16px/1 -apple-system,system-ui,sans-serif;color:#fdfaf5">Monthly</span>
+        <span style="font:400 13px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.6)">$2.99/mo</span>
+      </button>
+      <button onClick="{{ startRender }}" style="appearance:none;border:none;background:none;cursor:pointer;font:500 14px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.5);padding:8px">Keep the watermark, export free</button>
+    </div>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isRender }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fdfaf5;font-family:-apple-system,system-ui,sans-serif;background:radial-gradient(100% 60% at 50% 35%,#8a5518 0%,rgba(138,85,24,0) 62%),#0d0703">
+  <div style="width:172px;height:230px;border-radius:18px;overflow:hidden;position:relative;box-shadow:0 22px 50px rgba(0,0,0,.55)"><dc-import name="Montage" hint-size="100%,100%"></dc-import></div>
+  <h1 style="margin:32px 0 8px;font:400 32px/1.08 'Instrument Serif',Georgia,serif">Rendering</h1>
+  <span style="font:500 12px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;color:rgba(255,255,255,.6)">{{ rpctText }}% · {{ etaText }} LEFT</span>
+  <div style="width:236px;height:5px;border-radius:5px;background:rgba(255,255,255,.14);margin-top:22px;overflow:hidden"><div style="height:100%;background:#f0b45e;transition:width .3s linear;width:{{ rpct }}%"></div></div>
+  <button onClick="{{ cancelRender }}" style="appearance:none;border:none;background:none;cursor:pointer;margin-top:26px;font:500 14px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.5)">Cancel</button>
+</div>
+</sc-if>
+
+<sc-if value="{{ isDone }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;color:#fdfaf5;font-family:-apple-system,system-ui,sans-serif;background:radial-gradient(110% 55% at 50% 0%,#a8712a 0%,rgba(168,113,42,0) 58%),#0f0803">
+  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:76px 26px 0;gap:20px">
+    <span style="font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.18em;color:rgba(255,255,255,.55)">DA NANG · {{ durText }}</span>
+    <div style="width:100%;aspect-ratio:9/14;border-radius:22px;overflow:hidden;position:relative;box-shadow:0 26px 60px rgba(0,0,0,.6)"><dc-import name="Montage" watermark="{{ true }}" hint-size="100%,100%"></dc-import></div>
+    <h1 style="margin:0;font:400 30px/1.1 'Instrument Serif',Georgia,serif;text-align:center">Your film is ready</h1>
+  </div>
+  <div style="padding:22px 26px 40px;display:flex;flex-direction:column;gap:11px;align-items:center">
+    <div style="display:flex;gap:10px;width:100%">
+      <button onClick="{{ toCleanup }}" style="flex:1;appearance:none;border:none;cursor:pointer;background:#fdfaf5;color:#17110c;font:600 16px/1 -apple-system,system-ui,sans-serif;padding:18px 10px;border-radius:999px">Save</button>
+      <button onClick="{{ toCleanup }}" style="flex:1;appearance:none;cursor:pointer;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.1);color:#fdfaf5;font:600 16px/1 -apple-system,system-ui,sans-serif;padding:18px 10px;border-radius:999px">Share</button>
+    </div>
+    <button onClick="{{ restart }}" style="appearance:none;border:none;background:none;cursor:pointer;font:500 13px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.45);padding:6px">Make another</button>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isCleanup }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;color:#fdfaf5;font-family:-apple-system,system-ui,sans-serif;background:radial-gradient(110% 55% at 50% 0%,#7d5a2a 0%,rgba(125,90,42,0) 58%),#0d0805">
+  <sc-if value="{{ cleanOffer }}">
+    <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:0 30px;text-align:center">
+      <span style="font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.18em;color:rgba(255,255,255,.5)">SAVED TO CAMERA ROLL</span>
+      <h1 style="margin:0;font:400 32px/1.1 'Instrument Serif',Georgia,serif;text-wrap:pretty">You cut {{ cutCount }} photos from this film. Want to clear them off your phone too?</h1>
+      <p style="margin:0;font:400 14px/1.5 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.6);max-width:290px">They're still in your library. Nothing has been deleted.</p>
+      <div style="display:flex;flex-direction:column;gap:11px;width:100%;padding-top:6px">
+        <button onClick="{{ openGrid }}" style="appearance:none;cursor:pointer;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.1);color:#fdfaf5;font:600 16px/1 -apple-system,system-ui,sans-serif;padding:18px;border-radius:999px">Review cut photos</button>
+        <button onClick="{{ restart }}" style="appearance:none;border:none;background:none;cursor:pointer;font:600 15px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.55);padding:10px">Not now</button>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ cleanGrid }}">
+    <div style="position:absolute;inset:0;display:flex;flex-direction:column">
+      <div style="padding:58px 20px 14px;display:flex;flex-direction:column;gap:6px">
+        <h1 style="margin:0;font:400 28px/1.1 'Instrument Serif',Georgia,serif">Cut photos</h1>
+        <span style="font:400 13px/1.4 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.55)">{{ selSubtitle }}</span>
+      </div>
+      <div style="flex:1;overflow:auto;padding:0 16px 16px;display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:112px;gap:8px;align-content:start">
+        <sc-for list="{{ cutTiles }}" as="c" hint-placeholder-count="12">
+          <button onClick="{{ c.toggle }}" style="appearance:none;border:none;cursor:pointer;position:relative;height:100%;border-radius:11px;overflow:hidden;padding:0;background:repeating-linear-gradient(128deg,rgba(255,255,255,.06) 0 8px,rgba(0,0,0,0) 8px 16px),{{ c.g }}">
+            <span style="position:absolute;right:6px;top:6px;width:22px;height:22px;border-radius:50%;border:1.6px solid rgba(255,255,255,.85);background:{{ c.dot }};display:flex;align-items:center;justify-content:center;font:600 12px/1 -apple-system,system-ui,sans-serif;color:#17110c">{{ c.mark }}</span>
+          </button>
+        </sc-for>
+      </div>
+      <div style="padding:14px 20px 40px;display:flex;flex-direction:column;gap:10px;border-top:1px solid rgba(255,255,255,.08);background:rgba(8,5,3,.6)">
+        <button onClick="{{ noop }}" style="appearance:none;border:none;cursor:pointer;border-radius:999px;padding:18px;font:600 16px/1 -apple-system,system-ui,sans-serif;background:{{ delBg }};color:{{ delFg }}">{{ delText }}</button>
+        <button onClick="{{ restart }}" style="appearance:none;border:none;background:none;cursor:pointer;font:500 14px/1 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.5);padding:4px">Keep them all</button>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</sc-if>
+
+</x-import>
+
+<div style="display:flex;flex-wrap:wrap;gap:7px;justify-content:center;max-width:520px">
+<sc-for list="{{ nav }}" as="n" hint-placeholder-count="12">
+  <button onClick="{{ n.go }}" style="appearance:none;cursor:pointer;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:rgba(255,255,255,.66);font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.06em;padding:8px 11px;border-radius:999px" style-hover="border-color:rgba(255,255,255,.4);color:#fff">{{ n.label }}</button>
+</sc-for>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;similarTags&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Cut screen&quot;},&quot;firstRunHint&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Cut screen&quot;},&quot;watermarkOnStandard&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Export&quot;}}">
+class Component extends DCLogic {
+  state = { screen: 'welcome', idx: 0, cuts: [], hist: [], pace: 46, hint: true,
+            rpct: 0, hd: false, clean: 0, sel: [], total: 84,
+            sheet: null, cards: ['open'], titleText: 'Da Nang', track: 'coast', beat: true, fmt: 'seq' };
+
+  P = [
+    { g: 'linear-gradient(155deg,#8a5a2e,#2c1810)', l: 'MY KHE BEACH' },
+    { g: 'linear-gradient(200deg,#3e5c63,#111d22)', l: 'STREET FOOD, 8PM' },
+    { g: 'linear-gradient(140deg,#a8703a,#33200f)', l: 'GOLDEN BRIDGE' },
+    { g: 'linear-gradient(170deg,#6b7a42,#1a2012)', l: 'HOI AN LANES' },
+    { g: 'linear-gradient(190deg,#8e4550,#22111a)', l: 'NIGHT MARKET' },
+    { g: 'linear-gradient(160deg,#2f4a6b,#0f1824)', l: 'HAN RIVER BOAT' },
+  ];
+
+  go = (s) => {
+    clearInterval(this.tick);
+    this.setState({ screen: s });
+  };
+
+  startBuild() {
+    clearInterval(this.tick);
+    this.setState({ screen: 'building', buildCount: 0, idx: 0, cuts: [], hist: [] });
+    let n = 0;
+    this.tick = setInterval(() => {
+      n += 3;
+      if (n >= 84) {
+        clearInterval(this.tick);
+        this.setState({ buildCount: 84 });
+        this.tick = setTimeout(() => this.setState({ screen: 'watch1' }), 700);
+      } else this.setState({ buildCount: n });
+    }, 150);
+  }
+
+  componentWillUnmount() { clearInterval(this.tick); clearTimeout(this.tick); }
+
+  cardRef = React.createRef();
+  cutStamp = React.createRef();
+  keepStamp = React.createRef();
+
+  photo(i) {
+    const p = this.P[i % 6];
+    const h = 7 + ((i * 3) % 12);
+    const m = (i * 17) % 60;
+    return { g: p.g, l: 'IMG_' + String(2140 + i), t: String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0'), sim: i % 4 === 1 };
+  }
+
+  resetCard(t) {
+    const el = this.cardRef.current;
+    if (!el) return;
+    el.style.transition = t ? 'transform .3s cubic-bezier(.2,.8,.2,1),opacity .3s ease' : 'none';
+    el.style.transform = 'translateX(0) rotate(0deg)';
+    el.style.opacity = '1';
+    if (this.cutStamp.current) this.cutStamp.current.style.opacity = '0';
+    if (this.keepStamp.current) this.keepStamp.current.style.opacity = '0';
+  }
+
+  advance(cut) {
+    const s = this.state;
+    const hist = s.hist.concat([{ i: s.idx, cut }]);
+    const cuts = cut ? s.cuts.concat([s.idx]) : s.cuts;
+    if (s.idx + 1 >= s.total) { this.setState({ cuts, hist, idx: s.idx }); this.go('pace'); return; }
+    this.setState({ cuts, hist, idx: s.idx + 1 });
+    requestAnimationFrame(() => this.resetCard(false));
+  }
+
+  fling(cut) {
+    const el = this.cardRef.current;
+    if (el) {
+      el.style.transition = 'transform .26s ease-out,opacity .26s ease-out';
+      el.style.transform = 'translateX(' + (cut ? -520 : 520) + 'px) rotate(' + (cut ? -20 : 20) + 'deg)';
+      el.style.opacity = '0';
+    }
+    setTimeout(() => this.advance(cut), 210);
+  }
+
+  onDown = (e) => {
+    this.drag = { x: e.clientX, on: true };
+    const el = this.cardRef.current;
+    if (el) { el.style.transition = 'none'; try { el.setPointerCapture(e.pointerId); } catch (err) {} }
+  };
+
+  onMove = (e) => {
+    if (!this.drag || !this.drag.on) return;
+    const dx = e.clientX - this.drag.x;
+    const el = this.cardRef.current;
+    if (!el) return;
+    el.style.transform = 'translateX(' + dx + 'px) rotate(' + (dx / 24) + 'deg)';
+    const k = Math.min(Math.abs(dx) / 110, 1);
+    if (this.cutStamp.current) this.cutStamp.current.style.opacity = dx < 0 ? String(k) : '0';
+    if (this.keepStamp.current) this.keepStamp.current.style.opacity = dx > 0 ? String(k) : '0';
+  };
+
+  onUp = (e) => {
+    if (!this.drag || !this.drag.on) return;
+    const dx = e.clientX - this.drag.x;
+    this.drag.on = false;
+    if (Math.abs(dx) > 92) this.fling(dx < 0);
+    else this.resetCard(true);
+  };
+
+  startRender() {
+    clearInterval(this.tick);
+    this.setState({ screen: 'render', rpct: 0 });
+    this.tick = setInterval(() => {
+      const p = this.state.rpct + 2.5;
+      if (p >= 100) { clearInterval(this.tick); this.setState({ rpct: 100 }); this.tick = setTimeout(() => this.setState({ screen: 'done' }), 500); }
+      else this.setState({ rpct: p });
+    }, 190);
+  }
+
+  cutTiles() {
+    const n = this.state.cuts.length || 24;
+    const ids = this.state.cuts.length ? this.state.cuts : Array.from({ length: 24 }, (_, i) => i * 3);
+    return ids.slice(0, 24).map((i, k) => {
+      const on = this.state.sel.indexOf(i) >= 0;
+      return {
+        g: this.P[k % 6].g, mark: on ? '✓' : '',
+        dot: on ? '#fdfaf5' : 'rgba(0,0,0,.28)',
+        toggle: () => this.setState(st => ({ sel: on ? st.sel.filter(x => x !== i) : st.sel.concat([i]) })),
+      };
+    });
+  }
+
+  T = {
+    drift: { name: 'Slow Drift', short: 'DRIFT', mood: 'Ambient piano', bpm: '72', icon: '≈', swatch: '#8fb3dc', bars: [6, 11, 8, 14, 9] },
+    coast: { name: 'Coast Road', short: 'COAST', mood: 'Warm indie guitar', bpm: '96', icon: '~', swatch: '#f0b45e', bars: [9, 15, 11, 18, 13] },
+    market: { name: 'Night Market', short: 'MARKET', mood: 'Percussive, bright', bpm: '118', icon: '◆', swatch: '#e08a6a', bars: [13, 20, 15, 22, 17] },
+    pulse: { name: 'Pulse', short: 'PULSE', mood: 'Electronic, driving', bpm: '128', icon: '▲', swatch: '#b48fdc', bars: [16, 22, 18, 22, 20] },
+    none: { name: 'No music', short: 'NONE', mood: 'Just the cut', bpm: '—', icon: '·', swatch: 'rgba(255,255,255,.3)', bars: [3, 3, 3, 3, 3] },
+  };
+
+  CARDS = [
+    { k: 'open', name: 'Opening title', where: 'Before the first photo', g: 'linear-gradient(155deg,#8a5a2e,#2c1810)', align: 'center', previewSize: '17px' },
+    { k: 'place', name: 'Place card', where: 'When the location changes', g: 'linear-gradient(200deg,#3e5c63,#111d22)', align: 'flex-end', previewSize: '13px' },
+    { k: 'end', name: 'End card', where: 'After the last photo', g: 'linear-gradient(190deg,#8e4550,#22111a)', align: 'center', previewSize: '13px' },
+  ];
+
+  onCards() { return this.state.cards ?? ['open']; }
+
+  titleCards() {
+    const on = this.onCards();
+    const txt = this.state.titleText ?? 'Da Nang';
+    const label = { open: txt, place: 'Hoi An', end: 'Aug 2026' };
+    return this.CARDS.map(c => {
+      const active = on.indexOf(c.k) >= 0;
+      return {
+        name: c.name, where: c.where, g: c.g, align: c.align, previewSize: c.previewSize,
+        text: label[c.k],
+        state: active ? 'IN THE FILM' : 'TAP TO ADD',
+        tint: active ? '#8fdc9b' : 'rgba(255,255,255,.4)',
+        border: active ? 'rgba(143,220,155,.4)' : 'rgba(255,255,255,.12)',
+        bg: active ? 'rgba(143,220,155,.07)' : 'rgba(255,255,255,.04)',
+        toggle: () => this.setState(st => {
+          const cur = st.cards ?? ['open'];
+          return { cards: active ? cur.filter(x => x !== c.k) : cur.concat([c.k]) };
+        }),
+      };
+    });
+  }
+
+  trackRows() {
+    const sel = this.state.track;
+    return ['drift', 'coast', 'market', 'pulse', 'none'].map(k => {
+      const t = this.T[k];
+      const active = sel === k || (k === 'none' && !sel);
+      return {
+        name: t.name, mood: t.mood, bpm: t.bpm, icon: t.icon, swatch: t.swatch, bars: t.bars,
+        wave: active ? t.swatch : 'rgba(255,255,255,.22)',
+        border: active ? 'rgba(240,180,94,.45)' : 'rgba(255,255,255,.1)',
+        bg: active ? 'rgba(240,180,94,.1)' : 'rgba(255,255,255,.04)',
+        pick: () => this.setState({ track: k === 'none' ? null : k, beat: k === 'none' ? false : (this.state.beat ?? true) }),
+      };
+    });
+  }
+
+  F = {
+    seq: { name: 'Photo sequence + timing sheet', apps: 'CapCut, InShot, anything', ext: 'ZIP' },
+    fcp: { name: 'Final Cut XML', apps: 'Final Cut Pro, DaVinci Resolve', ext: 'FCPXML' },
+    edl: { name: 'Edit decision list', apps: 'Premiere Pro, Avid', ext: 'EDL' },
+  };
+
+  formatRows() {
+    const cur = this.state.fmt ?? 'seq';
+    return ['seq', 'fcp', 'edl'].map(k => {
+      const f = this.F[k], on = cur === k;
+      return {
+        name: f.name, apps: f.apps, ext: f.ext,
+        tint: on ? '#f0b45e' : 'rgba(255,255,255,.4)',
+        border: on ? 'rgba(240,180,94,.45)' : 'rgba(255,255,255,.1)',
+        bg: on ? 'rgba(240,180,94,.1)' : 'rgba(255,255,255,.04)',
+        pick: () => this.setState({ fmt: k }),
+      };
+    });
+  }
+
+  sliderRef = React.createRef();
+
+  setPaceFrom(clientX) {
+    const el = this.sliderRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const p = Math.max(0, Math.min(100, Math.round(((clientX - r.left) / r.width) * 100)));
+    this.setState({ pace: p });
+  }
+
+  padDown = (e) => {
+    this.padding = true;
+    this.setPaceFrom(e.clientX);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+  };
+  padMove = (e) => { if (this.padding) this.setPaceFrom(e.clientX); };
+  padUp = () => { this.padding = false; };
+
+  undo = () => {
+    const s = this.state;
+    if (!s.hist.length) return;
+    const last = s.hist[s.hist.length - 1];
+    this.setState({
+      hist: s.hist.slice(0, -1),
+      cuts: s.cuts.filter(i => i !== last.i),
+      idx: last.i,
+    });
+    requestAnimationFrame(() => this.resetCard(false));
+  };
+
+  fmt(sec) {
+    const s = Math.max(1, Math.round(sec));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  perPhoto() { return 1.85 - (this.state.pace / 100) * 1.25; }
+  keptCount() { return this.state.total - this.state.cuts.length; }
+
+  renderVals() {
+    const s = this.state;
+    const nav = [
+      ['welcome', '1 WELCOME'], ['access', '2 ACCESS'], ['limited', '2b LIMITED'],
+      ['trips', '3 TRIPS'], ['empty', '3b EMPTY'], ['building', '4 BUILDING'],
+      ['watch1', '5 FIRST WATCH'], ['swipe', '6 CUT'], ['pace', '7 PACE'],
+      ['watch2', '8 SECOND WATCH'], ['export', '9 EXPORT'], ['paywall', '14 PAYWALL'],
+      ['render', '10 RENDER'], ['done', '11 DONE'], ['cleanup', '12 CLEANUP'],
+    ].map(([k, label]) => ({
+      label,
+      go: () => { if (k === 'building') this.startBuild(); else if (k === 'render') this.startRender(); else this.go(k); },
+    }));
+
+    return {
+      nav,
+      isWelcome: s.screen === 'welcome',
+      isAccess: s.screen === 'access',
+      isLimited: s.screen === 'limited',
+      isTrips: s.screen === 'trips',
+      isEmpty: s.screen === 'empty',
+      isBuilding: s.screen === 'building',
+      buildCount: s.buildCount || 0,
+      trips: [
+        { place: 'Da Nang, Vietnam', dates: 'Aug 2 – Aug 9, 2026', count: 84, g: 'linear-gradient(155deg,#8a5a2e,#2c1810)', pick: () => this.startBuild() },
+        { place: 'Kyoto, Japan', dates: 'Apr 11 – Apr 18, 2026', count: 212, g: 'linear-gradient(170deg,#6b7a42,#1a2012)', pick: () => this.startBuild() },
+        { place: 'Lisbon, Portugal', dates: 'Nov 3 – Nov 8, 2025', count: 96, g: 'linear-gradient(190deg,#8e4550,#22111a)', pick: () => this.startBuild() },
+        { place: 'Big Sur, California', dates: 'Jun 21 – Jun 23, 2025', count: 41, g: 'linear-gradient(160deg,#2f4a6b,#0f1824)', pick: () => this.startBuild() },
+      ],
+      isExport: s.screen === 'export',
+      isPaywall: s.screen === 'paywall',
+      isRender: s.screen === 'render',
+      isDone: s.screen === 'done',
+      isCleanup: s.screen === 'cleanup',
+      cleanOffer: s.screen === 'cleanup' && s.clean === 0,
+      cleanGrid: s.screen === 'cleanup' && s.clean === 1,
+      toPaywall: () => this.go('paywall'),
+      toCleanup: () => { this.setState({ clean: 0 }); this.go('cleanup'); },
+      openGrid: () => this.setState({ clean: 1 }),
+      restart: () => { this.setState({ sel: [], clean: 0, hint: true }); this.go('trips'); },
+      startRender: () => this.startRender(),
+      cancelRender: () => this.go('export'),
+      rpct: s.rpct,
+      rpctText: Math.round(s.rpct),
+      etaText: Math.max(1, Math.round((100 - s.rpct) * 0.34)) + 'S',
+      cutCount: s.cuts.length || 24,
+      cutTiles: this.cutTiles(),
+      delText: s.sel.length ? 'Delete ' + s.sel.length + ' photo' + (s.sel.length > 1 ? 's' : '') : 'Nothing selected',
+      delBg: s.sel.length ? '#ff6b57' : 'rgba(255,255,255,.08)',
+      delFg: s.sel.length ? '#1a0703' : 'rgba(255,255,255,.35)',
+      selSubtitle: s.sel.length
+        ? s.sel.length + ' selected to delete. The rest stay in your library.'
+        : 'Nothing is selected. Pick only what you want gone.',
+      noop: () => {},
+      isPace: s.screen === 'pace',
+      isWatch2: s.screen === 'watch2',
+      toPace: () => this.go('pace'),
+      toWatch2: () => this.go('watch2'),
+      pacePct: s.pace,
+      sliderRef: this.sliderRef,
+      padDown: this.padDown, padMove: this.padMove, padUp: this.padUp,
+      perPhotoText: this.perPhoto().toFixed(1) + 's',
+      durText: this.fmt(this.keptCount() * this.perPhoto()),
+      keptText: this.keptCount(),
+      cutText: s.cuts.length ? 'You cut ' + s.cuts.length + '. This is the film.' : 'Nothing cut. This is the film.',
+      strip: [0, 1, 2, 3, 4, 5, 6, 7].map(i => ({ g: this.P[i % 6].g, w: Math.round(18 + this.perPhoto() * 22) })),
+      adv: s.adv,
+      openAdv: () => this.setState({ adv: true }),
+      closeAdv: () => this.setState({ adv: false }),
+      advRows: [0, 1, 2, 3].map(i => ({ g: this.P[i].g, l: this.photo(i).l, d: this.perPhoto().toFixed(1) + 's' })),
+      sheetProject: s.sheet === 'project',
+      openProject: () => this.setState({ sheet: 'project' }),
+      formats: this.formatRows(),
+      exportLabel: 'Export ' + this.F[s.fmt ?? 'seq'].ext,
+      trackSuffix: s.track ? ' · ' + this.T[s.track].name : '',
+      sheetTitles: s.sheet === 'titles',
+      sheetMusic: s.sheet === 'music',
+      openTitles: () => this.setState({ sheet: 'titles' }),
+      openMusic: () => this.setState({ sheet: 'music' }),
+      closeSheet: () => this.setState({ sheet: null }),
+      titleText: s.titleText ?? 'Da Nang',
+      setTitleText: (e) => this.setState({ titleText: e.target.value }),
+      titleCards: this.titleCards(),
+      titlesBadge: this.onCards().length ? this.onCards().length + ' ON' : 'NONE',
+      titlesTint: this.onCards().length ? '#8fdc9b' : 'rgba(255,255,255,.4)',
+      tracks: this.trackRows(),
+      musicBadge: s.track ? this.T[s.track].short : 'NONE',
+      musicTint: s.track ? '#8fdc9b' : 'rgba(255,255,255,.4)',
+      beatNote: s.track ? (s.beat ? 'Photos land on the downbeat' : 'Photos keep your pace') : 'Pick a track first',
+      beatBg: s.beat && s.track ? '#f0b45e' : 'rgba(255,255,255,.14)',
+      beatJustify: s.beat && s.track ? 'flex-end' : 'flex-start',
+      toggleBeat: () => { if (this.state.track) this.setState(st => ({ beat: !st.beat })); },
+      isWatch1: s.screen === 'watch1',
+      isSwipe: s.screen === 'swipe',
+      toSwipe: () => this.go('swipe'),
+      toExport: () => this.go('export'),
+      progressText: (s.idx + 1) + ' of ' + s.total,
+      swipePct: Math.round(((s.idx + 1) / s.total) * 100),
+      cutLabel: s.cuts.length + ' cut',
+      curG: this.photo(s.idx).g,
+      curL: this.photo(s.idx).l,
+      curTime: this.photo(s.idx).t,
+      curSimilar: this.photo(s.idx).sim && (this.props.similarTags ?? true),
+      showHint: s.hint && s.screen === 'swipe' && (this.props.firstRunHint ?? true),
+      wmStd: this.props.watermarkOnStandard ?? true,
+      dismissHint: () => this.setState({ hint: false }),
+      doCut: () => this.fling(true),
+      doKeep: () => this.fling(false),
+      undo: this.undo,
+      onDown: this.onDown, onMove: this.onMove, onUp: this.onUp,
+      cardRef: this.cardRef, cutStamp: this.cutStamp, keepStamp: this.keepStamp,
+      doneCutting: () => this.go('pace'),
+      toEmpty: () => this.go('empty'),
+      startBuild: () => this.startBuild(),
+      toAccess: () => this.go('access'),
+      toLimited: () => this.go('limited'),
+      toTrips: () => this.go('trips'),
+    };
+  }
+}
+</script>
+</body>
+</html>
