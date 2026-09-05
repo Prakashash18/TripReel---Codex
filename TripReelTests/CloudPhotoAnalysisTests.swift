@@ -768,7 +768,22 @@ private final class URLProtocolStub: URLProtocol, @unchecked Sendable {
             return
         }
         do {
-            let (response, data) = try handler(request)
+            var normalizedRequest = request
+            if normalizedRequest.httpBody == nil,
+               let bodyStream = normalizedRequest.httpBodyStream {
+                bodyStream.open()
+                defer { bodyStream.close() }
+                var body = Data()
+                var buffer = [UInt8](repeating: 0, count: 4_096)
+                while bodyStream.hasBytesAvailable {
+                    let count = bodyStream.read(&buffer, maxLength: buffer.count)
+                    guard count >= 0 else { throw bodyStream.streamError ?? URLError(.cannotDecodeContentData) }
+                    if count == 0 { break }
+                    body.append(contentsOf: buffer.prefix(count))
+                }
+                normalizedRequest.httpBody = body
+            }
+            let (response, data) = try handler(normalizedRequest)
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)

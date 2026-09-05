@@ -33,19 +33,25 @@ struct TripAsset: Identifiable, Hashable, Sendable {
     let creationDate: Date?
     let filename: String
     let isScreenshot: Bool
+    let pixelWidth: Int
+    let pixelHeight: Int
 
     init(
         id: String,
         source: PhotoSource,
         creationDate: Date?,
         filename: String,
-        isScreenshot: Bool = false
+        isScreenshot: Bool = false,
+        pixelWidth: Int = 0,
+        pixelHeight: Int = 0
     ) {
         self.id = id
         self.source = source
         self.creationDate = creationDate
         self.filename = filename
         self.isScreenshot = isScreenshot
+        self.pixelWidth = max(0, pixelWidth)
+        self.pixelHeight = max(0, pixelHeight)
     }
 }
 
@@ -130,6 +136,210 @@ struct ReelPhoto: Identifiable, Hashable, Sendable {
     let label: String
     let time: String
     let isSimilar: Bool
+    let pixelWidth: Int
+    let pixelHeight: Int
+    let frameStyle: MontageFrameStyle
+
+    var aspectRatio: Double {
+        guard pixelWidth > 0, pixelHeight > 0 else { return 4.0 / 3.0 }
+        return Double(pixelWidth) / Double(pixelHeight)
+    }
+}
+
+enum MontageFrameStyle: String, Hashable, Sendable {
+    case fullBleed
+    case portraitMatte
+    case cinematic
+    case postcard
+}
+
+enum MontageContentKind: String, Hashable, Sendable {
+    case scenery
+    case people
+    case food
+    case moment
+}
+
+struct MontagePhotoInsight: Hashable, Sendable {
+    let memoryScore: Double
+    let aestheticScore: Double
+    let contentKind: MontageContentKind
+    let featurePrint: NativePhotoFeaturePrint?
+
+    init(
+        memoryScore: Double = 0.5,
+        aestheticScore: Double = 0.5,
+        contentKind: MontageContentKind = .moment,
+        featurePrint: NativePhotoFeaturePrint? = nil
+    ) {
+        self.memoryScore = min(max(memoryScore, 0), 1)
+        self.aestheticScore = min(max(aestheticScore, 0), 1)
+        self.contentKind = contentKind
+        self.featurePrint = featurePrint
+    }
+
+    init(result: NativePhotoIntelligenceResult) {
+        let kind: MontageContentKind
+        if result.tags.contains(.groupPhoto) || result.tags.contains(.people) {
+            kind = .people
+        } else if result.tags.contains(.scenery) {
+            kind = .scenery
+        } else if result.tags.contains(.food) {
+            kind = .food
+        } else {
+            kind = .moment
+        }
+        self.init(
+            memoryScore: result.scores.memoryScore,
+            aestheticScore: result.scores.aestheticScore ?? 0.5,
+            contentKind: kind,
+            featurePrint: result.signals.featurePrint
+        )
+    }
+}
+
+struct MontagePlanItem: Hashable, Sendable {
+    let asset: TripAsset
+    let frameStyle: MontageFrameStyle
+    let isSimilar: Bool
+}
+
+/// Creates a small editorial arc for each day while keeping the trip's days in
+/// order. Vision scores choose strong openers and category/orientation variety;
+/// unavailable analysis falls back to a stable chronological sequence.
+enum MontageSequencePlanner {
+    static func plan(
+        assets: [TripAsset],
+        insights: [String: MontagePhotoInsight],
+        calendar: Calendar = .current
+    ) -> [MontagePlanItem] {
+        guard !assets.isEmpty else { return [] }
+        let chronological = assets.sorted(by: chronologicalOrder)
+        let dayGroups = Dictionary(grouping: chronological) { asset -> Date in
+            guard let date = asset.creationDate else { return .distantPast }
+            return calendar.startOfDay(for: date)
+        }
+        let orderedDays = dayGroups.keys.sorted()
+        let editorial = orderedDays.flatMap { day in
+            editorialOrder(dayGroups[day] ?? [], insights: insights)
+        }
+
+        return editorial.enumerated().map { index, asset in
+            let ratio = aspectRatio(of: asset)
+            let style: MontageFrameStyle
+            if ratio < 0.88 {
+                style = index % 4 == 1 ? .postcard : .portraitMatte
+            } else if ratio >= 1.72 {
+                style = .cinematic
+            } else if index % 5 == 2 {
+                style = .postcard
+            } else {
+                style = .fullBleed
+            }
+
+            let previous = index > 0 ? editorial[index - 1] : nil
+            return MontagePlanItem(
+                asset: asset,
+                frameStyle: style,
+                isSimilar: previous.map {
+                    areVisuallySimilar($0, asset, insights: insights)
+                } ?? false
+            )
+        }
+    }
+
+    private static func editorialOrder(
+        _ assets: [TripAsset],
+        insights: [String: MontagePhotoInsight]
+    ) -> [TripAsset] {
+        guard assets.count > 2, !insights.isEmpty else {
+            return assets.sorted(by: chronologicalOrder)
+        }
+
+        let source = assets.sorted(by: chronologicalOrder)
+        let ranks = Dictionary(uniqueKeysWithValues: source.enumerated().map { ($0.element.id, $0.offset) })
+        var remaining = source
+        var ordered: [TripAsset] = []
+
+        while !remaining.isEmpty {
+            let targetRank = ordered.count
+            let previous = ordered.last
+            let bestIndex = remaining.indices.max { left, right in
+                candidateScore(
+                    remaining[left],
+                    previous: previous,
+                    targetRank: targetRank,
+                    chronologicalRank: ranks[remaining[left].id] ?? 0,
+                    insights: insights
+                ) < candidateScore(
+                    remaining[right],
+                    previous: previous,
+                    targetRank: targetRank,
+                    chronologicalRank: ranks[remaining[right].id] ?? 0,
+                    insights: insights
+                )
+            } ?? remaining.startIndex
+            ordered.append(remaining.remove(at: bestIndex))
+        }
+        return ordered
+    }
+
+    private static func candidateScore(
+        _ asset: TripAsset,
+        previous: TripAsset?,
+        targetRank: Int,
+        chronologicalRank: Int,
+        insights: [String: MontagePhotoInsight]
+    ) -> Double {
+        let insight = insights[asset.id] ?? MontagePhotoInsight()
+        var score = (0.58 * insight.memoryScore) + (0.30 * insight.aestheticScore)
+        if targetRank == 0 {
+            score += insight.contentKind == .scenery ? 0.32 : 0.08
+            score += aspectRatio(of: asset) >= 1.2 ? 0.08 : 0
+        } else {
+            score -= Double(abs(chronologicalRank - targetRank)) * 0.012
+        }
+
+        if let previous {
+            let previousInsight = insights[previous.id] ?? MontagePhotoInsight()
+            if previousInsight.contentKind == insight.contentKind { score -= 0.22 }
+            let previousPortrait = aspectRatio(of: previous) < 0.88
+            if previousPortrait == (aspectRatio(of: asset) < 0.88) { score -= 0.07 }
+            if areVisuallySimilar(previous, asset, insights: insights) { score -= 0.55 }
+        }
+        return score
+    }
+
+    private static func areVisuallySimilar(
+        _ first: TripAsset,
+        _ second: TripAsset,
+        insights: [String: MontagePhotoInsight]
+    ) -> Bool {
+        guard let firstPrint = insights[first.id]?.featurePrint,
+              let secondPrint = insights[second.id]?.featurePrint,
+              let distance = try? firstPrint.distance(to: secondPrint) else {
+            return false
+        }
+        return distance < 8.0
+    }
+
+    private static func aspectRatio(of asset: TripAsset) -> Double {
+        guard asset.pixelWidth > 0, asset.pixelHeight > 0 else { return 4.0 / 3.0 }
+        return Double(asset.pixelWidth) / Double(asset.pixelHeight)
+    }
+
+    private static func chronologicalOrder(_ lhs: TripAsset, _ rhs: TripAsset) -> Bool {
+        switch (lhs.creationDate, rhs.creationDate) {
+        case let (left?, right?) where left != right:
+            return left < right
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        default:
+            return lhs.id < rhs.id
+        }
+    }
 }
 
 enum TitleCardKind: String, CaseIterable, Identifiable {
@@ -161,9 +371,11 @@ struct MusicTrack: Identifiable, Hashable {
     let name: String
     let mood: String
     let bpm: String
+    let bpmValue: Double
     let symbol: String
     let tint: Color
     let bars: [CGFloat]
+    let soundProfile: LocalSoundtrackStyle?
 }
 
 struct ProjectFormat: Identifiable, Hashable {
@@ -248,6 +460,7 @@ final class TripReelModel: ObservableObject {
     private var resolvedCoordinates: [String: PhotoCoordinate] = [:]
     private var activeImportedPhotos: [ManualImportedPhoto] = []
     private var pendingBuildTrip: Trip?
+    private var activePhotoInsights: [String: MontagePhotoInsight] = [:]
 
     private static let cloudPreferenceKey = "tripreel.cloud-photo-analysis-preference.v1"
 
@@ -326,11 +539,11 @@ final class TripReelModel: ObservableObject {
     ]
 
     let tracks = [
-        MusicTrack(id: "drift", name: "Slow Drift", mood: "Ambient piano", bpm: "72", symbol: "waveform", tint: Color(red: 0.56, green: 0.70, blue: 0.86), bars: [8, 15, 11, 20, 13]),
-        MusicTrack(id: "coast", name: "Coast Road", mood: "Warm indie guitar", bpm: "96", symbol: "guitars", tint: TR.accent, bars: [12, 21, 15, 25, 18]),
-        MusicTrack(id: "market", name: "Night Market", mood: "Percussive, bright", bpm: "118", symbol: "music.quarternote.3", tint: Color(red: 0.88, green: 0.54, blue: 0.42), bars: [17, 26, 20, 29, 23]),
-        MusicTrack(id: "pulse", name: "Pulse", mood: "Electronic, driving", bpm: "128", symbol: "waveform.path.ecg", tint: Color(red: 0.71, green: 0.56, blue: 0.86), bars: [21, 28, 23, 29, 26]),
-        MusicTrack(id: "none", name: "No music", mood: "Just the cut", bpm: "—", symbol: "speaker.slash", tint: Color.white.opacity(0.35), bars: [4, 4, 4, 4, 4])
+        MusicTrack(id: "drift", name: "Slow Drift", mood: "Ambient, spacious", bpm: "72", bpmValue: 72, symbol: "waveform", tint: Color(red: 0.56, green: 0.70, blue: 0.86), bars: [8, 15, 11, 20, 13], soundProfile: .drift),
+        MusicTrack(id: "coast", name: "Coast Road", mood: "Warm, sunlit", bpm: "96", bpmValue: 96, symbol: "guitars", tint: TR.accent, bars: [12, 21, 15, 25, 18], soundProfile: .coast),
+        MusicTrack(id: "market", name: "Night Market", mood: "Percussive, bright", bpm: "118", bpmValue: 118, symbol: "music.quarternote.3", tint: Color(red: 0.88, green: 0.54, blue: 0.42), bars: [17, 26, 20, 29, 23], soundProfile: .market),
+        MusicTrack(id: "pulse", name: "Pulse", mood: "Electronic, driving", bpm: "128", bpmValue: 128, symbol: "waveform.path.ecg", tint: Color(red: 0.71, green: 0.56, blue: 0.86), bars: [21, 28, 23, 29, 26], soundProfile: .pulse),
+        MusicTrack(id: "none", name: "No music", mood: "Just the cut", bpm: "—", bpmValue: 0, symbol: "speaker.slash", tint: Color.white.opacity(0.35), bars: [4, 4, 4, 4, 4], soundProfile: nil)
     ]
 
     let formats = [
@@ -478,7 +691,7 @@ final class TripReelModel: ObservableObject {
             return
         }
         self.selectedTrip = updatedTrip
-        photos = Self.makeReelPhotos(from: updatedTrip)
+        photos = Self.makeReelPhotos(from: updatedTrip, insights: activePhotoInsights)
         cutPhotoIDs.formIntersection(Set(photos.map(\.id)))
         currentPhotoIndex = min(currentPhotoIndex, max(0, photos.count - 1))
     }
@@ -495,6 +708,7 @@ final class TripReelModel: ObservableObject {
         excludedPhotos = []
         photoAnalysisProgress = 0
         photoAnalysisStatus = "Preparing smart selection"
+        activePhotoInsights = [:]
 
         // The analysis coordinator is installed below; keeping this launch in a
         // cancellable task prevents a second trip tap from racing the first.
@@ -514,6 +728,7 @@ final class TripReelModel: ObservableObject {
         var cloudReviewedCount = 0
         var cloudFailureMessage: String?
         var cloudFailed = false
+        var montageInsights: [String: MontagePhotoInsight] = [:]
 
         for (index, asset) in trip.assets.enumerated() {
             guard photoAnalysisGeneration == generation, !Task.isCancelled else {
@@ -538,6 +753,7 @@ final class TripReelModel: ObservableObject {
                     )
                 )
                 analyzedCount += 1
+                montageInsights[asset.id] = MontagePhotoInsight(result: nativeResult)
 
                 if let localDecision = SmartPhotoSelectionPolicy.nativeDecision(
                     for: asset,
@@ -626,6 +842,7 @@ final class TripReelModel: ObservableObject {
             : "Smart selection complete on this iPhone"
         isAnalyzingPhotos = false
         photoAnalysisTask = nil
+        activePhotoInsights = montageInsights
 
         if let cloudFailureMessage {
             libraryErrorMessage = cloudFailureMessage
@@ -842,7 +1059,9 @@ final class TripReelModel: ObservableObject {
                 source: .library($0.id),
                 creationDate: $0.creationDate,
                 filename: $0.filename,
-                isScreenshot: $0.isScreenshot
+                isScreenshot: $0.isScreenshot,
+                pixelWidth: $0.pixelWidth,
+                pixelHeight: $0.pixelHeight
             )
         }
         let coordinate = sorted.compactMap(\.coordinate).first
@@ -902,7 +1121,9 @@ final class TripReelModel: ObservableObject {
                 id: photo.id,
                 source: .imported(photo.filePath),
                 creationDate: photo.creationDate,
-                filename: photo.filename
+                filename: photo.filename,
+                pixelWidth: photo.pixelWidth,
+                pixelHeight: photo.pixelHeight
             )
         }
         let dated = imported.compactMap(\.creationDate)
@@ -981,7 +1202,7 @@ final class TripReelModel: ObservableObject {
     func startBuild(trip: Trip) {
         guard !trip.assets.isEmpty else { return }
         selectedTrip = trip
-        photos = Self.makeReelPhotos(from: trip)
+        photos = Self.makeReelPhotos(from: trip, insights: activePhotoInsights)
         titleText = trip.shortPlace
         workTask?.cancel()
         buildCount = 0
@@ -1126,6 +1347,7 @@ final class TripReelModel: ObservableObject {
         libraryPhotoCount = 0
         selectedPhotoCount = 0
         resolvedCoordinates = [:]
+        activePhotoInsights = [:]
         cutPhotoIDs = []
         history = []
 
@@ -1252,7 +1474,9 @@ final class TripReelModel: ObservableObject {
                 source: .library($0.id),
                 creationDate: $0.creationDate,
                 filename: $0.filename,
-                isScreenshot: $0.isScreenshot
+                isScreenshot: $0.isScreenshot,
+                pixelWidth: $0.pixelWidth,
+                pixelHeight: $0.pixelHeight
             )
         }
         let fallbackPlace = detected.centroid == nil
@@ -1276,7 +1500,9 @@ final class TripReelModel: ObservableObject {
                 source: .library($0.id),
                 creationDate: $0.creationDate,
                 filename: $0.filename,
-                isScreenshot: $0.isScreenshot
+                isScreenshot: $0.isScreenshot,
+                pixelWidth: $0.pixelWidth,
+                pixelHeight: $0.pixelHeight
             )
         }
         return makeReelPhotos(
@@ -1292,8 +1518,13 @@ final class TripReelModel: ObservableObject {
         )
     }
 
-    private static func makeReelPhotos(from trip: Trip) -> [ReelPhoto] {
-        trip.assets.enumerated().map { index, asset in
+    private static func makeReelPhotos(
+        from trip: Trip,
+        insights: [String: MontagePhotoInsight] = [:]
+    ) -> [ReelPhoto] {
+        MontageSequencePlanner.plan(assets: trip.assets, insights: insights)
+            .enumerated().map { index, item in
+            let asset = item.asset
             let fallbackLabel = "PHOTO_\(String(format: "%04d", index + 1))"
             let label = asset.filename.isEmpty ? fallbackLabel : asset.filename
             return ReelPhoto(
@@ -1301,10 +1532,13 @@ final class TripReelModel: ObservableObject {
                 source: asset.source,
                 label: label,
                 time: asset.creationDate.map(timeFormatter.string) ?? "—",
-                isSimilar: {
+                isSimilar: item.isSimilar || {
                     if case .bundled = asset.source { return index % 4 == 1 }
                     return false
-                }()
+                }(),
+                pixelWidth: asset.pixelWidth,
+                pixelHeight: asset.pixelHeight,
+                frameStyle: item.frameStyle
             )
         }
     }
@@ -1335,7 +1569,9 @@ final class TripReelModel: ObservableObject {
                 id: "demo-\(id)-\(index)",
                 source: .bundled(imageName),
                 creationDate: start.addingTimeInterval(duration * progress),
-                filename: "IMG_\(2140 + index)"
+                filename: "IMG_\(2140 + index)",
+                pixelWidth: 1_024,
+                pixelHeight: 1_536
             )
         }
         let coverID = assets.first(where: {
@@ -1374,7 +1610,10 @@ final class TripReelModel: ObservableObject {
         source: .bundled("my-khe-beach"),
         label: "PHOTO",
         time: "—",
-        isSimilar: false
+        isSimilar: false,
+        pixelWidth: 1_024,
+        pixelHeight: 1_536,
+        frameStyle: .portraitMatte
     )
 
     private static let timeFormatter: DateFormatter = {

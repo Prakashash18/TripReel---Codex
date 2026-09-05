@@ -15,7 +15,11 @@ On a normal launch, TripReel scans every non-hidden image available under the us
 
 Before building a film, Smart Selection runs on the iPhone with Apple Vision. It combines Apple's screenshot subtype, image classification, OCR coverage (recognized text itself is not retained), faces, document segmentation, feature prints, and iOS 18+ aesthetics. Screenshots do not make a photo collection qualify as a trip. High-confidence utility images are moved to a recoverable **More Photos** list and are never deleted; group, scenic, food, people, and uncertain images stay in the film by default.
 
-Trips currently need at least 15 photos across at least 18 hours and two calendar dates. A gap over 48 hours starts a new time window, repeated locations more than 120 km apart form separate destinations, and candidates longer than 45 days are rejected instead of becoming giant false trips. A location seen during at least eight weeks over 90 days is treated as habitual/home and filtered from trip results. The final video-render/save actions remain prototype simulations; the app never deletes originals.
+The same local analysis now drives an editorial sequence rather than a plain timestamp slideshow: days stay in story order, while strong establishing shots open each day and the cut alternates scenery, people, food, orientation, and near-duplicates. The montage automatically chooses full-bleed, cinematic, portrait-matte, and postcard treatments. Portrait images are shown sharp and uncropped over a softened fill, so faces and the full composition remain visible.
+
+Music preview is real and offline. The four included instrumental loops are synthesized on the iPhone with AVAudioEngine, require no licensed catalog or network request, and use an explicit playback audio session plus play/pause control. The final video-render/save actions remain prototype simulations, so the soundtrack is audible in the editor but is not yet written into an exported movie file.
+
+Trips currently need at least 15 photos across at least 18 hours and two calendar dates. A gap over 48 hours starts a new time window, repeated locations more than 120 km apart form separate destinations, and candidates longer than 45 days are rejected instead of becoming giant false trips. A location seen during at least eight weeks over 90 days is treated as habitual/home and filtered from trip results. The app never deletes originals.
 
 Bundled travel photos are used only before permission is granted and by deterministic UI-test launches using `-qaScreen`.
 

@@ -1,17 +1,30 @@
+import AVFAudio
 import ImageIO
 import Photos
 import SwiftUI
 import UIKit
 
+enum PhotoDisplayContentMode: Hashable {
+    case fill
+    case fit
+}
+
 struct PhotoAssetView: View {
     let source: PhotoSource
     var label: String? = nil
     var dim = false
+    var contentMode: PhotoDisplayContentMode = .fill
 
-    init(source: PhotoSource, label: String? = nil, dim: Bool = false) {
+    init(
+        source: PhotoSource,
+        label: String? = nil,
+        dim: Bool = false,
+        contentMode: PhotoDisplayContentMode = .fill
+    ) {
         self.source = source
         self.label = label
         self.dim = dim
+        self.contentMode = contentMode
     }
 
     init(imageName: String, label: String? = nil, dim: Bool = false) {
@@ -20,7 +33,7 @@ struct PhotoAssetView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            PhotoSourceImage(source: source, size: proxy.size)
+            PhotoSourceImage(source: source, size: proxy.size, contentMode: contentMode)
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 .clipped()
                 .overlay {
@@ -52,6 +65,7 @@ struct MontageView: View {
     var watermark = false
     var showLabels = true
     @State private var currentIndex = 0
+    @State private var motionPhase = false
 
     private var slideCount: Int {
         if !photos.isEmpty { return photos.count }
@@ -63,14 +77,22 @@ struct MontageView: View {
         let index = min(currentIndex, slideCount - 1)
         if !photos.isEmpty {
             let photo = photos[index]
-            return MontageSlide(id: photo.id, source: photo.source, label: photo.label)
+            return MontageSlide(
+                id: photo.id,
+                source: photo.source,
+                label: photo.label,
+                aspectRatio: photo.aspectRatio,
+                frameStyle: photo.frameStyle
+            )
         }
 
         let imageName = TripReelModel.assetNames[index]
         return MontageSlide(
             id: "bundled-\(imageName)",
             source: .bundled(imageName),
-            label: TripReelModel.photoLabels[index]
+            label: TripReelModel.photoLabels[index],
+            aspectRatio: 2.0 / 3.0,
+            frameStyle: index % 3 == 1 ? .postcard : .portraitMatte
         )
     }
 
@@ -85,14 +107,14 @@ struct MontageView: View {
     var body: some View {
         ZStack {
             if let slide = currentSlide {
-                PhotoAssetView(
-                    source: slide.source,
-                    label: showLabels ? slide.label : nil,
-                    dim: false
+                MontageSlideArtwork(
+                    slide: slide,
+                    showLabel: showLabels,
+                    motionPhase: motionPhase,
+                    reduceMotion: reduceMotion
                 )
                 .id(slide.id)
                 .transition(.opacity)
-                .scaleEffect(reduceMotion ? 1 : 1.08)
             } else {
                 ZStack {
                     Color.white.opacity(0.045)
@@ -133,6 +155,13 @@ struct MontageView: View {
         .background(Color(red: 0.051, green: 0.035, blue: 0.024))
         .accessibilityHidden(true)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.72), value: currentIndex)
+        .onChange(of: currentIndex, initial: true) { _, _ in
+            motionPhase = false
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 2.15)) {
+                motionPhase = true
+            }
+        }
         .task(id: contentKey) {
             currentIndex = 0
             guard !reduceMotion, slideCount > 0 else { return }
@@ -149,6 +178,145 @@ private struct MontageSlide {
     let id: String
     let source: PhotoSource
     let label: String
+    let aspectRatio: Double
+    let frameStyle: MontageFrameStyle
+}
+
+private struct MontageSlideArtwork: View {
+    let slide: MontageSlide
+    let showLabel: Bool
+    let motionPhase: Bool
+    let reduceMotion: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            switch slide.frameStyle {
+            case .fullBleed:
+                fullBleed(size: proxy.size)
+            case .portraitMatte:
+                portraitMatte(size: proxy.size)
+            case .cinematic:
+                cinematic(size: proxy.size)
+            case .postcard:
+                postcard(size: proxy.size)
+            }
+        }
+    }
+
+    private func fullBleed(size: CGSize) -> some View {
+        PhotoAssetView(source: slide.source, label: showLabel ? slide.label : nil)
+            .scaleEffect(reduceMotion ? 1 : (motionPhase ? 1.09 : 1.015))
+            .offset(
+                x: reduceMotion ? 0 : (motionPhase ? -size.width * 0.014 : size.width * 0.01),
+                y: reduceMotion ? 0 : (motionPhase ? -size.height * 0.012 : size.height * 0.008)
+            )
+    }
+
+    private func portraitMatte(size: CGSize) -> some View {
+        ZStack {
+            PhotoAssetView(source: slide.source)
+                .scaleEffect(1.22)
+                .blur(radius: 30)
+                .saturation(0.82)
+                .overlay(.black.opacity(0.34))
+
+            LinearGradient(
+                colors: [.black.opacity(0.22), .clear, .black.opacity(0.44)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            PhotoAssetView(
+                source: slide.source,
+                label: showLabel ? slide.label : nil,
+                contentMode: .fit
+            )
+            .frame(width: size.width * 0.76, height: size.height * 0.86)
+            .background(.black.opacity(0.34))
+            .overlay(
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .stroke(.white.opacity(0.25), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
+            .shadow(color: .black.opacity(0.62), radius: 26, y: 16)
+            .scaleEffect(reduceMotion ? 1 : (motionPhase ? 1.025 : 0.99))
+        }
+    }
+
+    private func cinematic(size: CGSize) -> some View {
+        ZStack {
+            Color(red: 0.035, green: 0.027, blue: 0.021)
+            PhotoAssetView(source: slide.source, contentMode: .fit)
+                .frame(height: size.height * 0.62)
+                .scaleEffect(reduceMotion ? 1 : (motionPhase ? 1.035 : 1))
+
+            VStack {
+                filmEdge
+                Spacer()
+                filmEdge
+            }
+            .padding(.vertical, 13)
+
+            if showLabel {
+                montageLabel
+            }
+        }
+    }
+
+    private func postcard(size: CGSize) -> some View {
+        ZStack {
+            PhotoAssetView(source: slide.source)
+                .scaleEffect(1.14)
+                .blur(radius: 24)
+                .saturation(0.72)
+                .overlay(.black.opacity(0.46))
+
+            VStack(spacing: 0) {
+                PhotoAssetView(source: slide.source, contentMode: .fit)
+                    .frame(height: size.height * 0.62)
+                    .background(Color(red: 0.12, green: 0.09, blue: 0.07))
+
+                HStack {
+                    Text(showLabel ? slide.label : "TRIPREEL")
+                        .font(TR.mono(9))
+                        .tracking(1.1)
+                        .lineLimit(1)
+                    Spacer()
+                    Image(systemName: "sparkle")
+                }
+                .foregroundStyle(TR.ink.opacity(0.68))
+                .padding(.horizontal, 13)
+                .frame(height: 38)
+            }
+            .frame(width: size.width * 0.82)
+            .padding(8)
+            .background(TR.cream)
+            .rotationEffect(.degrees(reduceMotion ? -1.2 : (motionPhase ? 1.1 : -1.6)))
+            .scaleEffect(reduceMotion ? 1 : (motionPhase ? 1.025 : 0.98))
+            .shadow(color: .black.opacity(0.62), radius: 24, y: 17)
+        }
+    }
+
+    private var filmEdge: some View {
+        HStack(spacing: 7) {
+            ForEach(0..<10, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(.white.opacity(0.18))
+                    .frame(width: 19, height: 6)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .clipped()
+    }
+
+    private var montageLabel: some View {
+        Text(slide.label)
+            .font(TR.mono(10))
+            .tracking(1.3)
+            .foregroundStyle(.white.opacity(0.56))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .padding(18)
+    }
 }
 
 private struct MontageContentKey: Hashable {
@@ -160,6 +328,7 @@ private struct MontageContentKey: Hashable {
 private struct PhotoSourceImage: View {
     let source: PhotoSource
     let size: CGSize
+    let contentMode: PhotoDisplayContentMode
     @Environment(\.displayScale) private var displayScale
     @StateObject private var loader = PhotoAssetImageLoader()
 
@@ -175,7 +344,8 @@ private struct PhotoSourceImage: View {
         return PhotoImageRequestKey(
             source: source,
             pixelWidth: max(80, Int((size.width * displayScale).rounded(.up))),
-            pixelHeight: max(80, Int((size.height * displayScale).rounded(.up)))
+            pixelHeight: max(80, Int((size.height * displayScale).rounded(.up))),
+            contentMode: contentMode
         )
     }
 
@@ -183,14 +353,18 @@ private struct PhotoSourceImage: View {
         Group {
             switch source {
             case let .bundled(imageName):
-                Image(imageName)
-                    .resizable()
-                    .scaledToFill()
+                if contentMode == .fit {
+                    Image(imageName).resizable().scaledToFit()
+                } else {
+                    Image(imageName).resizable().scaledToFill()
+                }
             case .library, .imported:
                 if let image = loader.image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
+                    if contentMode == .fit {
+                        Image(uiImage: image).resizable().scaledToFit()
+                    } else {
+                        Image(uiImage: image).resizable().scaledToFill()
+                    }
                 } else {
                     ZStack {
                         Color.white.opacity(0.055)
@@ -225,6 +399,7 @@ private struct PhotoImageRequestKey: Hashable {
     let source: PhotoSource
     let pixelWidth: Int
     let pixelHeight: Int
+    let contentMode: PhotoDisplayContentMode
 }
 
 @MainActor
@@ -290,7 +465,7 @@ private final class PhotoAssetImageLoader: ObservableObject {
         requestID = Self.manager.requestImage(
             for: asset,
             targetSize: CGSize(width: key.pixelWidth, height: key.pixelHeight),
-            contentMode: .aspectFill,
+            contentMode: key.contentMode == .fit ? .aspectFit : .aspectFill,
             options: options
         ) { [weak self] image, info in
             let cancelled = (info?[PHImageCancelledKey] as? Bool) == true
@@ -464,6 +639,182 @@ struct PlaybackProgressBar: View {
                 }
             }
         }
+    }
+}
+
+enum LocalSoundtrackStyle: String, Hashable, Sendable {
+    case drift
+    case coast
+    case market
+    case pulse
+}
+
+/// Plays small original instrumental loops synthesized entirely on the device.
+/// This makes music previews real without a network dependency or licensed
+/// catalog audio. A future renderer can schedule the same samples into export.
+@MainActor
+final class LocalSoundtrackPlayer: ObservableObject {
+    @Published private(set) var isPlaying = false
+    @Published private(set) var errorMessage: String?
+
+    private let engine = AVAudioEngine()
+    private let player = AVAudioPlayerNode()
+    private var preparationTask: Task<Void, Never>?
+    private var activeTrackID: String?
+
+    init() {
+        engine.attach(player)
+        let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
+        engine.connect(player, to: engine.mainMixerNode, format: format)
+    }
+
+    func play(track: MusicTrack?) {
+        guard let track, let profile = track.soundProfile else {
+            stop()
+            return
+        }
+        if activeTrackID == track.id, isPlaying { return }
+
+        stop(deactivateSession: false)
+        activeTrackID = track.id
+        errorMessage = nil
+        preparationTask = Task { [weak self] in
+            let samples = await Task.detached(priority: .userInitiated) {
+                LocalSoundtrackSynthesizer.render(profile: profile, bpm: track.bpmValue)
+            }.value
+            guard !Task.isCancelled, let self, self.activeTrackID == track.id else { return }
+            self.start(samples: samples)
+        }
+    }
+
+    func toggle(track: MusicTrack?) {
+        if isPlaying {
+            player.pause()
+            isPlaying = false
+        } else if activeTrackID == track?.id, engine.isRunning {
+            player.play()
+            isPlaying = true
+        } else {
+            play(track: track)
+        }
+    }
+
+    func stop() {
+        stop(deactivateSession: true)
+    }
+
+    private func start(samples: [Float]) {
+        let frameCount = AVAudioFrameCount(samples.count)
+        guard frameCount > 0,
+              let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount),
+              let channels = buffer.floatChannelData else {
+            errorMessage = "Audio preview couldn't be prepared."
+            activeTrackID = nil
+            return
+        }
+
+        buffer.frameLength = frameCount
+        for index in samples.indices {
+            channels[0][index] = samples[index]
+            channels[1][index] = samples[index]
+        }
+
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .moviePlayback)
+            try session.setActive(true)
+            if !engine.isRunning {
+                engine.prepare()
+                try engine.start()
+            }
+            player.scheduleBuffer(buffer, at: nil, options: .loops)
+            player.play()
+            isPlaying = true
+        } catch {
+            errorMessage = "Audio preview is unavailable on the current output."
+            isPlaying = false
+            activeTrackID = nil
+        }
+    }
+
+    private func stop(deactivateSession: Bool) {
+        preparationTask?.cancel()
+        preparationTask = nil
+        player.stop()
+        engine.pause()
+        isPlaying = false
+        activeTrackID = nil
+        if deactivateSession {
+            try? AVAudioSession.sharedInstance().setActive(
+                false,
+                options: .notifyOthersOnDeactivation
+            )
+        }
+    }
+}
+
+private enum LocalSoundtrackSynthesizer {
+    static func render(profile: LocalSoundtrackStyle, bpm: Double) -> [Float] {
+        let sampleRate = 44_100.0
+        let beats = 16.0
+        let seconds = beats * 60.0 / max(60, bpm)
+        let sampleCount = max(1, Int(seconds * sampleRate))
+        let roots = [48, 53, 45, 50]
+        var output = [Float](repeating: 0, count: sampleCount)
+
+        for frame in 0..<sampleCount {
+            let time = Double(frame) / sampleRate
+            let beatPosition = time * bpm / 60.0
+            let beatPhase = beatPosition.truncatingRemainder(dividingBy: 1)
+            let barPosition = beatPosition / 4
+            let bar = min(3, Int(barPosition) % 4)
+            let barPhase = barPosition.truncatingRemainder(dividingBy: 1)
+            let chordEnvelope = min(1, min(barPhase * 7, (1 - barPhase) * 9))
+            let root = roots[bar]
+
+            let rootTone = sine(midi: root, time: time)
+            let third = sine(midi: root + (bar == 2 ? 3 : 4), time: time)
+            let fifth = sine(midi: root + 7, time: time)
+            var sample = (rootTone * 0.42 + third * 0.28 + fifth * 0.24)
+                * chordEnvelope * 0.20
+
+            switch profile {
+            case .drift:
+                sample += sine(midi: root + 12, time: time) * 0.055
+                    * (0.5 + 0.5 * sin(time * 0.7))
+            case .coast:
+                let pluck = exp(-beatPhase * 7.5)
+                sample += sine(midi: root + 12 + Int(beatPosition) % 5, time: time)
+                    * pluck * 0.16
+            case .market:
+                let mallet = exp(-beatPhase * 11)
+                sample += sine(midi: root + 19 + (Int(beatPosition) % 3) * 2, time: time)
+                    * mallet * 0.18
+                if Int(beatPosition * 2) % 2 == 1 {
+                    sample += deterministicNoise(frame) * exp(-(beatPhase * 2).truncatingRemainder(dividingBy: 1) * 18) * 0.035
+                }
+            case .pulse:
+                let bass = sine(midi: root - 12, time: time) * 0.15
+                sample += bass * (beatPhase < 0.56 ? 1 : 0.24)
+                sample += sin(2 * .pi * (58 - beatPhase * 30) * time)
+                    * exp(-beatPhase * 12) * 0.16
+            }
+
+            let edgeFade = min(1, min(time / 0.06, (seconds - time) / 0.06))
+            output[frame] = Float(max(-0.86, min(0.86, sample * max(0, edgeFade))))
+        }
+        return output
+    }
+
+    private static func sine(midi: Int, time: Double) -> Double {
+        let frequency = 440 * pow(2, Double(midi - 69) / 12)
+        return sin(2 * .pi * frequency * time)
+    }
+
+    private static func deterministicNoise(_ value: Int) -> Double {
+        let raw = sin(Double(value) * 12.9898) * 43_758.5453
+        return ((raw - floor(raw)) * 2) - 1
     }
 }
 

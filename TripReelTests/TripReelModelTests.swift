@@ -57,6 +57,15 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertNil(model.selectedTrack)
     }
 
+    func testSoundtracksHavePlayableLocalProfiles() {
+        let model = makeModel()
+        let musicTracks = model.tracks.filter { $0.id != "none" }
+
+        XCTAssertFalse(musicTracks.isEmpty)
+        XCTAssertTrue(musicTracks.allSatisfy { $0.bpmValue > 0 && $0.soundProfile != nil })
+        XCTAssertNil(model.tracks.first { $0.id == "none" }?.soundProfile)
+    }
+
     func testRestartReturnsToTripsAndClearsCleanupState() {
         let model = makeModel()
         model.cleanupShowsGrid = true
@@ -151,6 +160,68 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(model.photos.first?.source, .library("library-0"))
         XCTAssertEqual(model.selectedTrip?.id, trip.id)
         model.go(.trips)
+    }
+
+    func testMontagePlannerUsesAScenicHeroThenAddsVariety() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let assets = [
+            makeAsset("food", start: start, minutes: 5, width: 3_024, height: 4_032),
+            makeAsset("people-a", start: start, minutes: 10, width: 4_032, height: 3_024),
+            makeAsset("scenic", start: start, minutes: 15, width: 4_032, height: 2_268),
+            makeAsset("people-b", start: start, minutes: 20, width: 4_032, height: 3_024)
+        ]
+        let insights: [String: MontagePhotoInsight] = [
+            "food": .init(memoryScore: 0.70, aestheticScore: 0.72, contentKind: .food),
+            "people-a": .init(memoryScore: 0.82, aestheticScore: 0.76, contentKind: .people),
+            "scenic": .init(memoryScore: 0.94, aestheticScore: 0.91, contentKind: .scenery),
+            "people-b": .init(memoryScore: 0.79, aestheticScore: 0.73, contentKind: .people)
+        ]
+
+        let plan = MontageSequencePlanner.plan(assets: assets, insights: insights)
+
+        XCTAssertEqual(plan.first?.asset.id, "scenic")
+        XCTAssertNotEqual(plan[1].asset.id, "people-b")
+        XCTAssertEqual(plan.first?.frameStyle, .cinematic)
+        XCTAssertEqual(plan.first(where: { $0.asset.id == "food" })?.frameStyle, .portraitMatte)
+    }
+
+    func testMontagePlannerKeepsDaysInStoryOrder() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let dayOne = Date(timeIntervalSince1970: 1_800_000_000)
+        let dayTwo = dayOne.addingTimeInterval(24 * 60 * 60)
+        let assets = [
+            makeAsset("day-two-hero", start: dayTwo, minutes: 5),
+            makeAsset("day-one-quiet", start: dayOne, minutes: 5),
+            makeAsset("day-one-hero", start: dayOne, minutes: 10)
+        ]
+        let insights: [String: MontagePhotoInsight] = [
+            "day-two-hero": .init(memoryScore: 1, aestheticScore: 1, contentKind: .scenery),
+            "day-one-quiet": .init(memoryScore: 0.3, aestheticScore: 0.3, contentKind: .moment),
+            "day-one-hero": .init(memoryScore: 0.8, aestheticScore: 0.8, contentKind: .people)
+        ]
+
+        let plan = MontageSequencePlanner.plan(assets: assets, insights: insights, calendar: calendar)
+
+        XCTAssertEqual(Set(plan.prefix(2).map(\.asset.id)), ["day-one-quiet", "day-one-hero"])
+        XCTAssertEqual(plan.last?.asset.id, "day-two-hero")
+    }
+
+    private func makeAsset(
+        _ id: String,
+        start: Date,
+        minutes: Int,
+        width: Int = 4_032,
+        height: Int = 3_024
+    ) -> TripAsset {
+        TripAsset(
+            id: id,
+            source: .library(id),
+            creationDate: start.addingTimeInterval(Double(minutes) * 60),
+            filename: "\(id).HEIC",
+            pixelWidth: width,
+            pixelHeight: height
+        )
     }
 }
 

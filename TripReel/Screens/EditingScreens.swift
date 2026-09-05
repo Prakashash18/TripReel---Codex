@@ -473,6 +473,7 @@ struct SecondWatchScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @State private var showTitles = false
     @State private var showMusic = false
+    @StateObject private var soundtrack = LocalSoundtrackPlayer()
 
     var body: some View {
         ZStack {
@@ -498,7 +499,31 @@ struct SecondWatchScreen: View {
                 Spacer()
 
                 VStack(alignment: .leading, spacing: 18) {
-                    PlaybackProgressBar()
+                    HStack(spacing: 12) {
+                        Button {
+                            soundtrack.toggle(track: model.selectedTrack)
+                        } label: {
+                            Image(systemName: soundtrack.isPlaying ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(TR.cream)
+                                .frame(width: 31, height: 31)
+                                .background(.black.opacity(0.34))
+                                .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(model.selectedTrack == nil)
+                        .opacity(model.selectedTrack == nil ? 0.42 : 1)
+                        .accessibilityLabel(soundtrack.isPlaying ? "Pause soundtrack" : "Play soundtrack")
+
+                        PlaybackProgressBar()
+                    }
+
+                    if let errorMessage = soundtrack.errorMessage {
+                        Text(errorMessage)
+                            .font(TR.ui(11, weight: .medium))
+                            .foregroundStyle(TR.accent)
+                    }
 
                     Text(model.cutPhotoIDs.isEmpty ? "Nothing cut. This is the film." : "You cut \(model.cutPhotoIDs.count). This is the film.")
                         .font(TR.display(29))
@@ -549,6 +574,12 @@ struct SecondWatchScreen: View {
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(26)
                 .presentationBackground(TR.sheet)
+        }
+        .task(id: model.selectedTrackID) {
+            soundtrack.play(track: model.selectedTrack)
+        }
+        .onDisappear {
+            soundtrack.stop()
         }
         .accessibilityIdentifier("second-watch-screen")
     }
@@ -705,6 +736,10 @@ private struct MusicSheet: View {
                     .font(TR.ui(13))
                     .foregroundStyle(.white.opacity(0.57))
                     .lineSpacing(4)
+
+                Label("Original instrumental loops · generated on this iPhone", systemImage: "iphone.and.arrow.forward")
+                    .font(TR.ui(11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.46))
 
                 VStack(spacing: 8) {
                     ForEach(model.tracks) { track in
