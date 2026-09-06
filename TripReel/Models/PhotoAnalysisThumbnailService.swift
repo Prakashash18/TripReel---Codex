@@ -15,6 +15,7 @@ protocol PhotoAnalysisThumbnailServing: Sendable {
 
 enum PhotoAnalysisThumbnailError: LocalizedError {
     case unavailable
+    case inaccessible
     case decodeFailed
     case encodeFailed
     case tooLarge
@@ -22,6 +23,7 @@ enum PhotoAnalysisThumbnailError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable: "The photo is not available right now."
+        case .inaccessible: "The photo is no longer available to TripReel."
         case .decodeFailed: "TripReel couldn't read the photo."
         case .encodeFailed: "TripReel couldn't prepare a private thumbnail."
         case .tooLarge: "The reduced thumbnail exceeded TripReel's upload limit."
@@ -71,7 +73,7 @@ final class PhotoAnalysisThumbnailService: PhotoAnalysisThumbnailServing, @unche
     private func requestLibraryImage(localIdentifier: String) async throws -> UIImage {
         let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
         guard let asset = fetchResult.firstObject else {
-            throw PhotoAnalysisThumbnailError.unavailable
+            throw PhotoAnalysisThumbnailError.inaccessible
         }
 
         let requestState = PhotoKitImageRequestState(manager: imageManager)

@@ -158,6 +158,47 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         model.go(.trips)
     }
 
+    func testDeferredPhotosUsePositiveFollowUpAndCanBeCheckedAgain() async throws {
+        let preferences = makePreferences()
+        preferences.set("onDeviceOnly", forKey: "tripreel.cloud-photo-analysis-preference.v1")
+        defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
+        let thumbnails = RetryableThumbnailStub()
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: StubPhotoLibraryForSelection(),
+            cloudPhotoAnalysis: CloudAnalysisSpy(results: []),
+            photoAnalysisThumbnails: thumbnails,
+            nativePhotoIntelligence: NativeIntelligenceStub(),
+            preferenceStore: preferences
+        )
+
+        model.requestBuild(trip: makeTrip(count: 3))
+        try await waitUntil {
+            !model.isAnalyzingPhotos && model.photoAnalysisFollowUp != nil
+        }
+
+        XCTAssertNil(model.libraryErrorMessage)
+        XCTAssertEqual(model.photos.count, 3)
+        XCTAssertEqual(model.photoAnalysisFollowUp?.syncingFromPhotosCount, 1)
+        XCTAssertEqual(model.photoAnalysisFollowUp?.anotherLookCount, 1)
+        XCTAssertEqual(model.photoAnalysisFollowUp?.accessNeededCount, 1)
+        XCTAssertEqual(
+            model.photoAnalysisFollowUp?.previewMessage,
+            "3 more moments can be checked later"
+        )
+
+        model.retryPhotoAnalysisFollowUp()
+        try await waitUntil {
+            !model.isAnalyzingPhotos && model.photoAnalysisFollowUp == nil
+        }
+
+        let requestCount = await thumbnails.observedRequestCount()
+        XCTAssertEqual(requestCount, 6)
+        XCTAssertEqual(model.photos.count, 3)
+        model.go(.trips)
+    }
+
     func testAuthorizationLossCancelsAnalysisAndClearsPendingFilm() async throws {
         let preferences = makePreferences()
         preferences.set("onDeviceOnly", forKey: "tripreel.cloud-photo-analysis-preference.v1")
@@ -278,6 +319,42 @@ private actor SlowThumbnailStub: PhotoAnalysisThumbnailServing {
     func prepare(asset: TripAsset) async throws -> PreparedPhotoThumbnail {
         try await Task.sleep(nanoseconds: 60_000_000_000)
         throw CancellationError()
+    }
+}
+
+private actor RetryableThumbnailStub: PhotoAnalysisThumbnailServing {
+    private var attempts: [String: Int] = [:]
+
+    func prepare(asset: TripAsset) async throws -> PreparedPhotoThumbnail {
+        let attempt = (attempts[asset.id] ?? 0) + 1
+        attempts[asset.id] = attempt
+        if attempt == 1 {
+            switch asset.id {
+            case "asset-0": throw PhotoAnalysisThumbnailError.unavailable
+            case "asset-1": throw PhotoAnalysisThumbnailError.decodeFailed
+            default: throw PhotoAnalysisThumbnailError.inaccessible
+            }
+        }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let context = CGContext(
+            data: nil,
+            width: 1,
+            height: 1,
+            bitsPerComponent: 8,
+            bytesPerRow: 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        return PreparedPhotoThumbnail(
+            id: asset.id,
+            cgImage: context.makeImage()!,
+            jpegData: Data([0xFF, 0xD8, 0xFF, 0xD9])
+        )
+    }
+
+    func observedRequestCount() -> Int {
+        attempts.values.reduce(0, +)
     }
 }
 

@@ -48,7 +48,43 @@ struct FirstWatchScreen: View {
                         .font(TR.display(29))
                         .fixedSize(horizontal: false, vertical: true)
 
-                    if let summary = model.smartSelectionSummary {
+                    if let followUp = model.photoAnalysisFollowUp {
+                        Button {
+                            model.isSmartSelectionReviewPresented = true
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(TR.keep)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Preview ready")
+                                        .font(TR.ui(12, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.86))
+                                    Text(followUp.previewMessage)
+                                        .font(TR.ui(11))
+                                        .foregroundStyle(.white.opacity(0.56))
+                                        .lineLimit(2)
+                                }
+
+                                Spacer(minLength: 8)
+
+                                Text("View")
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                            .foregroundStyle(.white.opacity(0.72))
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 10)
+                            .background(.black.opacity(0.30))
+                            .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("photo-analysis-follow-up-button")
+                        .accessibilityLabel("Preview ready. \(followUp.previewMessage)")
+                        .accessibilityHint("Shows optional ways to check more photos")
+                    } else if let summary = model.smartSelectionSummary {
                         Button {
                             model.isSmartSelectionReviewPresented = true
                         } label: {

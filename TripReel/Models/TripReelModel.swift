@@ -539,6 +539,7 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var photoAnalysisProcessedCount = 0
     @Published private(set) var photoAnalysisTotalCount = 0
     @Published private(set) var excludedPhotos: [SmartExcludedPhoto] = []
+    @Published private(set) var photoAnalysisFollowUp: PhotoAnalysisFollowUp?
     @Published var isSmartSelectionReviewPresented = false
 
     let usesDemoData: Bool
@@ -568,7 +569,9 @@ final class TripReelModel: ObservableObject {
     private var resolvedCoordinates: [String: PhotoCoordinate] = [:]
     private var activeImportedPhotos: [ManualImportedPhoto] = []
     private var pendingBuildTrip: Trip?
+    private var activeAnalysisTrip: Trip?
     private var activePhotoInsights: [String: MontagePhotoInsight] = [:]
+    private var manuallyIncludedPhotoIDs: Set<String> = []
 
     private static let cloudPreferenceKey = "tripreel.cloud-photo-analysis-preference.v1"
 
@@ -816,10 +819,21 @@ final class TripReelModel: ObservableObject {
         guard let updatedTrip = selectedTrip.replacingAssets(selectedTrip.assets + [restored.asset]) else {
             return
         }
+        manuallyIncludedPhotoIDs.insert(restored.id)
         self.selectedTrip = updatedTrip
         photos = Self.makeReelPhotos(from: updatedTrip, insights: activePhotoInsights)
         cutPhotoIDs.formIntersection(Set(photos.map(\.id)))
         currentPhotoIndex = min(currentPhotoIndex, max(0, photos.count - 1))
+    }
+
+    /// Rechecks the source trip on demand while leaving the current preview
+    /// intact until a refreshed cut is ready. This deliberately happens only
+    /// after the user asks, so temporary iCloud work never blocks first watch.
+    func retryPhotoAnalysisFollowUp() {
+        guard let trip = activeAnalysisTrip,
+              photoAnalysisFollowUp?.hasAnythingToCheck == true,
+              !isAnalyzingPhotos else { return }
+        beginSmartPhotoSelection(for: trip, preservesExistingFollowUp: true)
     }
 
     private func setCloudAnalysisPreference(_ preference: CloudAnalysisPreference) {
@@ -827,8 +841,16 @@ final class TripReelModel: ObservableObject {
         preferenceStore.set(preference.rawValue, forKey: Self.cloudPreferenceKey)
     }
 
-    private func beginSmartPhotoSelection(for trip: Trip) {
+    private func beginSmartPhotoSelection(
+        for trip: Trip,
+        preservesExistingFollowUp: Bool = false
+    ) {
         photoAnalysisTask?.cancel()
+        activeAnalysisTrip = trip
+        if !preservesExistingFollowUp {
+            photoAnalysisFollowUp = nil
+            manuallyIncludedPhotoIDs = []
+        }
         let generation = UUID()
         photoAnalysisGeneration = generation
         excludedPhotos = []
@@ -855,6 +877,7 @@ final class TripReelModel: ObservableObject {
         var pendingCloudBatch: [(asset: TripAsset, jpegData: Data)] = []
         var analyzedCount = 0
         var unavailableCount = 0
+        var followUp = PhotoAnalysisFollowUp()
         var cloudReviewedCount = 0
         var cloudFailureMessage: String?
         var cloudFailed = false
@@ -911,7 +934,7 @@ final class TripReelModel: ObservableObject {
                             return
                         } catch {
                             cloudFailed = true
-                            cloudFailureMessage = "Cloud enhancement wasn't available, so TripReel finished safely on this iPhone."
+                            cloudFailureMessage = "Cloud enhancement can be checked again later."
                             pendingCloudBatch.removeAll(keepingCapacity: false)
                         }
                     }
@@ -923,6 +946,14 @@ final class TripReelModel: ObservableObject {
                 // A missing iCloud thumbnail or unsupported image should never
                 // remove a memory. It stays in the film by default.
                 unavailableCount += 1
+                switch Self.photoAnalysisFollowUpReason(for: error) {
+                case .syncingFromPhotos:
+                    followUp.syncingFromPhotosCount += 1
+                case .anotherLook:
+                    followUp.anotherLookCount += 1
+                case .accessNeeded:
+                    followUp.accessNeededCount += 1
+                }
             }
 
             recordProcessedPhoto(asset, index: index, total: trip.assets.count)
@@ -942,7 +973,7 @@ final class TripReelModel: ObservableObject {
                 finishPhotoAnalysisCancellation(generation: generation)
                 return
             } catch {
-                cloudFailureMessage = "Cloud enhancement wasn't available, so TripReel finished safely on this iPhone."
+                cloudFailureMessage = "Cloud enhancement can be checked again later."
             }
             pendingCloudBatch.removeAll(keepingCapacity: false)
         } else if cloudAnalysisPreference == .enabled, !cloudPhotoAnalysis.isConfigured {
@@ -969,6 +1000,9 @@ final class TripReelModel: ObservableObject {
         for decision in contextualDecisions where decisions[decision.id] == nil {
             decisions[decision.id] = decision
         }
+        for photoID in manuallyIncludedPhotoIDs {
+            decisions.removeValue(forKey: photoID)
+        }
 
         // Never allow automation to create an empty film. If every image was a
         // high-confidence utility photo, keep the middle one and let the user
@@ -993,12 +1027,9 @@ final class TripReelModel: ObservableObject {
         photoAnalysisCurrentAsset = nil
         photoAnalysisTask = nil
         activePhotoInsights = montageInsights
-
-        if let cloudFailureMessage {
-            libraryErrorMessage = cloudFailureMessage
-        } else if unavailableCount > 0 {
-            libraryErrorMessage = "\(unavailableCount) photo\(unavailableCount == 1 ? " was" : "s were") unavailable for analysis and stayed in your film."
-        }
+        followUp.cloudPassCanBeRetried = cloudFailureMessage != nil
+            && cloudPhotoAnalysis.isConfigured
+        photoAnalysisFollowUp = followUp.hasAnythingToCheck ? followUp : nil
 
         _ = SmartPhotoSelectionOutcome(
             includedAssets: includedAssets,
@@ -1008,6 +1039,42 @@ final class TripReelModel: ObservableObject {
             unavailableCount: unavailableCount
         )
         startBuild(trip: selected)
+    }
+
+    private static func photoAnalysisFollowUpReason(
+        for error: Error
+    ) -> PhotoAnalysisFollowUpReason {
+        if let thumbnailError = error as? PhotoAnalysisThumbnailError {
+            switch thumbnailError {
+            case .unavailable:
+                return .syncingFromPhotos
+            case .inaccessible:
+                return .accessNeeded
+            case .decodeFailed, .encodeFailed, .tooLarge:
+                return .anotherLook
+            }
+        }
+
+        if let nativeError = error as? NativePhotoIntelligenceError {
+            switch nativeError {
+            case .photoLibraryAccessUnavailable, .assetNotFound:
+                return .accessNeeded
+            case .assetUnavailableLocally, .imageRequestFailed:
+                return .syncingFromPhotos
+            case .invalidImage, .visionRequestFailed:
+                return .anotherLook
+            }
+        }
+
+        let error = error as NSError
+        if error.domain == PHPhotosErrorDomain {
+            return .syncingFromPhotos
+        }
+        let message = error.localizedDescription.lowercased()
+        if message.contains("icloud") || message.contains("network") || message.contains("download") {
+            return .syncingFromPhotos
+        }
+        return .anotherLook
     }
 
     private func reviewCloudBatch(
@@ -1530,6 +1597,7 @@ final class TripReelModel: ObservableObject {
         cleanupSelection.subtract(photoIDs)
         history.removeAll { photoIDs.contains($0.id) }
         excludedPhotos.removeAll { photoIDs.contains($0.id) }
+        manuallyIncludedPhotoIDs.subtract(photoIDs)
         activePhotoInsights = activePhotoInsights.filter { !photoIDs.contains($0.key) }
         libraryPreviewPhotos.removeAll { photo in
             if case let .library(identifier) = photo.source {
@@ -1583,6 +1651,9 @@ final class TripReelModel: ObservableObject {
     func clearLibraryState(afterAuthorizationChangedTo status: PHAuthorizationStatus) {
         cancelPhotoAnalysis()
         pendingBuildTrip = nil
+        activeAnalysisTrip = nil
+        photoAnalysisFollowUp = nil
+        manuallyIncludedPhotoIDs = []
         isCloudAnalysisConsentPresented = false
         cloudConsentIsSettings = false
         isSmartSelectionReviewPresented = false

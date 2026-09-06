@@ -321,6 +321,12 @@ struct SmartSelectionReviewView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 16)
 
+                if let followUp = model.photoAnalysisFollowUp {
+                    photoAnalysisFollowUpCard(followUp)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 14)
+                }
+
                 if model.excludedPhotos.isEmpty {
                     VStack(spacing: 13) {
                         Image(systemName: "checkmark.circle")
@@ -345,6 +351,100 @@ struct SmartSelectionReviewView: View {
         }
         .foregroundStyle(TR.cream)
         .accessibilityIdentifier("smart-selection-review")
+    }
+
+    private func photoAnalysisFollowUpCard(_ followUp: PhotoAnalysisFollowUp) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 11) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(TR.accent)
+                    .frame(width: 30, height: 30)
+                    .background(TR.accent.opacity(0.12))
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Your preview is ready")
+                        .font(TR.ui(15, weight: .semibold))
+                    Text("Enjoy it now. TripReel can check a few more moments whenever you choose.")
+                        .font(TR.ui(12))
+                        .foregroundStyle(.white.opacity(0.58))
+                        .lineSpacing(3)
+                }
+            }
+
+            VStack(spacing: 9) {
+                if followUp.syncingFromPhotosCount > 0 {
+                    followUpRow(
+                        "Still syncing from Photos",
+                        count: followUp.syncingFromPhotosCount,
+                        symbol: "icloud.and.arrow.down"
+                    )
+                }
+                if followUp.anotherLookCount > 0 {
+                    followUpRow(
+                        "Ready for another look",
+                        count: followUp.anotherLookCount,
+                        symbol: "magnifyingglass"
+                    )
+                }
+                if followUp.accessNeededCount > 0 {
+                    followUpRow(
+                        "May need Photos access",
+                        count: followUp.accessNeededCount,
+                        symbol: "photo.on.rectangle"
+                    )
+                }
+                if followUp.cloudPassCanBeRetried {
+                    followUpRow("Cloud finishing pass", detail: "Available later", symbol: "cloud")
+                }
+            }
+
+            Button {
+                model.retryPhotoAnalysisFollowUp()
+                dismiss()
+            } label: {
+                Label("Check again now", systemImage: "arrow.clockwise")
+                    .font(TR.ui(13, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .foregroundStyle(TR.ink)
+                    .background(TR.cream)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("photo-analysis-retry-button")
+            .accessibilityHint("Checks the source trip again and refreshes the preview")
+        }
+        .padding(15)
+        .glassCard(cornerRadius: 18)
+    }
+
+    private func followUpRow(
+        _ title: String,
+        count: Int? = nil,
+        detail: String? = nil,
+        symbol: String
+    ) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.54))
+                .frame(width: 18)
+            Text(title)
+                .font(TR.ui(12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.72))
+            Spacer()
+            if let count {
+                Text("\(count)")
+                    .font(TR.mono(11))
+                    .foregroundStyle(.white.opacity(0.52))
+            } else if let detail {
+                Text(detail)
+                    .font(TR.ui(10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.48))
+            }
+        }
     }
 
     private func excludedRow(_ excluded: SmartExcludedPhoto) -> some View {

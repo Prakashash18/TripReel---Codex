@@ -81,6 +81,36 @@ struct SmartPhotoSelectionOutcome: Sendable {
     let unavailableCount: Int
 }
 
+/// A gentle, non-blocking summary of photos that can be checked again after a
+/// complete first cut is ready. Counts contain no identifiers or image data.
+struct PhotoAnalysisFollowUp: Equatable, Sendable {
+    var syncingFromPhotosCount = 0
+    var anotherLookCount = 0
+    var accessNeededCount = 0
+    var cloudPassCanBeRetried = false
+
+    var photoCount: Int {
+        syncingFromPhotosCount + anotherLookCount + accessNeededCount
+    }
+
+    var hasAnythingToCheck: Bool {
+        photoCount > 0 || cloudPassCanBeRetried
+    }
+
+    var previewMessage: String {
+        if photoCount > 0 {
+            return "\(photoCount) more moment\(photoCount == 1 ? "" : "s") can be checked later"
+        }
+        return "A cloud finishing pass can be checked later"
+    }
+}
+
+enum PhotoAnalysisFollowUpReason: Sendable {
+    case syncingFromPhotos
+    case anotherLook
+    case accessNeeded
+}
+
 enum SmartPhotoSelectionPolicy {
     /// Metadata screenshots are Apple's own high-confidence subtype and never
     /// need to leave the device for identification.
