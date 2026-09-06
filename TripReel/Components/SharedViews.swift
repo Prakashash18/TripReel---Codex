@@ -9,6 +9,17 @@ enum PhotoDisplayContentMode: Hashable, Sendable {
     case fit
 }
 
+enum PhotoAssetLoadState: Equatable, Sendable {
+    case loading(progress: Double?)
+    case ready
+    case failed
+
+    var isReady: Bool {
+        if case .ready = self { return true }
+        return false
+    }
+}
+
 enum PhotoDisplaySizing {
     static func targetSize(
         sourcePixelWidth: Int,
@@ -71,6 +82,7 @@ struct PhotoAssetView: View {
     var contentScale: CGFloat = 1
     var contentOffset: CGSize = .zero
     var samplingScale: CGFloat = 1
+    var onLoadStateChange: ((PhotoAssetLoadState) -> Void)?
 
     init(
         source: PhotoSource,
@@ -79,7 +91,8 @@ struct PhotoAssetView: View {
         contentMode: PhotoDisplayContentMode = .fill,
         contentScale: CGFloat = 1,
         contentOffset: CGSize = .zero,
-        samplingScale: CGFloat? = nil
+        samplingScale: CGFloat? = nil,
+        onLoadStateChange: ((PhotoAssetLoadState) -> Void)? = nil
     ) {
         self.source = source
         self.label = label
@@ -88,6 +101,7 @@ struct PhotoAssetView: View {
         self.contentScale = max(1, contentScale)
         self.contentOffset = contentOffset
         self.samplingScale = max(1, samplingScale ?? contentScale)
+        self.onLoadStateChange = onLoadStateChange
     }
 
     init(imageName: String, label: String? = nil, dim: Bool = false) {
@@ -100,7 +114,8 @@ struct PhotoAssetView: View {
                 source: source,
                 size: proxy.size,
                 contentMode: contentMode,
-                samplingScale: samplingScale
+                samplingScale: samplingScale,
+                onLoadStateChange: onLoadStateChange
             )
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 .scaleEffect(contentScale)
@@ -141,6 +156,8 @@ struct MontageView: View {
     var secondsPerSlide = 2.2
     @State private var currentIndex = 0
     @State private var motionPhase = false
+    @State private var currentPhotoLoadState: PhotoAssetLoadState = .loading(progress: nil)
+    @State private var lastReadySlide: MontageSlide?
 
     private var timeline: [MontageTimelineItem] {
         if !photos.isEmpty {
@@ -234,13 +251,39 @@ struct MontageView: View {
                         : .opacity.combined(with: .scale(scale: 1.012))
                 )
             } else if let slide = currentSlide {
-                MontageSlideArtwork(
-                    slide: slide,
-                    showLabel: showLabels,
-                    motionPhase: motionPhase,
-                    reduceMotion: motionReduced,
-                    motionIntensity: motionIntensity
-                )
+                ZStack {
+                    if !currentPhotoLoadState.isReady,
+                       let lastReadySlide,
+                       lastReadySlide.id != slide.id {
+                        MontageSlideArtwork(
+                            slide: lastReadySlide,
+                            showLabel: showLabels,
+                            motionPhase: motionPhase,
+                            reduceMotion: motionReduced,
+                            motionIntensity: motionIntensity
+                        )
+                    }
+
+                    MontageSlideArtwork(
+                        slide: slide,
+                        showLabel: showLabels,
+                        motionPhase: motionPhase,
+                        reduceMotion: motionReduced,
+                        motionIntensity: motionIntensity,
+                        onLoadStateChange: { state in
+                            handleLoadState(state, for: slide)
+                        }
+                    )
+                    .opacity(currentPhotoLoadState.isReady ? 1 : 0.001)
+
+                    if !currentPhotoLoadState.isReady, lastReadySlide == nil {
+                        MontagePhotoWaitingArtwork(loadState: currentPhotoLoadState)
+                    } else if !currentPhotoLoadState.isReady {
+                        MontagePhotoWaitingBadge(loadState: currentPhotoLoadState)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                            .padding(.bottom, 18)
+                    }
+                }
                 .id("\(slide.id)-\(slide.frameStyle.rawValue)")
                 .transition(motionReduced ? .opacity : slide.motionStyle.transition)
             } else {
@@ -311,13 +354,23 @@ struct MontageView: View {
         }
         .task(id: contentKey) {
             currentIndex = 0
+            lastReadySlide = nil
+            prepareLoadStateForCurrentItem()
             guard !timeline.isEmpty else { return }
             while !Task.isCancelled {
+                let itemID = currentItem?.id
+                if case .photo = currentItem,
+                   !(await waitForCurrentPhoto(itemID: itemID)) {
+                    guard !Task.isCancelled else { return }
+                    try? await Task.sleep(nanoseconds: 140_000_000)
+                    advanceToNextItem()
+                    continue
+                }
                 let duration = currentItem?.duration(defaultPhotoDuration: secondsPerSlide) ?? secondsPerSlide
                 let delay = UInt64(max(0.6, duration) * 1_000_000_000)
                 try? await Task.sleep(nanoseconds: delay)
                 guard !Task.isCancelled else { return }
-                currentIndex = (currentIndex + 1) % timeline.count
+                advanceToNextItem()
             }
         }
     }
@@ -332,6 +385,92 @@ struct MontageView: View {
         PhotoAssetImageLoader.preheat(sources: sources)
     }
 
+    private func prepareLoadStateForCurrentItem() {
+        guard case let .photo(photo) = currentItem else {
+            currentPhotoLoadState = .ready
+            return
+        }
+        if case .bundled = photo.source {
+            currentPhotoLoadState = .ready
+        } else {
+            currentPhotoLoadState = .loading(progress: nil)
+        }
+    }
+
+    private func advanceToNextItem() {
+        guard !timeline.isEmpty else { return }
+        let nextIndex = (currentIndex + 1) % timeline.count
+        if case let .photo(photo) = timeline[nextIndex], case .bundled = photo.source {
+            currentPhotoLoadState = .ready
+        } else if case .photo = timeline[nextIndex] {
+            currentPhotoLoadState = .loading(progress: nil)
+        } else {
+            currentPhotoLoadState = .ready
+        }
+        currentIndex = nextIndex
+    }
+
+    private func handleLoadState(_ state: PhotoAssetLoadState, for slide: MontageSlide) {
+        guard currentSlide?.id == slide.id else { return }
+        currentPhotoLoadState = state
+        if state.isReady {
+            lastReadySlide = slide
+        }
+    }
+
+    private func waitForCurrentPhoto(itemID: String?) async -> Bool {
+        // Preheating normally makes this immediate. A short grace period lets
+        // iCloud finish without putting an empty frame into the montage; after
+        // that, this pass skips the slide and can pick it up on the next loop.
+        // Give the opening frame a little more time because there is nothing
+        // honest to hold behind it. Once playback is under way, move on quickly
+        // while the seven-frame preheater continues fetching in the background.
+        let attempts = lastReadySlide == nil ? 80 : 12
+        for _ in 0..<attempts {
+            guard !Task.isCancelled, currentItem?.id == itemID else { return false }
+            switch currentPhotoLoadState {
+            case .ready:
+                return true
+            case .failed:
+                return false
+            case .loading:
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+        }
+        return false
+    }
+
+}
+
+private struct MontagePhotoWaitingBadge: View {
+    let loadState: PhotoAssetLoadState
+
+    var body: some View {
+        HStack(spacing: 7) {
+            ProgressView(value: progress)
+                .progressViewStyle(.circular)
+                .controlSize(.small)
+                .tint(TR.accent)
+            Text(detail)
+                .font(TR.ui(10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.76))
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .background(.black.opacity(0.64))
+        .clipShape(Capsule())
+        .transition(.opacity)
+    }
+
+    private var progress: Double? {
+        guard case let .loading(progress) = loadState else { return nil }
+        return progress
+    }
+
+    private var detail: String {
+        guard let progress else { return "Preparing next moment" }
+        return "iCloud \(Int(progress * 100))%"
+    }
 }
 
 private struct MontageSlide {
@@ -345,6 +484,46 @@ private struct MontageSlide {
     let cropScale: Double
     let cropOffsetX: Double
     let cropOffsetY: Double
+}
+
+private struct MontagePhotoWaitingArtwork: View {
+    let loadState: PhotoAssetLoadState
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.16, green: 0.085, blue: 0.035),
+                    Color(red: 0.045, green: 0.03, blue: 0.022),
+                    .black
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            VStack(spacing: 12) {
+                ProgressView(value: progress)
+                    .progressViewStyle(.circular)
+                    .tint(TR.accent)
+                Text("Preparing the next moment")
+                    .font(TR.ui(12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.70))
+                Text(detail)
+                    .font(TR.ui(10))
+                    .foregroundStyle(.white.opacity(0.42))
+            }
+        }
+    }
+
+    private var progress: Double? {
+        guard case let .loading(progress) = loadState else { return nil }
+        return progress
+    }
+
+    private var detail: String {
+        guard let progress else { return "TripReel will skip it for now if it needs longer." }
+        return "Downloading from iCloud · \(Int(progress * 100))%"
+    }
 }
 
 private struct MontageTitleArtwork: View {
@@ -431,6 +610,7 @@ private struct MontageSlideArtwork: View {
     let motionPhase: Bool
     let reduceMotion: Bool
     let motionIntensity: MontageMotionIntensity
+    var onLoadStateChange: ((PhotoAssetLoadState) -> Void)? = nil
 
     var body: some View {
         GeometryReader { proxy in
@@ -453,7 +633,8 @@ private struct MontageSlideArtwork: View {
             label: showLabel ? slide.label : nil,
             contentScale: fullBleedScale * CGFloat(slide.cropScale),
             contentOffset: combinedOffset(in: size),
-            samplingScale: CGFloat(slide.cropScale) * (1 + 0.085 * amplitude)
+            samplingScale: CGFloat(slide.cropScale) * (1 + 0.085 * amplitude),
+            onLoadStateChange: onLoadStateChange
         )
     }
 
@@ -478,7 +659,8 @@ private struct MontageSlideArtwork: View {
                 contentMode: .fit,
                 contentScale: CGFloat(slide.cropScale),
                 contentOffset: cropOffset(in: frameSize),
-                samplingScale: CGFloat(slide.cropScale) * (1 + 0.028 * amplitude)
+                samplingScale: CGFloat(slide.cropScale) * (1 + 0.028 * amplitude),
+                onLoadStateChange: onLoadStateChange
             )
             .frame(width: frameSize.width, height: frameSize.height)
             .background(.black.opacity(0.34))
@@ -503,7 +685,8 @@ private struct MontageSlideArtwork: View {
                 contentOffset: cropOffset(
                     in: CGSize(width: size.width, height: size.height * 0.62)
                 ),
-                samplingScale: CGFloat(slide.cropScale) * (1 + 0.028 * amplitude)
+                samplingScale: CGFloat(slide.cropScale) * (1 + 0.028 * amplitude),
+                onLoadStateChange: onLoadStateChange
             )
                 .frame(height: size.height * 0.62)
                 .scaleEffect(framedScale)
@@ -541,7 +724,8 @@ private struct MontageSlideArtwork: View {
                             height: size.height * 0.62
                         )
                     ),
-                    samplingScale: CGFloat(slide.cropScale) * (1 + 0.028 * amplitude)
+                    samplingScale: CGFloat(slide.cropScale) * (1 + 0.028 * amplitude),
+                    onLoadStateChange: onLoadStateChange
                 )
                     .frame(height: size.height * 0.62)
                     .background(Color(red: 0.12, green: 0.09, blue: 0.07))
@@ -698,6 +882,7 @@ private struct PhotoSourceImage: View {
     let size: CGSize
     let contentMode: PhotoDisplayContentMode
     let samplingScale: CGFloat
+    let onLoadStateChange: ((PhotoAssetLoadState) -> Void)?
     @Environment(\.displayScale) private var displayScale
     @StateObject private var loader = PhotoAssetImageLoader()
 
@@ -791,7 +976,17 @@ private struct PhotoSourceImage: View {
             loader.retry(requestKey)
         }
         .onDisappear { loader.cancel() }
+        .onChange(of: reportedLoadState, initial: true) { _, state in
+            onLoadStateChange?(state)
+        }
         .accessibilityLabel(loader.failed ? "Photo unavailable. Tap to try again." : "Photo")
+    }
+
+    private var reportedLoadState: PhotoAssetLoadState {
+        if case .bundled = source { return .ready }
+        if loader.isPreviewReady { return .ready }
+        if loader.failed { return .failed }
+        return .loading(progress: loader.downloadProgress)
     }
 }
 
@@ -805,6 +1000,7 @@ private struct PhotoImageRequestKey: Hashable, Sendable {
 @MainActor
 private final class PhotoAssetImageLoader: ObservableObject {
     @Published private(set) var image: UIImage?
+    @Published private(set) var isPreviewReady = false
     @Published private(set) var failed = false
     @Published private(set) var downloadProgress: Double?
 
@@ -882,11 +1078,15 @@ private final class PhotoAssetImageLoader: ObservableObject {
         guard self.key != key else { return }
         cancel()
         self.key = key
+        isPreviewReady = false
         failed = false
         downloadProgress = nil
         if let cached = Self.cachedPhoto(for: key.source) {
             image = cached.image
-            if Self.isSufficient(cached, for: key) { return }
+            if Self.isSufficient(cached, for: key) {
+                isPreviewReady = true
+                return
+            }
         }
         request(key)
     }
@@ -899,6 +1099,7 @@ private final class PhotoAssetImageLoader: ObservableObject {
         retryTask?.cancel()
         retryTask = nil
         retryCount = 0
+        isPreviewReady = false
         failed = false
         downloadProgress = nil
         usingDataFallback = false
@@ -976,6 +1177,7 @@ private final class PhotoAssetImageLoader: ObservableObject {
                             self.retryTask?.cancel()
                             self.retryTask = nil
                             self.failed = false
+                            self.isPreviewReady = true
                             self.downloadProgress = nil
                             self.retryCount = 0
                             self.usingDataFallback = false
@@ -1051,6 +1253,7 @@ private final class PhotoAssetImageLoader: ObservableObject {
                         )
                         self.downloadProgress = nil
                         self.failed = false
+                        self.isPreviewReady = true
                         self.retryCount = 0
                     } else {
                         self.scheduleRetry(for: key)
@@ -1110,6 +1313,7 @@ private final class PhotoAssetImageLoader: ObservableObject {
                     sourcePixelHeight: decoded.sourcePixelHeight
                 )
                 self.failed = false
+                self.isPreviewReady = true
                 self.downloadProgress = nil
                 self.retryCount = 0
             } else {
@@ -1134,6 +1338,7 @@ private final class PhotoAssetImageLoader: ObservableObject {
             guard !Task.isCancelled, let self, self.key == key else { return }
             self.retryTask = nil
             self.failed = false
+            self.isPreviewReady = false
             self.downloadProgress = nil
             self.request(key)
         }
@@ -1259,6 +1464,7 @@ private final class PhotoAssetImageLoader: ObservableObject {
         cancelImageRequest()
         key = nil
         image = nil
+        isPreviewReady = false
         failed = false
         downloadProgress = nil
     }

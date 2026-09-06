@@ -19,6 +19,7 @@ enum CloudAnalysisPreference: String, Sendable {
 }
 
 enum SmartPhotoExclusionReason: String, CaseIterable, Sendable {
+    case waitingForPhotos
     case screenshot
     case document
     case lowQuality
@@ -28,6 +29,7 @@ enum SmartPhotoExclusionReason: String, CaseIterable, Sendable {
 
     var title: String {
         switch self {
+        case .waitingForPhotos: "Waiting for Photos"
         case .screenshot: "Screenshot"
         case .document: "Order or document"
         case .lowQuality: "Low quality"
@@ -39,6 +41,7 @@ enum SmartPhotoExclusionReason: String, CaseIterable, Sendable {
 
     var symbol: String {
         switch self {
+        case .waitingForPhotos: "icloud.and.arrow.down"
         case .screenshot: "iphone"
         case .document: "doc.text.viewfinder"
         case .lowQuality: "camera.filters"

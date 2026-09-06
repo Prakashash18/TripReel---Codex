@@ -110,13 +110,18 @@ struct ExportScreen: View {
                 .presentationBackground(TR.sheet)
         }
         .alert(
-            "Export couldn't finish",
+            model.exportErrorTitle,
             isPresented: Binding(
                 get: { model.exportErrorMessage != nil },
                 set: { if !$0 { model.dismissExportMessage() } }
             )
         ) {
-            Button("OK", role: .cancel) { model.dismissExportMessage() }
+            if model.exportCanRetryPhotoDownload {
+                Button("Retry download") { model.retryExportPhotoDownload() }
+                Button("Not now", role: .cancel) { model.dismissExportMessage() }
+            } else {
+                Button("OK", role: .cancel) { model.dismissExportMessage() }
+            }
         } message: {
             Text(model.exportErrorMessage ?? "Please try again.")
         }
@@ -505,18 +510,33 @@ struct RenderingScreen: View {
                     }
                     .trEntrance(0, distance: 12)
 
-                Text("Rendering")
+                Text(model.exportProgressTitle)
                     .font(TR.display(32))
+                    .multilineTextAlignment(.center)
                     .padding(.top, 32)
                     .padding(.bottom, 8)
                     .trEntrance(1, distance: 8)
+                    .contentTransition(.opacity)
 
-                MetadataText(
-                    text: "\(Int(model.renderProgress * 100))% · full-resolution video",
-                    color: .white.opacity(0.62)
-                )
+                Text(model.exportProgressDetail.uppercased())
+                    .font(TR.mono(11, weight: .medium))
+                    .tracking(1.1)
+                    .foregroundStyle(.white.opacity(0.62))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.72)
+                    .padding(.horizontal, 28)
                 .contentTransition(.numericText())
-                .animation(reduceMotion ? nil : TRMotion.progress, value: model.renderProgress)
+                .animation(reduceMotion ? nil : TRMotion.progress, value: model.exportProgressDetail)
+
+                if case .preparingPhotos = model.exportProgressPhase {
+                    Text("TripReel retries iCloud automatically before it starts encoding.")
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.42))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 44)
+                        .padding(.top, 10)
+                }
 
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {

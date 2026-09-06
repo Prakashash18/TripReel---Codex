@@ -532,6 +532,53 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(savedURL, model.exportedVideoURL)
     }
 
+    func testUnavailableExportPhotoOffersOneTapRetryWithoutLosingQuality() async throws {
+        let exporter = FailOnceVideoExporter()
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            videoExporter: exporter
+        )
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let asset = TripAsset(
+            id: "icloud-photo",
+            source: .bundled("my-khe-beach"),
+            creationDate: date,
+            filename: "PHOTO_0006.JPG",
+            pixelWidth: 1_024,
+            pixelHeight: 1_536
+        )
+        let trip = Trip(
+            id: "icloud-trip",
+            place: "Test trip",
+            dates: "Today",
+            startDate: date,
+            endDate: date,
+            assets: [asset],
+            coverID: asset.id
+        )
+        model.startBuild(trip: trip)
+        model.startRender(hd: true)
+
+        for _ in 0..<100 where model.exportErrorMessage == nil {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(model.screen, .export)
+        XCTAssertEqual(model.exportErrorTitle, "A photo needs a little longer")
+        XCTAssertTrue(model.exportCanRetryPhotoDownload)
+        XCTAssertTrue(model.exportErrorMessage?.contains("kept every edit safe") == true)
+
+        model.retryExportPhotoDownload()
+        for _ in 0..<100 where model.screen != .done {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(model.screen, .done)
+        let qualities = await exporter.recordedQualities()
+        XCTAssertEqual(qualities, [.hd, .hd])
+    }
+
     func testPhotoFixtureIsDeterministic() {
         let model = makeModel()
 
@@ -1001,10 +1048,15 @@ private actor RecordingVideoExporter: TripReelVideoExporting {
 
     func export(
         _ request: TripReelVideoExportRequest,
-        progress: @escaping @Sendable (Double) -> Void
+        progress: @escaping @Sendable (TripReelVideoExportProgress) -> Void
     ) async throws -> URL {
         lastRequest = request
-        progress(1)
+        progress(
+            TripReelVideoExportProgress(
+                fraction: 1,
+                phase: .finalizing
+            )
+        )
         return FileManager.default.temporaryDirectory
             .appendingPathComponent("TripReel-test.mp4")
     }
@@ -1012,4 +1064,41 @@ private actor RecordingVideoExporter: TripReelVideoExporting {
     func saveToPhotoLibrary(_ url: URL) async throws {
         savedURL = url
     }
+}
+
+private actor FailOnceVideoExporter: TripReelVideoExporting {
+    private var qualities: [ExportQuality] = []
+
+    func export(
+        _ request: TripReelVideoExportRequest,
+        progress: @escaping @Sendable (TripReelVideoExportProgress) -> Void
+    ) async throws -> URL {
+        qualities.append(request.quality)
+        if qualities.count == 1 {
+            progress(
+                TripReelVideoExportProgress(
+                    fraction: 0.08,
+                    phase: .preparingPhotos(
+                        ready: 0,
+                        total: 1,
+                        currentLabel: "PHOTO_0006",
+                        downloadProgress: 0.42
+                    )
+                )
+            )
+            throw TripReelVideoExportError.photoUnavailable("PHOTO_0006")
+        }
+        progress(
+            TripReelVideoExportProgress(
+                fraction: 1,
+                phase: .finalizing
+            )
+        )
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent("TripReel-retry-test.mp4")
+    }
+
+    func saveToPhotoLibrary(_ url: URL) async throws {}
+
+    func recordedQualities() -> [ExportQuality] { qualities }
 }

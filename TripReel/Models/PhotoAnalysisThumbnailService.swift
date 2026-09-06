@@ -76,6 +76,34 @@ final class PhotoAnalysisThumbnailService: PhotoAnalysisThumbnailServing, @unche
             throw PhotoAnalysisThumbnailError.inaccessible
         }
 
+        // PhotoKit can transiently finish a thumbnail request without a final
+        // image while an optimized library hands the asset off from iCloud.
+        // Retry once, then fall back to source-data delivery and decode only a
+        // 512 px thumbnail. The original is never retained by TripReel.
+        for delay in [UInt64(0), 500_000_000] {
+            if delay > 0 {
+                try await Task.sleep(nanoseconds: delay)
+            }
+            do {
+                return try await requestLibraryThumbnail(asset: asset)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                continue
+            }
+        }
+
+        try await Task.sleep(nanoseconds: 800_000_000)
+        do {
+            return try await requestLibraryImageData(asset: asset)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw PhotoAnalysisThumbnailError.unavailable
+        }
+    }
+
+    private func requestLibraryThumbnail(asset: PHAsset) async throws -> UIImage {
         let requestState = PhotoKitImageRequestState(manager: imageManager)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -109,6 +137,56 @@ final class PhotoAnalysisThumbnailService: PhotoAnalysisThumbnailServing, @unche
                         return
                     }
                     requestState.finish(with: .success(image))
+                }
+                requestState.install(requestID: requestID)
+            }
+        } onCancel: {
+            requestState.cancel()
+        }
+    }
+
+    private func requestLibraryImageData(asset: PHAsset) async throws -> UIImage {
+        let requestState = PhotoKitImageRequestState(manager: imageManager)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                requestState.install(continuation: continuation)
+
+                let options = PHImageRequestOptions()
+                options.deliveryMode = .highQualityFormat
+                options.version = .current
+                options.isNetworkAccessAllowed = true
+
+                let requestID = imageManager.requestImageDataAndOrientation(
+                    for: asset,
+                    options: options
+                ) { data, _, _, info in
+                    if (info?[PHImageCancelledKey] as? Bool) == true {
+                        requestState.finish(with: .failure(CancellationError()))
+                        return
+                    }
+                    if let error = info?[PHImageErrorKey] as? Error {
+                        requestState.finish(with: .failure(error))
+                        return
+                    }
+                    guard let data,
+                          let source = CGImageSourceCreateWithData(
+                            data as CFData,
+                            [kCGImageSourceShouldCache: false] as CFDictionary
+                          ),
+                          let thumbnail = CGImageSourceCreateThumbnailAtIndex(
+                            source,
+                            0,
+                            [
+                                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                kCGImageSourceCreateThumbnailWithTransform: true,
+                                kCGImageSourceThumbnailMaxPixelSize: Self.maximumPixelSize,
+                                kCGImageSourceShouldCacheImmediately: true
+                            ] as CFDictionary
+                          ) else {
+                        requestState.finish(with: .failure(PhotoAnalysisThumbnailError.decodeFailed))
+                        return
+                    }
+                    requestState.finish(with: .success(UIImage(cgImage: thumbnail)))
                 }
                 requestState.install(requestID: requestID)
             }

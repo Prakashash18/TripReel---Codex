@@ -173,13 +173,15 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
             preferenceStore: preferences
         )
 
-        model.requestBuild(trip: makeTrip(count: 3))
+        model.requestBuild(trip: makeTrip(count: 4))
         try await waitUntil {
             !model.isAnalyzingPhotos && model.photoAnalysisFollowUp != nil
         }
 
         XCTAssertNil(model.libraryErrorMessage)
-        XCTAssertEqual(model.photos.count, 3)
+        XCTAssertEqual(model.photos.map(\.id), ["asset-3"])
+        XCTAssertEqual(model.excludedPhotos.count, 3)
+        XCTAssertTrue(model.excludedPhotos.allSatisfy { $0.reason == .waitingForPhotos })
         XCTAssertEqual(model.photoAnalysisFollowUp?.syncingFromPhotosCount, 1)
         XCTAssertEqual(model.photoAnalysisFollowUp?.anotherLookCount, 1)
         XCTAssertEqual(model.photoAnalysisFollowUp?.accessNeededCount, 1)
@@ -194,9 +196,33 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         }
 
         let requestCount = await thumbnails.observedRequestCount()
-        XCTAssertEqual(requestCount, 6)
-        XCTAssertEqual(model.photos.count, 3)
+        XCTAssertEqual(requestCount, 8)
+        XCTAssertEqual(model.photos.count, 4)
         model.go(.trips)
+    }
+
+    func testEntirelyUnavailableTripDoesNotCreateABlankPreview() async throws {
+        let preferences = makePreferences()
+        preferences.set("onDeviceOnly", forKey: "tripreel.cloud-photo-analysis-preference.v1")
+        defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: StubPhotoLibraryForSelection(),
+            cloudPhotoAnalysis: CloudAnalysisSpy(results: []),
+            photoAnalysisThumbnails: UnavailableThumbnailStub(),
+            nativePhotoIntelligence: NativeIntelligenceStub(),
+            preferenceStore: preferences
+        )
+
+        model.requestBuild(trip: makeTrip(count: 2))
+        try await waitUntil { !model.isAnalyzingPhotos && model.libraryErrorMessage != nil }
+
+        XCTAssertTrue(model.photos.isEmpty)
+        XCTAssertNotEqual(model.screen, .building)
+        XCTAssertEqual(model.excludedPhotos.count, 2)
+        XCTAssertTrue(model.excludedPhotos.allSatisfy { $0.reason == .waitingForPhotos })
+        XCTAssertTrue(model.libraryErrorMessage?.contains("instead of showing empty frames") == true)
     }
 
     func testAuthorizationLossCancelsAnalysisAndClearsPendingFilm() async throws {
@@ -322,6 +348,12 @@ private actor SlowThumbnailStub: PhotoAnalysisThumbnailServing {
     }
 }
 
+private actor UnavailableThumbnailStub: PhotoAnalysisThumbnailServing {
+    func prepare(asset: TripAsset) async throws -> PreparedPhotoThumbnail {
+        throw PhotoAnalysisThumbnailError.unavailable
+    }
+}
+
 private actor RetryableThumbnailStub: PhotoAnalysisThumbnailServing {
     private var attempts: [String: Int] = [:]
 
@@ -332,7 +364,8 @@ private actor RetryableThumbnailStub: PhotoAnalysisThumbnailServing {
             switch asset.id {
             case "asset-0": throw PhotoAnalysisThumbnailError.unavailable
             case "asset-1": throw PhotoAnalysisThumbnailError.decodeFailed
-            default: throw PhotoAnalysisThumbnailError.inaccessible
+            case "asset-2": throw PhotoAnalysisThumbnailError.inaccessible
+            default: break
             }
         }
 

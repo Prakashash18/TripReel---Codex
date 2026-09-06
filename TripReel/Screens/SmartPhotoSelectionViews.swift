@@ -510,20 +510,31 @@ struct SmartSelectionReviewView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button("Include") {
-                withAnimation(reduceMotion ? .easeInOut(duration: 0.16) : TRMotion.cardDismiss) {
-                    model.includeExcludedPhoto(id: excluded.id)
+            if excluded.reason == .waitingForPhotos {
+                Text("Check later")
+                    .font(TR.ui(11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.48))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 9)
+                    .background(.white.opacity(0.07))
+                    .clipShape(Capsule())
+                    .accessibilityLabel("Photo is not ready yet")
+            } else {
+                Button("Include") {
+                    withAnimation(reduceMotion ? .easeInOut(duration: 0.16) : TRMotion.cardDismiss) {
+                        model.includeExcludedPhoto(id: excluded.id)
+                    }
+                    includeFeedback += 1
                 }
-                includeFeedback += 1
+                .font(TR.ui(12, weight: .semibold))
+                .foregroundStyle(TR.ink)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(TR.cream)
+                .clipShape(Capsule())
+                .buttonStyle(TactileButtonStyle(pressedScale: 0.94))
+                .accessibilityLabel("Include \(excluded.asset.filename.isEmpty ? "photo" : excluded.asset.filename)")
             }
-            .font(TR.ui(12, weight: .semibold))
-            .foregroundStyle(TR.ink)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background(TR.cream)
-            .clipShape(Capsule())
-            .buttonStyle(TactileButtonStyle(pressedScale: 0.94))
-            .accessibilityLabel("Include \(excluded.asset.filename.isEmpty ? "photo" : excluded.asset.filename)")
         }
         .padding(10)
         .glassCard(cornerRadius: 17)

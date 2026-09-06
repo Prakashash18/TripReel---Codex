@@ -835,6 +835,14 @@ final class TripReelModel: ObservableObject {
     @Published var isSmartSelectionReviewPresented = false
     @Published private(set) var exportedVideoURL: URL?
     @Published private(set) var exportErrorMessage: String?
+    @Published private(set) var exportErrorTitle = "Export couldn't finish"
+    @Published private(set) var exportCanRetryPhotoDownload = false
+    @Published private(set) var exportProgressPhase: TripReelVideoExportPhase = .preparingPhotos(
+        ready: 0,
+        total: 0,
+        currentLabel: nil,
+        downloadProgress: nil
+    )
     @Published private(set) var isSavingExport = false
     @Published private(set) var exportSaveMessage: String?
 
@@ -1048,6 +1056,37 @@ final class TripReelModel: ObservableObject {
         let titleDuration = montageTitleCards.reduce(0) { $0 + $1.duration }
         let photoDuration = keptPhotos.reduce(0) { $0 + duration(for: $1) }
         return Self.durationText(seconds: photoDuration + titleDuration)
+    }
+
+    var exportProgressTitle: String {
+        switch exportProgressPhase {
+        case .preparingPhotos:
+            "Gathering full-quality photos"
+        case .rendering:
+            "Rendering"
+        case .addingSoundtrack:
+            "Adding your soundtrack"
+        case .finalizing:
+            "Finishing your film"
+        }
+    }
+
+    var exportProgressDetail: String {
+        switch exportProgressPhase {
+        case let .preparingPhotos(ready, total, currentLabel, downloadProgress):
+            let count = "\(ready) of \(total) ready"
+            guard let currentLabel else { return count }
+            if let downloadProgress {
+                return "\(count) · iCloud \(Int(downloadProgress * 100))%"
+            }
+            return "\(count) · \(currentLabel)"
+        case .rendering:
+            return "\(Int(renderProgress * 100))% · full-resolution video"
+        case .addingSoundtrack:
+            return "Picture complete · mixing audio"
+        case .finalizing:
+            return "Saving the finished file"
+        }
     }
 
     var montageTitleCards: [MontageTitleCard] {
@@ -1341,10 +1380,12 @@ final class TripReelModel: ObservableObject {
                 finishPhotoAnalysisCancellation(generation: generation)
                 return
             } catch {
-                // A missing iCloud thumbnail or unsupported image should never
-                // remove a memory. It stays in the film by default.
+                // A photo that is not locally readable stays recoverable in
+                // More Photos, but never becomes an empty frame in the first
+                // preview. A later retry rebuilds the cut and can restore it.
                 unavailableCount += 1
-                switch Self.photoAnalysisFollowUpReason(for: error) {
+                let followUpReason = Self.photoAnalysisFollowUpReason(for: error)
+                switch followUpReason {
                 case .syncingFromPhotos:
                     followUp.syncingFromPhotosCount += 1
                 case .anotherLook:
@@ -1352,6 +1393,13 @@ final class TripReelModel: ObservableObject {
                 case .accessNeeded:
                     followUp.accessNeededCount += 1
                 }
+                decisions[asset.id] = SmartExcludedPhoto(
+                    asset: asset,
+                    reason: .waitingForPhotos,
+                    detail: Self.photoAnalysisDeferredDetail(for: followUpReason),
+                    confidence: 1,
+                    origin: .onDevice
+                )
             }
 
             recordProcessedPhoto(asset, index: index, total: trip.assets.count)
@@ -1406,13 +1454,29 @@ final class TripReelModel: ObservableObject {
         }
 
         // Never allow automation to create an empty film. If every image was a
-        // high-confidence utility photo, keep the middle one and let the user
-        // decide in the regular cut flow.
+        // high-confidence utility photo, keep one readable image and let the
+        // user decide in the regular cut flow. Never use an unreadable iCloud
+        // item as that fallback, because it would create a blank preview.
         var includedAssets = trip.assets.filter { decisions[$0.id] == nil }
         if includedAssets.isEmpty, !trip.assets.isEmpty {
-            let fallback = trip.assets[trip.assets.count / 2]
-            decisions.removeValue(forKey: fallback.id)
-            includedAssets = [fallback]
+            let readableFallbacks = trip.assets.filter {
+                decisions[$0.id]?.reason != .waitingForPhotos
+            }
+            if let fallback = readableFallbacks.dropFirst(readableFallbacks.count / 2).first {
+                decisions.removeValue(forKey: fallback.id)
+                includedAssets = [fallback]
+            } else {
+                excludedPhotos = trip.assets.compactMap { decisions[$0.id] }
+                photoAnalysisProgress = 1
+                photoAnalysisStatus = "Waiting for Photos to finish syncing"
+                isAnalyzingPhotos = false
+                photoAnalysisCurrentAsset = nil
+                photoAnalysisTask = nil
+                activePhotoInsights = montageInsights
+                photoAnalysisFollowUp = followUp.hasAnythingToCheck ? followUp : nil
+                libraryErrorMessage = "Your trip is safe in Photos. These moments are still syncing from iCloud, so TripReel held back the preview instead of showing empty frames. Check your connection and try this trip again shortly."
+                return
+            }
         }
         guard let selected = trip.replacingAssets(includedAssets) else {
             finishPhotoAnalysisCancellation(generation: generation)
@@ -1476,6 +1540,19 @@ final class TripReelModel: ObservableObject {
             return .syncingFromPhotos
         }
         return .anotherLook
+    }
+
+    private static func photoAnalysisDeferredDetail(
+        for reason: PhotoAnalysisFollowUpReason
+    ) -> String {
+        switch reason {
+        case .syncingFromPhotos:
+            "Still syncing from iCloud. Check again when Photos has finished."
+        case .anotherLook:
+            "TripReel couldn't read this copy yet. Check it again later."
+        case .accessNeeded:
+            "Photos access changed. Review access, then check this moment again."
+        }
     }
 
     private func reviewCloudBatch(
@@ -2007,10 +2084,19 @@ final class TripReelModel: ObservableObject {
         exportQuality = hd ? .hd : .standard
         renderProgress = 0
         exportErrorMessage = nil
+        exportErrorTitle = "Export couldn't finish"
+        exportCanRetryPhotoDownload = false
+        exportProgressPhase = .preparingPhotos(
+            ready: 0,
+            total: keptPhotos.count,
+            currentLabel: keptPhotos.first?.label,
+            downloadProgress: nil
+        )
         exportSaveMessage = nil
         go(.rendering)
 
         if usesDemoData {
+            exportProgressPhase = .rendering
             workTask = Task { [weak self] in
                 guard let self else { return }
                 for step in 1...40 {
@@ -2049,7 +2135,8 @@ final class TripReelModel: ObservableObject {
                 let url = try await exporter.export(request) { [weak self] progress in
                     Task { @MainActor [weak self] in
                         guard let self, self.exportGeneration == generation else { return }
-                        self.renderProgress = progress
+                        self.renderProgress = max(self.renderProgress, progress.fraction)
+                        self.exportProgressPhase = progress.phase
                     }
                 }
                 guard !Task.isCancelled, self.exportGeneration == generation else { return }
@@ -2060,6 +2147,14 @@ final class TripReelModel: ObservableObject {
                 return
             } catch {
                 guard self.exportGeneration == generation else { return }
+                if let exportError = error as? TripReelVideoExportError,
+                   case .photoUnavailable = exportError {
+                    self.exportErrorTitle = "A photo needs a little longer"
+                    self.exportCanRetryPhotoDownload = true
+                } else {
+                    self.exportErrorTitle = "Export couldn't finish"
+                    self.exportCanRetryPhotoDownload = false
+                }
                 self.exportErrorMessage = (error as? LocalizedError)?.errorDescription
                     ?? "TripReel couldn't finish this export. Please try again."
                 self.go(.export)
@@ -2073,6 +2168,13 @@ final class TripReelModel: ObservableObject {
         workTask = nil
         renderProgress = 0
         go(.export, direction: .backward)
+    }
+
+    func retryExportPhotoDownload() {
+        guard exportCanRetryPhotoDownload else { return }
+        let shouldUseHD = exportQuality == .hd
+        dismissExportMessage()
+        startRender(hd: shouldUseHD)
     }
 
     @discardableResult
@@ -2094,6 +2196,8 @@ final class TripReelModel: ObservableObject {
 
     func dismissExportMessage() {
         exportErrorMessage = nil
+        exportErrorTitle = "Export couldn't finish"
+        exportCanRetryPhotoDownload = false
         exportSaveMessage = nil
     }
 
