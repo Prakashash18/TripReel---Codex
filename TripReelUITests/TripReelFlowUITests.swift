@@ -37,7 +37,14 @@ final class TripReelFlowUITests: XCTestCase {
 
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Style")).firstMatch.tap()
         XCTAssertTrue(screen("film-style-sheet").waitForExistence(timeout: 3))
+        let stylePreview = screen("film-style-live-preview")
+        XCTAssertTrue(stylePreview.waitForExistence(timeout: 3))
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Journal")).firstMatch.tap()
+        expectation(
+            for: NSPredicate(format: "label CONTAINS[c] %@", "Journal"),
+            evaluatedWith: stylePreview
+        )
+        waitForExpectations(timeout: 2)
         app.buttons["Done"].tap()
 
         app.buttons["Export"].tap()

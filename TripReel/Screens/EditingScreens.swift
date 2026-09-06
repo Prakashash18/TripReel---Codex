@@ -1109,6 +1109,8 @@ private struct FilmStyleSheet: View {
                     .foregroundStyle(.white.opacity(0.57))
                     .lineSpacing(4)
 
+                stylePreview
+
                 VStack(spacing: 9) {
                     ForEach(MontageLook.allCases) { look in
                         lookRow(look)
@@ -1158,10 +1160,79 @@ private struct FilmStyleSheet: View {
         .accessibilityIdentifier("film-style-sheet")
     }
 
+    private var stylePreview: some View {
+        HStack(spacing: 17) {
+            MontageView(
+                photos: previewPhotos,
+                showLabels: false,
+                look: model.montageLook,
+                motionIntensity: model.montageMotionIntensity,
+                secondsPerSlide: max(1.15, model.secondsPerPhoto)
+            )
+            .id("\(model.montageLook.rawValue)-\(model.montageMotionIntensity.rawValue)")
+            .frame(width: 126, height: 224)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(.white.opacity(0.18), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.46), radius: 18, y: 10)
+
+            VStack(alignment: .leading, spacing: 9) {
+                MetadataText(text: "LIVE PREVIEW", color: TR.accent)
+                Text(model.montageLook.name)
+                    .font(TR.display(28))
+                    .foregroundStyle(TR.cream)
+                Text(model.montageLook.detail)
+                    .font(TR.ui(11))
+                    .foregroundStyle(.white.opacity(0.54))
+                    .lineSpacing(3)
+                Spacer(minLength: 4)
+                Label("Updates with every tap", systemImage: "play.circle.fill")
+                    .font(TR.ui(10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.62))
+            }
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(13)
+        .glassCard(cornerRadius: 20)
+        .animation(.easeInOut(duration: 0.24), value: model.montageLook)
+        .animation(.easeInOut(duration: 0.24), value: model.montageMotionIntensity)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Live \(model.montageLook.name) film preview")
+        .accessibilityIdentifier("film-style-live-preview")
+    }
+
+    private var previewPhotos: [ReelPhoto] {
+        let photos = model.keptPhotos
+        guard !photos.isEmpty else { return [] }
+        var selected: [ReelPhoto] = []
+        let landscape = photos.first(where: { $0.aspectRatio >= 0.88 })
+        let portrait = photos.first(where: { $0.aspectRatio < 0.88 })
+        if model.montageLook == .story {
+            // Story is the mixed editorial treatment; lead with its portrait
+            // matte when available so it cannot look identical to Clean.
+            selected.append(portrait ?? photos[0])
+            if let landscape { selected.append(landscape) }
+        } else {
+            // Cinema, Journal, and Clean resolve the same landscape into three
+            // deliberately different frames on the first preview beat.
+            selected.append(landscape ?? photos[0])
+            if let portrait { selected.append(portrait) }
+        }
+        selected.append(contentsOf: photos.filter { candidate in
+            !selected.contains(where: { $0.id == candidate.id })
+        })
+        return Array(selected.prefix(4))
+    }
+
     private func lookRow(_ look: MontageLook) -> some View {
         let selected = model.montageLook == look
         return Button {
-            model.montageLook = look
+            withAnimation(.easeInOut(duration: 0.24)) {
+                model.montageLook = look
+            }
         } label: {
             HStack(spacing: 13) {
                 Image(systemName: look.symbol)

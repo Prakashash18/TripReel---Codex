@@ -1,3 +1,5 @@
+import CoreVideo
+import UIKit
 import XCTest
 @testable import TripReel
 
@@ -5,6 +7,55 @@ import XCTest
 final class TripReelModelTests: XCTestCase {
     private func makeModel() -> TripReelModel {
         TripReelModel(arguments: [], useDemoData: true)
+    }
+
+    func testVideoFrameCopyDoesNotTurnUIKitArtworkUpsideDown() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let rendered = UIGraphicsImageRenderer(
+            size: CGSize(width: 2, height: 2),
+            format: format
+        ).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 1))
+            UIColor.blue.setFill()
+            context.fill(CGRect(x: 0, y: 1, width: 2, height: 1))
+        }
+        let source = try XCTUnwrap(rendered.cgImage)
+
+        var optionalBuffer: CVPixelBuffer?
+        let status = CVPixelBufferCreate(
+            nil,
+            2,
+            2,
+            kCVPixelFormatType_32BGRA,
+            [
+                kCVPixelBufferCGImageCompatibilityKey as String: true,
+                kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
+            ] as CFDictionary,
+            &optionalBuffer
+        )
+        XCTAssertEqual(status, kCVReturnSuccess)
+        let buffer = try XCTUnwrap(optionalBuffer)
+
+        try TripReelVideoExporter.copyRenderedFrame(
+            source,
+            into: buffer,
+            outputSize: CGSize(width: 2, height: 2)
+        )
+
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        let baseAddress = try XCTUnwrap(CVPixelBufferGetBaseAddress(buffer))
+            .assumingMemoryBound(to: UInt8.self)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
+        // BGRA row zero is the top of a video frame.
+        XCTAssertEqual(Array(UnsafeBufferPointer(start: baseAddress, count: 4)), [0, 0, 255, 255])
+        XCTAssertEqual(
+            Array(UnsafeBufferPointer(start: baseAddress + bytesPerRow, count: 4)),
+            [255, 0, 0, 255]
+        )
     }
 
     func testNearbyPlaceLabelPrefersLandmarkAndNeighborhood() {
@@ -450,6 +501,59 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertNotEqual(plan[1].asset.id, "people-b")
         XCTAssertEqual(plan.first?.frameStyle, .cinematic)
         XCTAssertEqual(plan.first(where: { $0.asset.id == "food" })?.frameStyle, .portraitMatte)
+    }
+
+    func testFilmLooksResolveToTheSameDistinctTreatmentsForPreviewAndExport() {
+        XCTAssertEqual(
+            MontageFrameResolver.resolve(
+                planned: .fullBleed,
+                aspectRatio: 1.5,
+                index: 0,
+                isCustomized: false,
+                look: .story
+            ),
+            .fullBleed
+        )
+        XCTAssertEqual(
+            MontageFrameResolver.resolve(
+                planned: .fullBleed,
+                aspectRatio: 1.5,
+                index: 0,
+                isCustomized: false,
+                look: .cinema
+            ),
+            .cinematic
+        )
+        XCTAssertEqual(
+            MontageFrameResolver.resolve(
+                planned: .fullBleed,
+                aspectRatio: 1.5,
+                index: 0,
+                isCustomized: false,
+                look: .journal
+            ),
+            .postcard
+        )
+        XCTAssertEqual(
+            MontageFrameResolver.resolve(
+                planned: .cinematic,
+                aspectRatio: 1.5,
+                index: 1,
+                isCustomized: false,
+                look: .clean
+            ),
+            .fullBleed
+        )
+        XCTAssertEqual(
+            MontageFrameResolver.resolve(
+                planned: .postcard,
+                aspectRatio: 1.5,
+                index: 0,
+                isCustomized: true,
+                look: .cinema
+            ),
+            .postcard
+        )
     }
 
     func testMontagePlannerUsesLocalFocalPointForPortraitStartingCrop() throws {

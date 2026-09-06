@@ -181,6 +181,11 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             photos: request.photos,
             titleCards: request.titleCards
         )
+        let photoIndices = Dictionary(
+            uniqueKeysWithValues: request.photos.enumerated().map {
+                ($0.element.id, $0.offset)
+            }
+        )
         let totalFrames = timeline.reduce(0) { partial, item in
             partial + max(1, Int(ceil(item.duration(defaultPhotoDuration: request.secondsPerPhoto) * Double(frameRate))))
         }
@@ -192,6 +197,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             let duration = item.duration(defaultPhotoDuration: request.secondsPerPhoto)
             let frameCount = max(1, Int(ceil(duration * Double(frameRate))))
             let photoImage: CGImage?
+            let itemPhotoIndex: Int
             switch item {
             case let .photo(photo):
                 photoImage = try await loadImage(
@@ -199,8 +205,10 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                     targetSize: outputSize
                 )
                 lastPhotoImage = photoImage
+                itemPhotoIndex = photoIndices[photo.id] ?? 0
             case .title:
                 photoImage = lastPhotoImage
+                itemPhotoIndex = 0
             }
 
             for localFrame in 0..<frameCount {
@@ -226,6 +234,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                         into: pixelBuffer,
                         outputSize: outputSize,
                         phase: phase,
+                        photoIndex: itemPhotoIndex,
                         request: request
                     )
                 }
@@ -410,6 +419,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         into pixelBuffer: CVPixelBuffer,
         outputSize: CGSize,
         phase: Double,
+        photoIndex: Int,
         request: TripReelVideoExportRequest
     ) throws {
         let rendererFormat = UIGraphicsImageRendererFormat()
@@ -429,6 +439,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                         image: photoImage,
                         bounds: bounds,
                         phase: phase,
+                        index: photoIndex,
                         look: request.look,
                         intensity: request.motionIntensity
                     )
@@ -445,6 +456,17 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             throw TripReelVideoExportError.cannotCreateFrame
         }
 
+        try copyRenderedFrame(cgImage, into: pixelBuffer, outputSize: outputSize)
+    }
+
+    /// Copies an already top-to-bottom UIKit image into the equally oriented
+    /// video buffer. Applying an additional Quartz Y-axis flip here turns the
+    /// final encoded movie upside down.
+    static func copyRenderedFrame(
+        _ image: CGImage,
+        into pixelBuffer: CVPixelBuffer,
+        outputSize: CGSize
+    ) throws {
         CVPixelBufferLockBaseAddress(pixelBuffer, [])
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
         guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer),
@@ -457,12 +479,11 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 space: CGColorSpaceCreateDeviceRGB(),
                 bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue
                     | CGImageAlphaInfo.premultipliedFirst.rawValue
-              ) else {
+        ) else {
             throw TripReelVideoExportError.cannotCreateFrame
         }
-        context.translateBy(x: 0, y: outputSize.height)
-        context.scaleBy(x: 1, y: -1)
-        context.draw(cgImage, in: CGRect(origin: .zero, size: outputSize))
+        context.setBlendMode(.copy)
+        context.draw(image, in: CGRect(origin: .zero, size: outputSize))
     }
 
     private static func drawPhoto(
@@ -470,10 +491,17 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         image: CGImage,
         bounds: CGRect,
         phase: Double,
+        index: Int,
         look: MontageLook,
         intensity: MontageMotionIntensity
     ) {
-        let style = resolvedFrameStyle(photo, look: look)
+        let style = MontageFrameResolver.resolve(
+            planned: photo.frameStyle,
+            aspectRatio: photo.aspectRatio,
+            index: index,
+            isCustomized: photo.hasCustomFrameStyle,
+            look: look
+        )
         let motion = motionTransform(
             for: photo.motionStyle,
             phase: phase,
@@ -640,22 +668,39 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
     }
 
     private static func drawWatermark(in bounds: CGRect) {
-        let text = "TripReel"
+        let text = "Made with TripReel"
+        let fontSize = max(24, bounds.width * 0.038)
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 17, weight: .semibold),
-            .foregroundColor: UIColor.white.withAlphaComponent(0.88)
+            .font: UIFont.systemFont(ofSize: fontSize, weight: .bold),
+            .foregroundColor: UIColor(red: 0.992, green: 0.980, blue: 0.956, alpha: 1)
         ]
         let size = NSString(string: text).size(withAttributes: attributes)
+        let horizontalPadding = fontSize * 0.62
+        let verticalPadding = fontSize * 0.42
+        let margin = bounds.width * 0.045
         let capsule = CGRect(
-            x: bounds.maxX - size.width - 42,
-            y: 30,
-            width: size.width + 24,
-            height: 36
+            x: bounds.maxX - size.width - (horizontalPadding * 2) - margin,
+            y: margin,
+            width: size.width + (horizontalPadding * 2),
+            height: size.height + (verticalPadding * 2)
         )
-        UIColor.black.withAlphaComponent(0.46).setFill()
-        UIBezierPath(roundedRect: capsule, cornerRadius: 8).fill()
+        UIColor.black.withAlphaComponent(0.76).setFill()
+        UIBezierPath(
+            roundedRect: capsule,
+            cornerRadius: capsule.height / 2
+        ).fill()
+        UIColor(red: 0.94, green: 0.71, blue: 0.37, alpha: 0.92).setStroke()
+        let border = UIBezierPath(
+            roundedRect: capsule.insetBy(dx: 1.5, dy: 1.5),
+            cornerRadius: (capsule.height - 3) / 2
+        )
+        border.lineWidth = 3
+        border.stroke()
         NSString(string: text).draw(
-            at: CGPoint(x: capsule.minX + 12, y: capsule.minY + 8),
+            at: CGPoint(
+                x: capsule.minX + horizontalPadding,
+                y: capsule.minY + verticalPadding
+            ),
             withAttributes: attributes
         )
     }
@@ -709,20 +754,6 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             width: size.width,
             height: size.height
         )
-    }
-
-    private static func resolvedFrameStyle(_ photo: ReelPhoto, look: MontageLook) -> MontageFrameStyle {
-        if photo.hasCustomFrameStyle { return photo.frameStyle }
-        switch look {
-        case .story:
-            return photo.frameStyle
-        case .cinema:
-            return photo.aspectRatio < 0.88 ? .portraitMatte : .cinematic
-        case .journal:
-            return photo.frameStyle == .fullBleed ? .postcard : photo.frameStyle
-        case .clean:
-            return photo.aspectRatio < 0.88 ? .portraitMatte : .fullBleed
-        }
     }
 
     private static func motionTransform(

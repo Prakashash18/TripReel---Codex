@@ -178,11 +178,12 @@ struct MontageView: View {
             source: photo.source,
             label: photo.label,
             aspectRatio: photo.aspectRatio,
-                frameStyle: resolvedFrameStyle(
-                    planned: photo.frameStyle,
-                    aspectRatio: photo.aspectRatio,
-                    index: photoIndex,
-                    isCustomized: photo.hasCustomFrameStyle
+            frameStyle: MontageFrameResolver.resolve(
+                planned: photo.frameStyle,
+                aspectRatio: photo.aspectRatio,
+                index: photoIndex,
+                isCustomized: photo.hasCustomFrameStyle,
+                look: look
             ),
             motionStyle: photo.motionStyle,
             cropScale: photo.cropScale,
@@ -245,16 +246,28 @@ struct MontageView: View {
             )
 
             if watermark {
-                Text("TripReel")
-                    .font(TR.ui(11, weight: .semibold))
-                    .tracking(0.7)
-                    .foregroundStyle(.white.opacity(0.86))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(.black.opacity(0.42))
-                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .padding(14)
+                HStack(spacing: 5) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(TR.accent)
+                    Text("Made with")
+                        .font(TR.ui(10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.78))
+                    Text("TripReel")
+                        .font(TR.ui(13, weight: .bold))
+                        .foregroundStyle(TR.cream)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(.black.opacity(0.74))
+                .overlay(
+                    Capsule()
+                        .stroke(TR.accent.opacity(0.62), lineWidth: 1)
+                )
+                .clipShape(Capsule())
+                .shadow(color: .black.opacity(0.48), radius: 10, y: 5)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .padding(16)
             }
         }
         .background(Color(red: 0.051, green: 0.035, blue: 0.024))
@@ -292,24 +305,6 @@ struct MontageView: View {
         PhotoAssetImageLoader.preheat(sources: sources)
     }
 
-    private func resolvedFrameStyle(
-        planned: MontageFrameStyle,
-        aspectRatio: Double,
-        index: Int,
-        isCustomized: Bool
-    ) -> MontageFrameStyle {
-        if isCustomized { return planned }
-        switch look {
-        case .story:
-            return planned
-        case .cinema:
-            return aspectRatio < 0.88 ? .portraitMatte : .cinematic
-        case .journal:
-            return index.isMultiple(of: 3) && aspectRatio >= 0.88 ? .fullBleed : .postcard
-        case .clean:
-            return aspectRatio < 0.88 ? .portraitMatte : .fullBleed
-        }
-    }
 }
 
 private struct MontageSlide {

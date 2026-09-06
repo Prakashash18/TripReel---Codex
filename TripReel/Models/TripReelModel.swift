@@ -311,6 +311,30 @@ enum MontageMotionIntensity: String, CaseIterable, Identifiable, Hashable, Senda
     }
 }
 
+/// One source of truth for the look-to-frame mapping used by both the live
+/// SwiftUI preview and the exported video renderer.
+enum MontageFrameResolver {
+    static func resolve(
+        planned: MontageFrameStyle,
+        aspectRatio: Double,
+        index: Int,
+        isCustomized: Bool,
+        look: MontageLook
+    ) -> MontageFrameStyle {
+        if isCustomized { return planned }
+        switch look {
+        case .story:
+            return planned
+        case .cinema:
+            return aspectRatio < 0.88 ? .portraitMatte : .cinematic
+        case .journal:
+            return index % 3 == 2 && aspectRatio >= 0.88 ? .fullBleed : .postcard
+        case .clean:
+            return aspectRatio < 0.88 ? .portraitMatte : .fullBleed
+        }
+    }
+}
+
 enum MontageContentKind: String, Hashable, Sendable {
     case scenery
     case people
