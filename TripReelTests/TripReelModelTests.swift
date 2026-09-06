@@ -434,10 +434,16 @@ final class TripReelModelTests: XCTestCase {
 
         model.startRender(hd: false)
         XCTAssertEqual(model.exportQuality, .standard)
+        XCTAssertEqual(model.exportHandoff, .normal)
         XCTAssertTrue(model.exportQuality.includesWatermark)
+
+        model.startCapCutRender()
+        XCTAssertEqual(model.exportQuality, .standard)
+        XCTAssertEqual(model.exportHandoff, .capCut)
 
         model.startRender(hd: true)
         XCTAssertEqual(model.exportQuality, .hd)
+        XCTAssertEqual(model.exportHandoff, .normal)
         XCTAssertFalse(model.exportQuality.includesWatermark)
     }
 
@@ -445,6 +451,11 @@ final class TripReelModelTests: XCTestCase {
         let model = makeModel()
         model.titleCards = [.opening, .place, .ending]
         model.titleText = "A Singapore Day"
+        model.setTitleText("Marina after dark", for: .place)
+        model.setTitleSubtitle("Bayfront · 9:14 PM", for: .place)
+        model.setTitleStyle(.bold, for: .place)
+        model.setTitleDuration(3.2, for: .place)
+        model.setTitleText("Until next time", for: .ending)
 
         let timeline = MontageTimelineBuilder.make(
             photos: Array(model.photos.prefix(2)),
@@ -460,8 +471,32 @@ final class TripReelModelTests: XCTestCase {
             return XCTFail("Expected opening, photo, place, photo, ending")
         }
         XCTAssertEqual(opening.title, "A Singapore Day")
-        XCTAssertEqual(place.title, model.tripShortPlace)
+        XCTAssertEqual(place.title, "Marina after dark")
+        XCTAssertEqual(place.subtitle, "Bayfront · 9:14 PM")
+        XCTAssertEqual(place.style, .bold)
+        XCTAssertEqual(place.duration, 3.2, accuracy: 0.001)
+        XCTAssertEqual(ending.title, "Until next time")
         XCTAssertEqual(ending.subtitle, "Made with TripReel")
+    }
+
+    func testTitleDraftsRemainIndependentAndDurationsAreClamped() {
+        let model = makeModel()
+
+        model.setTitleText("Opening", for: .opening)
+        model.setTitleText("Place", for: .place)
+        model.setTitleText("Ending", for: .ending)
+        model.setTitleDuration(0.2, for: .opening)
+        model.setTitleDuration(8, for: .ending)
+        model.setTitleCardEnabled(true, for: .place)
+        model.setTitleCardEnabled(false, for: .opening)
+
+        XCTAssertEqual(model.titleDraft(for: .opening).title, "Opening")
+        XCTAssertEqual(model.titleDraft(for: .place).title, "Place")
+        XCTAssertEqual(model.titleDraft(for: .ending).title, "Ending")
+        XCTAssertEqual(model.titleDraft(for: .opening).duration, 1, accuracy: 0.001)
+        XCTAssertEqual(model.titleDraft(for: .ending).duration, 4, accuracy: 0.001)
+        XCTAssertFalse(model.titleCards.contains(.opening))
+        XCTAssertTrue(model.titleCards.contains(.place))
     }
 
     func testPerPhotoFramingMotionCropAndTimingCanBeReset() {

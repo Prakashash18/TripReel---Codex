@@ -112,6 +112,44 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 3))
     }
 
+    func testEveryTitleIsAvailableInTheVisualTimelineEditor() {
+        launchApp(at: "secondWatch")
+        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
+
+        screen("studio-edit-menu").tap()
+        screen("studio-tool-titles").tap()
+
+        XCTAssertTrue(screen("title-editor-screen").waitForExistence(timeout: 3))
+        XCTAssertTrue(screen("title-live-preview").exists)
+        XCTAssertTrue(screen("title-timeline-opening").exists)
+        XCTAssertTrue(screen("title-timeline-place").exists)
+        XCTAssertTrue(screen("title-timeline-ending").exists)
+
+        screen("title-timeline-place").tap()
+        XCTAssertTrue(screen("title-main-text").exists)
+        XCTAssertTrue(screen("title-subtitle-text").exists)
+        screen("title-style-bold").tap()
+
+        screen("title-timeline-ending").tap()
+        XCTAssertTrue(screen("title-enabled-toggle").exists)
+        app.buttons["Done"].tap()
+
+        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
+    }
+
+    func testCapCutPathRendersACompatibleMovie() {
+        launchApp(at: "export")
+        XCTAssertTrue(screen("export-screen").waitForExistence(timeout: 3))
+
+        screen("export-project").tap()
+        let renderForCapCut = screen("render-capcut-video")
+        XCTAssertTrue(renderForCapCut.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["CapCut, InShot, spreadsheets"].exists)
+
+        renderForCapCut.tap()
+        XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
+    }
+
     func testCleanupShowsDestructiveWarningBeforePhotosRequest() {
         launchApp(at: "cleanup")
         XCTAssertTrue(screen("cleanup-screen").waitForExistence(timeout: 3))

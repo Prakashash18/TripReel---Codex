@@ -1025,20 +1025,46 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             color: UIColor(red: 0.94, green: 0.71, blue: 0.37, alpha: 0.86 * eyebrowReveal),
             tracking: 2.4
         )
-        let titleFont = UIFont(name: "InstrumentSerif-Regular", size: card.kind == .opening ? 70 : 59)
-            ?? UIFont.systemFont(ofSize: card.kind == .opening ? 70 : 59, weight: .regular)
+        let baseTitleSize: CGFloat = card.kind == .opening ? 70 : 59
+        let titleFont: UIFont
+        let displayTitle: String
+        let titleTracking: CGFloat
+        switch card.style {
+        case .editorial:
+            titleFont = UIFont(name: "InstrumentSerif-Regular", size: baseTitleSize)
+                ?? UIFont.systemFont(ofSize: baseTitleSize, weight: .regular)
+            displayTitle = card.title
+            titleTracking = -0.6
+        case .clean:
+            titleFont = UIFont.systemFont(ofSize: baseTitleSize * 0.74, weight: .semibold)
+            displayTitle = card.title
+            titleTracking = 0
+        case .bold:
+            titleFont = UIFont.systemFont(ofSize: baseTitleSize * 0.78, weight: .black)
+            displayTitle = card.title.uppercased()
+            titleTracking = 0
+        }
         let titleReveal = staggeredReveal(phase, start: 0.05, duration: 0.34)
         drawCenteredText(
-            card.title,
+            displayTitle,
             in: CGRect(x: 54, y: bounds.midY - 88 + CGFloat(phase * -8), width: bounds.width - 108, height: 180),
             font: titleFont,
             color: UIColor(red: 0.992, green: 0.980, blue: 0.956, alpha: titleReveal),
-            tracking: -0.6
+            tracking: titleTracking
         )
+        let subtitleFont: UIFont
+        switch card.style {
+        case .editorial:
+            subtitleFont = UIFont.systemFont(ofSize: 20, weight: .medium)
+        case .clean:
+            subtitleFont = UIFont.systemFont(ofSize: 18, weight: .regular)
+        case .bold:
+            subtitleFont = UIFont.monospacedSystemFont(ofSize: 17, weight: .semibold)
+        }
         drawCenteredText(
             card.subtitle,
             in: CGRect(x: 58, y: bounds.midY + 102 + CGFloat(phase * -8), width: bounds.width - 116, height: 55),
-            font: UIFont.systemFont(ofSize: 20, weight: .medium),
+            font: subtitleFont,
             color: UIColor.white.withAlphaComponent(
                 0.58 * staggeredReveal(phase, start: 0.18, duration: 0.34)
             ),

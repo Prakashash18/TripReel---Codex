@@ -3,7 +3,10 @@
 > September 6 update: the Film Studio now keeps its 9:16 film completely
 > unobstructed and reduces the screen to Edit film and Export film. Persistent
 > Back, an edge swipe, and VoiceOver escape restore predictable reverse
-> navigation without turning Back into another primary action. Full-person safe framing, similarity
+> navigation without turning Back into another primary action. Titles now use
+> one full-screen live canvas and timeline where every card's text, style,
+> visibility, and duration can be edited. CapCut receives a rendered MPEG-4
+> handoff rather than an incompatible timing file. Full-person safe framing, similarity
 > clustering, directional navigation, cinematic montage transitions, and the
 > accessible app-wide motion system pass strict source checks. The optional
 > OpenAI consent is now a numbered plain-language flow, and Cleanup exposes

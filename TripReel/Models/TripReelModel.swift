@@ -686,22 +686,47 @@ enum TitleCardKind: String, CaseIterable, Identifiable, Hashable, Sendable {
         case .ending: "After the last photo"
         }
     }
+
+    var defaultDuration: Double {
+        switch self {
+        case .opening: 2.4
+        case .place: 1.9
+        case .ending: 2.2
+        }
+    }
+}
+
+enum MontageTitleStyle: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case editorial
+    case clean
+    case bold
+
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .editorial: "Editorial"
+        case .clean: "Clean"
+        case .bold: "Bold"
+        }
+    }
+}
+
+struct TitleCardDraft: Hashable, Sendable {
+    var title: String
+    var subtitle: String
+    var style: MontageTitleStyle
+    var duration: Double
 }
 
 struct MontageTitleCard: Identifiable, Hashable, Sendable {
     let kind: TitleCardKind
     let title: String
     let subtitle: String
+    let style: MontageTitleStyle
+    let duration: Double
 
     var id: String { "title-\(kind.rawValue)" }
-
-    var duration: Double {
-        switch kind {
-        case .opening: 2.4
-        case .place: 1.9
-        case .ending: 2.2
-        }
-    }
 }
 
 enum MontageTimelineItem: Identifiable, Hashable, Sendable {
@@ -788,6 +813,11 @@ enum ExportQuality: Equatable, Sendable {
     var includesWatermark: Bool { self == .standard }
 }
 
+enum ExportHandoff: Equatable, Sendable {
+    case normal
+    case capCut
+}
+
 @MainActor
 final class TripReelModel: ObservableObject {
     @Published var screen: AppScreen = .welcome
@@ -800,7 +830,7 @@ final class TripReelModel: ObservableObject {
     @Published var showCutHint = true
     @Published var renderProgress = 0.0
     @Published var titleCards: Set<TitleCardKind> = [.opening]
-    @Published var titleText = "My trip"
+    @Published private(set) var titleDrafts: [TitleCardKind: TitleCardDraft] = [:]
     @Published var selectedTrackID: String? = "wanderlust"
     @Published var cutToBeat = true
     @Published var selectedFormatID = "sequence"
@@ -810,6 +840,7 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var cleanupDeletionErrorMessage: String?
     @Published var selectedPhotoCount = 0
     @Published var exportQuality: ExportQuality = .standard
+    @Published private(set) var exportHandoff: ExportHandoff = .normal
     @Published var montageLook: MontageLook = .story
     @Published var montageMotionIntensity: MontageMotionIntensity = .gentle
     @Published private(set) var trips: [Trip] = []
@@ -977,7 +1008,7 @@ final class TripReelModel: ObservableObject {
     ]
 
     let formats = [
-        ProjectFormat(id: "sequence", name: "Photo timing sheet", apps: "CapCut, InShot, spreadsheets", fileExtension: "CSV"),
+        ProjectFormat(id: "sequence", name: "Photo timing sheet", apps: "Spreadsheets and custom workflows", fileExtension: "CSV"),
         ProjectFormat(id: "fcpxml", name: "Final Cut XML", apps: "Final Cut Pro, DaVinci Resolve", fileExtension: "FCPXML"),
         ProjectFormat(id: "edl", name: "Edit decision list", apps: "Premiere Pro, Avid", fileExtension: "EDL")
     ]
@@ -1093,21 +1124,86 @@ final class TripReelModel: ObservableObject {
     var montageTitleCards: [MontageTitleCard] {
         TitleCardKind.allCases.compactMap { kind in
             guard titleCards.contains(kind) else { return nil }
-            switch kind {
-            case .opening:
-                return MontageTitleCard(
-                    kind: kind,
-                    title: titleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        ? tripShortPlace
-                        : titleText,
-                    subtitle: tripDates
-                )
-            case .place:
-                return MontageTitleCard(kind: kind, title: tripShortPlace, subtitle: tripDates)
-            case .ending:
-                return MontageTitleCard(kind: kind, title: tripMonthYear, subtitle: "Made with TripReel")
-            }
+            return montageTitleCard(for: kind)
         }
+    }
+
+    func montageTitleCard(for kind: TitleCardKind) -> MontageTitleCard {
+        let draft = titleDraft(for: kind)
+        return MontageTitleCard(
+            kind: kind,
+            title: draft.title,
+            subtitle: draft.subtitle,
+            style: draft.style,
+            duration: draft.duration
+        )
+    }
+
+    func titleDraft(for kind: TitleCardKind) -> TitleCardDraft {
+        if let draft = titleDrafts[kind] { return draft }
+        switch kind {
+        case .opening:
+            return TitleCardDraft(
+                title: tripShortPlace,
+                subtitle: tripDates,
+                style: .editorial,
+                duration: kind.defaultDuration
+            )
+        case .place:
+            return TitleCardDraft(
+                title: tripShortPlace,
+                subtitle: tripDates,
+                style: .clean,
+                duration: kind.defaultDuration
+            )
+        case .ending:
+            return TitleCardDraft(
+                title: tripMonthYear,
+                subtitle: "Made with TripReel",
+                style: .editorial,
+                duration: kind.defaultDuration
+            )
+        }
+    }
+
+    func setTitleText(_ text: String, for kind: TitleCardKind) {
+        var draft = titleDraft(for: kind)
+        draft.title = String(text.prefix(80))
+        titleDrafts[kind] = draft
+    }
+
+    func setTitleSubtitle(_ text: String, for kind: TitleCardKind) {
+        var draft = titleDraft(for: kind)
+        draft.subtitle = String(text.prefix(100))
+        titleDrafts[kind] = draft
+    }
+
+    func setTitleStyle(_ style: MontageTitleStyle, for kind: TitleCardKind) {
+        var draft = titleDraft(for: kind)
+        draft.style = style
+        titleDrafts[kind] = draft
+    }
+
+    func setTitleDuration(_ duration: Double, for kind: TitleCardKind) {
+        var draft = titleDraft(for: kind)
+        draft.duration = min(max(duration, 1.0), 4.0)
+        titleDrafts[kind] = draft
+    }
+
+    func setTitleCardEnabled(_ enabled: Bool, for kind: TitleCardKind) {
+        if enabled {
+            titleCards.insert(kind)
+        } else {
+            titleCards.remove(kind)
+        }
+    }
+
+    private func resetTitleDrafts() {
+        titleDrafts = Dictionary(
+            uniqueKeysWithValues: TitleCardKind.allCases.map { kind in
+                (kind, titleDraft(for: kind))
+            }
+        )
     }
 
     func duration(for photo: ReelPhoto) -> Double {
@@ -1138,6 +1234,14 @@ final class TripReelModel: ObservableObject {
     var tripPlace: String { selectedTrip?.place ?? "Your trip" }
     var tripShortPlace: String { selectedTrip?.shortPlace ?? "Your trip" }
     var tripDates: String { selectedTrip?.dates ?? "Selected photos" }
+
+    /// Backward-compatible opening-title access. Each title card now keeps an
+    /// independent editable draft, but existing callers can still use this
+    /// property for the opening card.
+    var titleText: String {
+        get { titleDraft(for: .opening).title }
+        set { setTitleText(newValue, for: .opening) }
+    }
 
     var tripMonthYear: String {
         guard let date = selectedTrip?.startDate else { return "Your trip" }
@@ -1967,8 +2071,10 @@ final class TripReelModel: ObservableObject {
         selectedTrip = trip
         photoEditOverrides = [:]
         photos = Self.makeReelPhotos(from: trip, insights: activePhotoInsights)
-        titleText = trip.shortPlace
+        titleDrafts = [:]
+        resetTitleDrafts()
         titleCards = [.opening]
+        exportHandoff = .normal
         exportedVideoURL = nil
         exportErrorMessage = nil
         exportSaveMessage = nil
@@ -2121,10 +2227,19 @@ final class TripReelModel: ObservableObject {
     }
 
     func startRender(hd: Bool = false) {
+        startRender(hd: hd, handoff: .normal)
+    }
+
+    func startCapCutRender() {
+        startRender(hd: false, handoff: .capCut)
+    }
+
+    private func startRender(hd: Bool, handoff: ExportHandoff) {
         workTask?.cancel()
         let generation = UUID()
         exportGeneration = generation
         exportQuality = hd ? .hd : .standard
+        exportHandoff = handoff
         renderProgress = 0
         exportErrorMessage = nil
         exportErrorTitle = "Export couldn't finish"
@@ -2216,8 +2331,9 @@ final class TripReelModel: ObservableObject {
     func retryExportPhotoDownload() {
         guard exportCanRetryPhotoDownload else { return }
         let shouldUseHD = exportQuality == .hd
+        let handoff = exportHandoff
         dismissExportMessage()
-        startRender(hd: shouldUseHD)
+        startRender(hd: shouldUseHD, handoff: handoff)
     }
 
     @discardableResult

@@ -574,13 +574,9 @@ struct SecondWatchScreen: View {
                 studioContent(previewHeight: 294, compact: true)
             }
         }
-        .sheet(isPresented: $showTitles) {
+        .fullScreenCover(isPresented: $showTitles) {
             TitlesSheet()
                 .environmentObject(model)
-                .presentationDetents([.fraction(0.76)])
-                .presentationDragIndicator(.visible)
-                .presentationCornerRadius(26)
-                .presentationBackground(TR.sheet)
         }
         .sheet(isPresented: $showMusic) {
             MusicSheet()
@@ -1386,104 +1382,289 @@ private struct TitlesSheet: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var focusedField: TitleField?
+    @State private var selectedKind: TitleCardKind = .opening
     @State private var selectionFeedback = 0
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 18) {
-                SheetHeader(title: "Titles") { dismiss() }
+        ZStack {
+            WarmBackground(variant: .cutting)
 
-                Text("Three cards, filled in from your photos. Tap one to add or remove it.")
-                    .font(TR.ui(13))
-                    .foregroundStyle(.white.opacity(0.57))
-                    .lineSpacing(4)
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 17) {
+                    SheetHeader(title: "Titles & text") { dismiss() }
 
-                VStack(spacing: 11) {
-                    ForEach(Array(TitleCardKind.allCases.enumerated()), id: \.element.id) { index, card in
-                        titleCardRow(card, index: index)
+                    Text("Edit every title on one timeline. Tap a clip, change its text below, and watch the live canvas update without closing the editor.")
+                        .font(TR.ui(13))
+                        .foregroundStyle(.white.opacity(0.58))
+                        .lineSpacing(4)
+
+                    titlePreview
+
+                    VStack(alignment: .leading, spacing: 9) {
+                        MetadataText(text: "TITLE TIMELINE", color: .white.opacity(0.43))
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 9) {
+                                ForEach(Array(TitleCardKind.allCases.enumerated()), id: \.element.id) { index, kind in
+                                    timelineClip(kind, index: index)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
                     }
+
+                    titleControls
                 }
-
-                VStack(alignment: .leading, spacing: 9) {
-                    MetadataText(text: "Opening title text", color: .white.opacity(0.42))
-
-                    TextField("Trip title", text: $model.titleText)
-                        .font(TR.display(21))
-                        .foregroundStyle(TR.cream)
-                        .padding(.horizontal, 15)
-                        .padding(.vertical, 13)
-                        .background(.white.opacity(0.06))
-                        .overlay(RoundedRectangle(cornerRadius: 13).stroke(.white.opacity(0.16), lineWidth: 1))
-                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-
-                    Text("Type is set by the film. No font or colour to pick.")
-                        .font(TR.ui(12))
-                        .foregroundStyle(.white.opacity(0.42))
-                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 38)
             }
-            .padding(.horizontal, 22)
-            .padding(.top, 20)
-            .padding(.bottom, 38)
+            .scrollDismissesKeyboard(.interactively)
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Button("Previous") { moveSelection(by: -1) }
+                Button("Next") { moveSelection(by: 1) }
+                Spacer()
+                Button("Done") { focusedField = nil }
+            }
         }
         .sensoryFeedback(.selection, trigger: selectionFeedback)
+        .accessibilityIdentifier("title-editor-screen")
     }
 
-    private func titleCardRow(_ card: TitleCardKind, index: Int) -> some View {
-        let active = model.titleCards.contains(card)
-        let text: String = {
-            switch card {
-            case .opening: model.titleText
-            case .place: model.tripShortPlace
-            case .ending: model.tripMonthYear
+    private var titlePreview: some View {
+        let active = model.titleCards.contains(selectedKind)
+        let previewHeight: CGFloat = UIScreen.main.bounds.height < 760 ? 230 : 300
+        return HStack {
+            Spacer(minLength: 0)
+            MontageTitleArtwork(
+                card: selectedCard,
+                backgroundSource: model.previewSource(at: selectedIndex),
+                motionPhase: false,
+                reduceMotion: true
+            )
+            .frame(width: previewHeight * 9 / 16, height: previewHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(active ? TR.accent.opacity(0.62) : .white.opacity(0.15), lineWidth: 1)
+            )
+            .overlay(alignment: .topTrailing) {
+                Text(active ? "IN FILM" : "NOT IN FILM")
+                    .font(TR.mono(8, weight: .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(active ? TR.keep : .white.opacity(0.58))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(.black.opacity(0.70))
+                    .clipShape(Capsule())
+                    .padding(9)
             }
-        }()
+            .shadow(color: .black.opacity(0.50), radius: 22, y: 14)
+            .animation(reduceMotion ? nil : TRMotion.selection, value: selectedCard)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Live preview for \(selectedKind.name)")
+            .accessibilityValue(active ? "Included in film" : "Not included in film")
+            .accessibilityIdentifier("title-live-preview")
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var titleControls: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(selectedKind.name)
+                        .font(TR.ui(16, weight: .semibold))
+                    Text(selectedKind.placement)
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.49))
+                }
+                Spacer()
+                Toggle(
+                    "Show in film",
+                    isOn: Binding(
+                        get: { model.titleCards.contains(selectedKind) },
+                        set: { model.setTitleCardEnabled($0, for: selectedKind) }
+                    )
+                )
+                .labelsHidden()
+                .tint(TR.keep)
+                .accessibilityLabel("Show \(selectedKind.name) in film")
+                .accessibilityIdentifier("title-enabled-toggle")
+            }
+
+            VStack(spacing: 9) {
+                TextField("Title", text: titleBinding, axis: .vertical)
+                    .font(TR.ui(17, weight: .semibold))
+                    .lineLimit(1...3)
+                    .focused($focusedField, equals: .title)
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = .subtitle }
+                    .accessibilityIdentifier("title-main-text")
+
+                Divider().overlay(.white.opacity(0.10))
+
+                TextField("Supporting text", text: subtitleBinding, axis: .vertical)
+                    .font(TR.ui(13))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(1...2)
+                    .focused($focusedField, equals: .subtitle)
+                    .submitLabel(.done)
+                    .onSubmit { focusedField = nil }
+                    .accessibilityIdentifier("title-subtitle-text")
+            }
+            .padding(.horizontal, 15)
+            .padding(.vertical, 12)
+            .background(.white.opacity(0.055))
+            .overlay(RoundedRectangle(cornerRadius: 15).stroke(.white.opacity(0.14), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 9) {
+                MetadataText(text: "TEXT STYLE", color: .white.opacity(0.43))
+                HStack(spacing: 8) {
+                    ForEach(MontageTitleStyle.allCases) { style in
+                        styleButton(style)
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    MetadataText(text: "ON SCREEN", color: .white.opacity(0.43))
+                    Spacer()
+                    Text(String(format: "%.1fs", selectedCard.duration))
+                        .font(TR.mono(11, weight: .semibold))
+                        .foregroundStyle(TR.accent)
+                }
+                Slider(value: durationBinding, in: 1...4, step: 0.1)
+                    .tint(TR.accent)
+                    .accessibilityIdentifier("title-duration-slider")
+            }
+        }
+        .padding(15)
+        .glassCard(cornerRadius: 20)
+    }
+
+    private func timelineClip(_ kind: TitleCardKind, index: Int) -> some View {
+        let active = model.titleCards.contains(kind)
+        let selected = selectedKind == kind
+        let card = model.montageTitleCard(for: kind)
 
         return Button {
             withAnimation(reduceMotion ? nil : TRMotion.selection) {
-                if active {
-                    model.titleCards.remove(card)
-                } else {
-                    model.titleCards.insert(card)
-                }
+                selectedKind = kind
+                if !active { model.setTitleCardEnabled(true, for: kind) }
             }
             selectionFeedback += 1
         } label: {
-            HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 7) {
                 ZStack {
                     PhotoAssetView(source: model.previewSource(at: index))
-                    Text(text)
-                        .font(TR.display(card == .opening ? 17 : 14))
+                    Color.black.opacity(0.46)
+                    Text(card.title)
+                        .font(TR.display(13))
                         .foregroundStyle(TR.cream)
                         .multilineTextAlignment(.center)
                         .shadow(color: .black.opacity(0.65), radius: 4, y: 1)
-                        .padding(8)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.65)
+                        .padding(7)
                 }
-                .frame(width: 96, height: 80)
+                .frame(width: 108, height: 68)
+                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(card.name)
-                        .font(TR.ui(15, weight: .semibold))
-                    Text(card.placement)
-                        .font(TR.ui(12))
-                        .foregroundStyle(.white.opacity(0.56))
-                    Text(active ? "IN THE FILM" : "TAP TO ADD")
-                        .font(TR.mono(10))
-                        .tracking(1)
-                        .foregroundStyle(active ? TR.keep : .white.opacity(0.42))
+                HStack(spacing: 5) {
+                    Text(kind.name.replacingOccurrences(of: " title", with: ""))
+                        .font(TR.ui(11, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 2)
+                    Text(active ? String(format: "%.1fs", card.duration) : "ADD")
+                        .font(TR.mono(8, weight: .semibold))
+                        .foregroundStyle(active ? TR.keep : TR.accent)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 15)
             }
+            .frame(width: 108)
             .foregroundStyle(TR.cream)
-            .background(active ? TR.keep.opacity(0.07) : .white.opacity(0.04))
+            .padding(7)
+            .background(selected ? TR.accent.opacity(0.13) : .white.opacity(0.04))
             .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(active ? TR.keep.opacity(0.42) : .white.opacity(0.12), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(selected ? TR.accent.opacity(0.72) : .white.opacity(0.11), lineWidth: selected ? 1.5 : 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(TactileButtonStyle())
-        .accessibilityValue(active ? "Selected" : "Not selected")
+        .accessibilityLabel(kind.name)
+        .accessibilityValue(active ? "In film, \(String(format: "%.1f seconds", card.duration))" : "Not in film")
+        .accessibilityIdentifier("title-timeline-\(kind.rawValue)")
+    }
+
+    private func styleButton(_ style: MontageTitleStyle) -> some View {
+        let selected = selectedCard.style == style
+        return Button {
+            withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                model.setTitleStyle(style, for: selectedKind)
+            }
+            selectionFeedback += 1
+        } label: {
+            Text(style.name)
+                .font(style == .editorial ? TR.display(16) : TR.ui(12, weight: style == .bold ? .bold : .medium))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .foregroundStyle(selected ? TR.ink : TR.cream)
+                .background(selected ? TR.cream : .white.opacity(0.055))
+                .clipShape(Capsule())
+        }
+        .buttonStyle(TactileButtonStyle(pressedScale: 0.95))
+        .accessibilityValue(selected ? "Selected" : "Not selected")
+        .accessibilityIdentifier("title-style-\(style.rawValue)")
+    }
+
+    private var selectedCard: MontageTitleCard {
+        model.montageTitleCard(for: selectedKind)
+    }
+
+    private var selectedIndex: Int {
+        TitleCardKind.allCases.firstIndex(of: selectedKind) ?? 0
+    }
+
+    private var titleBinding: Binding<String> {
+        Binding(
+            get: { model.titleDraft(for: selectedKind).title },
+            set: { model.setTitleText($0, for: selectedKind) }
+        )
+    }
+
+    private var subtitleBinding: Binding<String> {
+        Binding(
+            get: { model.titleDraft(for: selectedKind).subtitle },
+            set: { model.setTitleSubtitle($0, for: selectedKind) }
+        )
+    }
+
+    private var durationBinding: Binding<Double> {
+        Binding(
+            get: { model.titleDraft(for: selectedKind).duration },
+            set: { model.setTitleDuration($0, for: selectedKind) }
+        )
+    }
+
+    private func moveSelection(by offset: Int) {
+        let all = TitleCardKind.allCases
+        guard let current = all.firstIndex(of: selectedKind) else { return }
+        let destination = min(max(current + offset, 0), all.count - 1)
+        withAnimation(reduceMotion ? nil : TRMotion.selection) {
+            selectedKind = all[destination]
+            model.setTitleCardEnabled(true, for: selectedKind)
+        }
+        selectionFeedback += 1
+    }
+
+    private enum TitleField: Hashable {
+        case title
+        case subtitle
     }
 }
 

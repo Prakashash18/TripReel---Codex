@@ -1,4 +1,16 @@
+import CoreTransferable
 import SwiftUI
+import UniformTypeIdentifiers
+
+struct TripReelMovieFile: Transferable, Sendable {
+    let url: URL
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .mpeg4Movie) { movie in
+            SentTransferredFile(movie.url)
+        }
+    }
+}
 
 struct ExportScreen: View {
     @EnvironmentObject private var model: TripReelModel
@@ -60,9 +72,9 @@ struct ExportScreen: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("Project file")
+                                Text("Continue editing")
                                     .font(TR.ui(18, weight: .semibold))
-                                Text("Keep editing in CapCut, Premiere or Final Cut")
+                                Text("CapCut video or professional timeline files")
                                     .font(TR.ui(13))
                                     .foregroundStyle(.white.opacity(0.62))
                                     .lineSpacing(2)
@@ -190,7 +202,7 @@ private struct ProjectFormatSheet: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text("Project file")
+                    Text("Continue editing")
                         .font(TR.display(28))
                     Spacer()
                     Button("Close") { dismiss() }
@@ -198,30 +210,51 @@ private struct ProjectFormatSheet: View {
                         .foregroundStyle(TR.accent)
                 }
 
-                Text("Your cut, order, framing, motion and timing travel in a small timeline file you can share with another editor.")
+                Text("Choose a finished MP4 for mobile editors, or a timing file for a desktop editor.")
                     .font(TR.ui(13))
                     .foregroundStyle(.white.opacity(0.57))
                     .lineSpacing(4)
 
-                VStack(spacing: 8) {
-                    ForEach(model.formats) { format in
-                        formatRow(format)
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
+                        RoundedIcon(symbol: "scissors", tint: TR.accent, size: 38)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("CapCut Mobile")
+                                .font(TR.ui(15, weight: .semibold))
+                            Text("CapCut accepts TripReel's MP4 as one editable video clip. Its mobile app doesn't import CSV, EDL or Final Cut timelines.")
+                                .font(TR.ui(12))
+                                .foregroundStyle(.white.opacity(0.66))
+                                .lineSpacing(3)
+                        }
                     }
-                }
 
-                HStack(alignment: .top, spacing: 11) {
-                    Text("CapCut")
-                        .font(TR.ui(13, weight: .semibold))
-                        .foregroundStyle(TR.accent)
-                    Text("CapCut can't read timeline files. Choose the CSV timing sheet to see the photo order, cut times, framing and motion settings.")
-                        .font(TR.ui(12))
-                        .foregroundStyle(.white.opacity(0.73))
+                    Button {
+                        dismiss()
+                        model.startCapCutRender()
+                    } label: {
+                        Label("Render MP4 for CapCut", systemImage: "play.rectangle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(CreamButtonStyle())
+                    .accessibilityIdentifier("render-capcut-video")
+
+                    Text("If CapCut isn't offered in the share sheet, save the MP4 to Photos and import it from inside CapCut.")
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.48))
                         .lineSpacing(3)
                 }
                 .padding(14)
                 .background(TR.accent.opacity(0.09))
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(TR.accent.opacity(0.26), lineWidth: 1))
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                MetadataText(text: "DESKTOP TIMELINE FILES", color: .white.opacity(0.43))
+
+                VStack(spacing: 8) {
+                    ForEach(model.formats) { format in
+                        formatRow(format)
+                    }
+                }
 
                 if let projectURL {
                     ShareLink(item: projectURL) {
@@ -619,7 +652,7 @@ struct FilmReadyScreen: View {
                 .shadow(color: .black.opacity(0.58), radius: 30, y: 22)
                 .trEntrance(1, distance: 12)
 
-            Text("Your film is ready")
+            Text(model.exportHandoff == .capCut ? "Ready for CapCut" : "Your film is ready")
                 .font(TR.display(compact ? 27 : 30))
                 .multilineTextAlignment(.center)
                 .padding(.top, compact ? 12 : 20)
@@ -628,45 +661,81 @@ struct FilmReadyScreen: View {
             Spacer(minLength: compact ? 4 : 14)
 
             VStack(spacing: compact ? 8 : 11) {
-                HStack(spacing: 10) {
-                    Button {
-                        if model.usesDemoData {
-                            model.cleanupShowsGrid = false
-                            model.go(.cleanup)
-                        } else {
-                            Task {
-                                if await model.saveExportToPhotos() {
-                                    model.cleanupShowsGrid = false
-                                    model.go(.cleanup)
-                                }
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 8) {
-                            if model.isSavingExport {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .tint(TR.ink)
-                            }
-                            Text(model.isSavingExport ? "Saving…" : "Save")
-                                .frame(maxWidth: .infinity)
-                        }
-                    }
-                    .buttonStyle(CreamButtonStyle())
-                    .disabled(model.isSavingExport)
-                    .accessibilityIdentifier("save-film")
+                if model.exportHandoff == .capCut {
+                    Text("Share the MP4 and choose CapCut. If it isn't listed, save it and import from Photos inside CapCut.")
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.53))
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
 
-                    if let url = model.exportedVideoURL {
-                        ShareLink(item: url) {
-                            Text("Share")
-                                .frame(maxWidth: .infinity)
+                    HStack(spacing: 10) {
+                        if let url = model.exportedVideoURL {
+                            ShareLink(
+                                item: TripReelMovieFile(url: url),
+                                preview: SharePreview("\(model.tripShortPlace) · TripReel film")
+                            ) {
+                                Text("Choose CapCut")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(CreamButtonStyle())
+                            .accessibilityIdentifier("share-film")
+                        } else {
+                            Button("Choose CapCut") { }
+                                .buttonStyle(CreamButtonStyle())
+                                .disabled(true)
+                        }
+
+                        Button {
+                            saveFilm()
+                        } label: {
+                            HStack(spacing: 8) {
+                                if model.isSavingExport {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .tint(TR.cream)
+                                }
+                                Text(model.isSavingExport ? "Saving…" : "Save to Photos")
+                                    .frame(maxWidth: .infinity)
+                            }
                         }
                         .buttonStyle(GlassButtonStyle())
-                        .accessibilityIdentifier("share-film")
-                    } else {
-                        Button("Share") { }
+                        .disabled(model.isSavingExport)
+                        .accessibilityIdentifier("save-film")
+                    }
+                } else {
+                    HStack(spacing: 10) {
+                        Button {
+                            saveFilm()
+                        } label: {
+                            HStack(spacing: 8) {
+                                if model.isSavingExport {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .tint(TR.ink)
+                                }
+                                Text(model.isSavingExport ? "Saving…" : "Save")
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .buttonStyle(CreamButtonStyle())
+                        .disabled(model.isSavingExport)
+                        .accessibilityIdentifier("save-film")
+
+                        if let url = model.exportedVideoURL {
+                            ShareLink(
+                                item: TripReelMovieFile(url: url),
+                                preview: SharePreview("\(model.tripShortPlace) · TripReel film")
+                            ) {
+                                Text("Share MP4")
+                                    .frame(maxWidth: .infinity)
+                            }
                             .buttonStyle(GlassButtonStyle())
-                            .disabled(true)
+                            .accessibilityIdentifier("share-film")
+                        } else {
+                            Button("Share MP4") { }
+                                .buttonStyle(GlassButtonStyle())
+                                .disabled(true)
+                        }
                     }
                 }
 
@@ -682,6 +751,20 @@ struct FilmReadyScreen: View {
             .trEntrance(3, distance: 10)
         }
         .padding(.bottom, compact ? 0 : 12)
+    }
+
+    private func saveFilm() {
+        if model.usesDemoData {
+            model.cleanupShowsGrid = false
+            model.go(.cleanup)
+        } else {
+            Task {
+                if await model.saveExportToPhotos() {
+                    model.cleanupShowsGrid = false
+                    model.go(.cleanup)
+                }
+            }
+        }
     }
 }
 
