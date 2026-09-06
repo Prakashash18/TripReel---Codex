@@ -2,7 +2,10 @@
 
 > September 6 update: the Film Studio hub, full-person safe framing, similarity
 > clustering, directional navigation, cinematic montage transitions, and the
-> accessible app-wide motion system pass strict source checks but are not
+> accessible app-wide motion system pass strict source checks. The optional
+> OpenAI consent is now a numbered plain-language flow, and Cleanup exposes
+> responsive Select all/Clear all controls with a live selected/total count.
+> These latest surfaces are not
 > represented by the older screenshots below. Fresh native capture is blocked because this
 > Mac's obsolete iOS 9 runtime crashes CoreSimulator/asset catalog services;
 > validate this updated flow in Xcode Cloud or the next TestFlight build.

@@ -982,6 +982,36 @@ final class TripReelModel: ObservableObject {
         photos.filter { !cutPhotoIDs.contains($0.id) }
     }
 
+    /// Original PhotoKit items that the user cut from this film and can choose
+    /// to remove from Apple Photos. Permission-free imports stay out of cleanup
+    /// because deleting TripReel's temporary copy cannot delete the original.
+    var cleanupCandidatePhotos: [ReelPhoto] {
+        if usesDemoData {
+            let demoCuts = photos.filter { cutPhotoIDs.contains($0.id) }
+            return demoCuts.isEmpty ? Array(photos.prefix(24)) : demoCuts
+        }
+
+        let libraryCuts = photos.filter { photo in
+            guard cutPhotoIDs.contains(photo.id) else { return false }
+            if case .library = photo.source { return true }
+            return false
+        }
+        return libraryCuts
+    }
+
+    var cleanupSelectedCount: Int {
+        cleanupSelection.intersection(cleanupCandidatePhotoIDs).count
+    }
+
+    var areAllCleanupCandidatesSelected: Bool {
+        let candidates = cleanupCandidatePhotoIDs
+        return !candidates.isEmpty && candidates.isSubset(of: cleanupSelection)
+    }
+
+    private var cleanupCandidatePhotoIDs: Set<String> {
+        Set(cleanupCandidatePhotos.map(\.id))
+    }
+
     var customizedPhotoCount: Int {
         keptPhotos.reduce(into: 0) { count, photo in
             if photo.hasCustomFrameStyle
@@ -2073,6 +2103,25 @@ final class TripReelModel: ObservableObject {
         cleanupDeletionErrorMessage = nil
         showCutHint = true
         go(.trips)
+    }
+
+    func toggleCleanupPhotoSelection(_ photoID: String) {
+        guard !isDeletingPhotos, cleanupCandidatePhotoIDs.contains(photoID) else { return }
+        if cleanupSelection.contains(photoID) {
+            cleanupSelection.remove(photoID)
+        } else {
+            cleanupSelection.insert(photoID)
+        }
+    }
+
+    func selectAllCleanupPhotos() {
+        guard !isDeletingPhotos else { return }
+        cleanupSelection = cleanupCandidatePhotoIDs
+    }
+
+    func clearCleanupSelection() {
+        guard !isDeletingPhotos else { return }
+        cleanupSelection.removeAll()
     }
 
     /// Deletes only explicitly selected, already-cut PhotoKit assets. Imported

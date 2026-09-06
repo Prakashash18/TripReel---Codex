@@ -1,12 +1,16 @@
 import XCTest
 
+@MainActor
 final class TripReelFlowUITests: XCTestCase {
     private var app: XCUIApplication!
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+    }
+
+    private func launchApp(at screen: String = "trips") {
         app = XCUIApplication()
-        app.launchArguments = ["-qaScreen", "trips", "-qaNoHint"]
+        app.launchArguments = ["-qaScreen", screen, "-qaNoHint"]
         app.launch()
     }
 
@@ -15,6 +19,7 @@ final class TripReelFlowUITests: XCTestCase {
     }
 
     func testCoreFilmCreationFlow() {
+        launchApp()
         XCTAssertTrue(screen("trips-screen").waitForExistence(timeout: 3))
 
         app.buttons["Da Nang, Vietnam, 84 photos"].tap()
@@ -69,6 +74,7 @@ final class TripReelFlowUITests: XCTestCase {
     }
 
     func testTripsAndNearbyStayInOneCalmCollectionScreen() {
+        launchApp()
         XCTAssertTrue(screen("trips-screen").waitForExistence(timeout: 3))
 
         app.buttons["Nearby"].tap()
@@ -79,9 +85,7 @@ final class TripReelFlowUITests: XCTestCase {
     }
 
     func testFilmStudioOffersFullPreviewAndPhotoSelectionLoop() {
-        app.terminate()
-        app.launchArguments = ["-qaScreen", "secondWatch", "-qaNoHint"]
-        app.launch()
+        launchApp(at: "secondWatch")
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
 
         screen("full-preview-button").tap()
@@ -96,12 +100,32 @@ final class TripReelFlowUITests: XCTestCase {
     }
 
     func testCleanupShowsDestructiveWarningBeforePhotosRequest() {
-        app.terminate()
-        app.launchArguments = ["-qaScreen", "cleanup", "-qaNoHint"]
-        app.launch()
+        launchApp(at: "cleanup")
         XCTAssertTrue(screen("cleanup-screen").waitForExistence(timeout: 3))
 
         app.buttons["Review cut photos"].tap()
+
+        let selectAll = screen("cleanup-select-all")
+        XCTAssertTrue(selectAll.waitForExistence(timeout: 2))
+        selectAll.tap()
+        XCTAssertTrue(app.buttons["Delete 24 photos"].waitForExistence(timeout: 2))
+
+        app.buttons["Delete 24 photos"].tap()
+        let bulkWarning = app.alerts["Delete 24 original photos?"]
+        XCTAssertTrue(bulkWarning.waitForExistence(timeout: 2))
+        XCTAssertTrue(
+            bulkWarning.staticTexts
+                .matching(NSPredicate(format: "label CONTAINS[c] %@", "including any thumbnail"))
+                .firstMatch
+                .exists
+        )
+        bulkWarning.buttons["Cancel"].tap()
+
+        let clearAll = screen("cleanup-clear-all")
+        XCTAssertTrue(clearAll.exists)
+        clearAll.tap()
+        XCTAssertTrue(app.buttons["Nothing selected"].waitForExistence(timeout: 2))
+
         let firstPhoto = app.buttons
             .matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Select "))
             .firstMatch

@@ -33,7 +33,7 @@ struct TripReelPrivacyPolicyView: View {
                         )
                         section(
                             "Your choices",
-                            "You can keep all analysis on-device or change the cloud choice from the Cloud photo intelligence card on the Trips screen. Turning it off prevents future uploads. Revoking Photos access in iOS Settings stops further library access."
+                            "You can keep all analysis on-device or change the cloud choice from the OpenAI review card on the Trips screen. Turning it off prevents future uploads. Revoking Photos access in iOS Settings stops further library access."
                         )
 
                         VStack(alignment: .leading, spacing: 10) {

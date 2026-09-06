@@ -735,10 +735,7 @@ struct CleanupScreen: View {
     }
 
     private var cleanupCount: Int {
-        if model.usesDemoData && model.cutPhotoIDs.isEmpty {
-            return min(24, model.photos.count)
-        }
-        return model.cutPhotoIDs.count
+        model.cleanupCandidatePhotos.count
     }
 
     private var cleanupQuestion: String {
@@ -756,11 +753,7 @@ private struct CleanupGrid: View {
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
 
     private var candidatePhotos: [ReelPhoto] {
-        let explicit = model.photos.filter { model.cutPhotoIDs.contains($0.id) }
-        if model.usesDemoData && explicit.isEmpty {
-            return Array(model.photos.prefix(24))
-        }
-        return explicit
+        model.cleanupCandidatePhotos
     }
 
     var body: some View {
@@ -771,6 +764,9 @@ private struct CleanupGrid: View {
                 Text(subtitle)
                     .font(TR.ui(13))
                     .foregroundStyle(.white.opacity(0.57))
+
+                selectionToolbar
+                    .padding(.top, 8)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
@@ -783,11 +779,7 @@ private struct CleanupGrid: View {
                         Button {
                             guard !model.isDeletingPhotos else { return }
                             withAnimation(reduceMotion ? nil : TRMotion.selection) {
-                                if model.cleanupSelection.contains(photo.id) {
-                                    model.cleanupSelection.remove(photo.id)
-                                } else {
-                                    model.cleanupSelection.insert(photo.id)
-                                }
+                                model.toggleCleanupPhotoSelection(photo.id)
                             }
                         } label: {
                             ZStack(alignment: .topTrailing) {
@@ -825,17 +817,20 @@ private struct CleanupGrid: View {
 
             VStack(spacing: 10) {
                 Button(deleteLabel) {
-                    guard !model.cleanupSelection.isEmpty else { return }
-                    activeAlert = .confirm(model.cleanupSelection.count)
+                    guard model.cleanupSelectedCount > 0 else { return }
+                    activeAlert = .confirm(
+                        model.cleanupSelectedCount,
+                        includesEveryCutPhoto: model.areAllCleanupCandidatesSelected
+                    )
                 }
                 .font(TR.ui(16, weight: .semibold))
-                .foregroundStyle(model.cleanupSelection.isEmpty ? .white.opacity(0.36) : Color(red: 0.10, green: 0.025, blue: 0.012))
+                .foregroundStyle(model.cleanupSelectedCount == 0 ? .white.opacity(0.36) : Color(red: 0.10, green: 0.025, blue: 0.012))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 18)
-                .background(model.cleanupSelection.isEmpty ? .white.opacity(0.08) : TR.cut)
+                .background(model.cleanupSelectedCount == 0 ? .white.opacity(0.08) : TR.cut)
                 .clipShape(Capsule())
                 .buttonStyle(TactileButtonStyle(pressedScale: 0.98))
-                .disabled(model.cleanupSelection.isEmpty || model.isDeletingPhotos)
+                .disabled(model.cleanupSelectedCount == 0 || model.isDeletingPhotos)
 
                 Button("Keep them all") {
                     model.restart()
@@ -856,10 +851,13 @@ private struct CleanupGrid: View {
         .sensoryFeedback(.selection, trigger: model.cleanupSelection.count)
         .alert(item: $activeAlert) { alert in
             switch alert {
-            case let .confirm(count):
-                Alert(
+            case let .confirm(count, includesEveryCutPhoto):
+                let selectionWarning = includesEveryCutPhoto
+                    ? "You selected every cut photo, including any thumbnail that is still loading here. "
+                    : ""
+                return Alert(
                     title: Text("Delete \(count) original photo\(count == 1 ? "" : "s")?"),
-                    message: Text("This removes the selected originals from Apple Photos and devices synced with iCloud Photos. TripReel cannot undo it. Apple Photos will ask you to confirm once more."),
+                    message: Text(selectionWarning + "This removes the selected originals from Apple Photos and devices synced with iCloud Photos. TripReel cannot undo it. Apple Photos will ask you to confirm once more."),
                     primaryButton: .destructive(Text("Delete from Photos")) {
                         Task {
                             if let deletedCount = await model.deleteCleanupSelection() {
@@ -875,13 +873,13 @@ private struct CleanupGrid: View {
                     secondaryButton: .cancel()
                 )
             case let .success(count):
-                Alert(
+                return Alert(
                     title: Text("Deleted from Photos"),
                     message: Text("\(count) photo\(count == 1 ? " was" : "s were") deleted after Apple Photos confirmed the change."),
                     dismissButton: .default(Text("Done")) { model.restart() }
                 )
             case let .failure(message):
-                Alert(
+                return Alert(
                     title: Text("Photos weren't deleted"),
                     message: Text(message),
                     dismissButton: .default(Text("OK"))
@@ -890,28 +888,102 @@ private struct CleanupGrid: View {
         }
     }
 
-    private var subtitle: String {
-        if model.cleanupSelection.isEmpty {
-            return "Nothing is selected. Pick only what you want gone."
+    private var selectionToolbar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                selectionCountLabel
+                Spacer(minLength: 4)
+                bulkSelectionButtons
+            }
+
+            VStack(alignment: .leading, spacing: 9) {
+                selectionCountLabel
+                bulkSelectionButtons
+            }
         }
-        return "\(model.cleanupSelection.count) selected to delete. The rest stay in your library."
+        .accessibilityElement(children: .contain)
+    }
+
+    private var selectionCountLabel: some View {
+        Text("\(model.cleanupSelectedCount) / \(candidatePhotos.count) selected")
+            .font(TR.mono(11, weight: .semibold))
+            .tracking(0.6)
+            .foregroundStyle(.white.opacity(0.64))
+            .contentTransition(.numericText())
+            .accessibilityLabel("\(model.cleanupSelectedCount) of \(candidatePhotos.count) photos selected")
+    }
+
+    private var bulkSelectionButtons: some View {
+        HStack(spacing: 8) {
+            cleanupBulkButton(
+                title: "Select all",
+                symbol: "checkmark.circle",
+                isEnabled: !candidatePhotos.isEmpty && !model.areAllCleanupCandidatesSelected,
+                accessibilityID: "cleanup-select-all"
+            ) {
+                withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                    model.selectAllCleanupPhotos()
+                }
+            }
+
+            cleanupBulkButton(
+                title: "Clear all",
+                symbol: "xmark.circle",
+                isEnabled: model.cleanupSelectedCount > 0,
+                accessibilityID: "cleanup-clear-all"
+            ) {
+                withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                    model.clearCleanupSelection()
+                }
+            }
+        }
+    }
+
+    private func cleanupBulkButton(
+        title: String,
+        symbol: String,
+        isEnabled: Bool,
+        accessibilityID: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(TR.ui(12, weight: .semibold))
+                .foregroundStyle(isEnabled ? TR.cream : .white.opacity(0.34))
+                .padding(.horizontal, 11)
+                .padding(.vertical, 9)
+                .background(.white.opacity(isEnabled ? 0.09 : 0.04))
+                .overlay(Capsule().stroke(.white.opacity(isEnabled ? 0.16 : 0.07), lineWidth: 1))
+                .clipShape(Capsule())
+        }
+        .buttonStyle(TactileButtonStyle(pressedScale: 0.96))
+        .disabled(!isEnabled || model.isDeletingPhotos)
+        .accessibilityIdentifier(accessibilityID)
+    }
+
+    private var subtitle: String {
+        if model.cleanupSelectedCount == 0 {
+            return "Tap individual photos, or select the whole group at once."
+        }
+        return "\(model.cleanupSelectedCount) selected to delete. The rest stay in your library."
     }
 
     private var deleteLabel: String {
         if model.isDeletingPhotos { return "Deleting…" }
-        let count = model.cleanupSelection.count
+        let count = model.cleanupSelectedCount
         guard count > 0 else { return "Nothing selected" }
         return "Delete \(count) photo\(count == 1 ? "" : "s")"
     }
 
     private enum CleanupAlert: Identifiable {
-        case confirm(Int)
+        case confirm(Int, includesEveryCutPhoto: Bool)
         case success(Int)
         case failure(String)
 
         var id: String {
             switch self {
-            case let .confirm(count): "confirm-\(count)"
+            case let .confirm(count, includesEveryCutPhoto):
+                "confirm-\(count)-\(includesEveryCutPhoto)"
             case let .success(count): "success-\(count)"
             case let .failure(message): "failure-\(message)"
             }

@@ -39,7 +39,7 @@ struct CloudAnalysisConsentView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     header
                     introduction
-                    privacySummary
+                    cloudReviewSummary
                     dataDetails
                     actions
                 }
@@ -61,7 +61,7 @@ struct CloudAnalysisConsentView: View {
 
     private var header: some View {
         HStack(alignment: .center) {
-            MetadataText(text: context == .firstUse ? "Optional enhancement" : "Photo intelligence")
+            MetadataText(text: context == .firstUse ? "Optional OpenAI review" : "Photo review settings")
 
             Spacer()
 
@@ -92,18 +92,18 @@ struct CloudAnalysisConsentView: View {
             }
             .accessibilityHidden(true)
 
-            Text(context == .firstUse ? "Pick the memories, skip the clutter" : "Cloud visual intelligence")
+            Text(context == .firstUse ? "A second opinion for tricky photos" : "Choose how tricky photos are reviewed")
                 .font(TR.display(36))
                 .tracking(-0.4)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("To better tell travel memories from order screenshots, TripReel can send reduced-resolution thumbnail copies — not your original photos — to TripReel's secure service and then to OpenAI's GPT-5.6 Luna.")
+            Text("Your iPhone makes the first cut. When it is unsure, OpenAI's image model, GPT-5.6 Luna, can look at a small thumbnail copy and help TripReel decide what belongs in your film.")
                 .font(TR.ui(15))
                 .foregroundStyle(.white.opacity(0.76))
                 .lineSpacing(5)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Label("Off until you choose it", systemImage: "checkmark.shield")
+            Label("Optional · off by default", systemImage: "checkmark.shield")
                 .font(TR.ui(13, weight: .semibold))
                 .foregroundStyle(TR.keep)
                 .padding(.horizontal, 12)
@@ -124,47 +124,93 @@ struct CloudAnalysisConsentView: View {
         }
     }
 
-    private var privacySummary: some View {
-        VStack(spacing: 1) {
-            privacyRow(
-                symbol: "photo.on.rectangle",
-                title: "Thumbnail copies only",
-                body: "Your original, full-resolution photos stay in your photo library."
+    private var cloudReviewSummary: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            MetadataText(text: "What happens", color: .white.opacity(0.52))
+
+            VStack(spacing: 0) {
+                reviewStep(
+                    number: 1,
+                    symbol: "iphone",
+                    title: "Your iPhone checks first",
+                    body: "Apple Vision analyzes every photo privately on the device."
+                )
+
+                stepDivider
+
+                reviewStep(
+                    number: 2,
+                    symbol: "sparkles.rectangle.stack",
+                    title: "OpenAI sees only the unsure ones",
+                    body: "A thumbnail up to 512 pixels is sent without its filename, location, or other photo metadata. Your full-resolution original stays in Photos."
+                )
+
+                stepDivider
+
+                reviewStep(
+                    number: 3,
+                    symbol: "trash.slash",
+                    title: "TripReel uses the answer, not the copy",
+                    body: "The result helps shape this film. TripReel discards its temporary thumbnail after review."
+                )
+
+                stepDivider
+
+                reviewStep(
+                    number: 4,
+                    symbol: "hand.raised",
+                    title: "You can keep everything local",
+                    body: "Say no and Smart Selection still works entirely on your iPhone."
+                )
+            }
+            .padding(.horizontal, 16)
+            .glassCard(cornerRadius: 20)
+            .accessibilityElement(children: .contain)
+
+            HStack(alignment: .top, spacing: 11) {
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(TR.accent)
+                    .frame(width: 24, height: 24)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Why use it")
+                        .font(TR.ui(13, weight: .semibold))
+                    Text("It can help with borderline screenshots, order or receipt photos, and low-quality shots while keeping travel and people moments in your hands.")
+                        .font(TR.ui(12))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(14)
+            .background(TR.accent.opacity(0.09))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(TR.accent.opacity(0.24), lineWidth: 1)
             )
-
-            Divider()
-                .overlay(.white.opacity(0.10))
-                .padding(.leading, 54)
-
-            privacyRow(
-                symbol: "trash.slash",
-                title: "TripReel doesn't store them",
-                body: "TripReel discards its temporary thumbnail copies after classification."
-            )
-
-            Divider()
-                .overlay(.white.opacity(0.10))
-                .padding(.leading, 54)
-
-            privacyRow(
-                symbol: "iphone",
-                title: "On-device still works",
-                body: "Decline cloud enhancement and TripReel will continue using on-device analysis."
-            )
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .padding(.horizontal, 16)
-        .glassCard(cornerRadius: 20)
-        .accessibilityElement(children: .contain)
     }
 
     private var dataDetails: some View {
         DisclosureGroup(isExpanded: $showsDataDetails) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Under default API data controls, OpenAI may retain API content for abuse monitoring for up to 30 days, or longer when legally or safety-required. Zero Data Retention removes that default storage for eligible accounts, but images flagged by OpenAI's child-safety classifier may still be retained for manual review. API data is not used to train OpenAI models by default.")
-                    .font(TR.ui(12))
-                    .foregroundStyle(.white.opacity(0.66))
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 14) {
+                handlingPoint(
+                    title: "Default retention",
+                    body: "OpenAI may retain API content for abuse monitoring for up to 30 days, or longer when legally or safety-required."
+                )
+
+                handlingPoint(
+                    title: "Zero Data Retention",
+                    body: "OpenAI-approved accounts can remove that default storage. Images flagged by OpenAI's child-safety classifier may still be retained for manual review."
+                )
+
+                handlingPoint(
+                    title: "Model training",
+                    body: "API data is not used to train OpenAI models by default."
+                )
 
                 Link(
                     "OpenAI API data controls",
@@ -174,13 +220,13 @@ struct CloudAnalysisConsentView: View {
                 .foregroundStyle(TR.accent)
                 .accessibilityHint("Opens OpenAI's API data controls documentation")
 
-                Text("You can change this choice later from the Cloud photo intelligence card on the Trips screen.")
+                Text("You can change this choice later from the OpenAI review card on the Trips screen.")
                     .font(TR.ui(12))
                     .foregroundStyle(.white.opacity(0.52))
             }
             .padding(.top, 12)
         } label: {
-            Label("How data is handled", systemImage: "lock.shield")
+            Label("How OpenAI handles the thumbnail", systemImage: "lock.shield")
                 .font(TR.ui(14, weight: .semibold))
                 .foregroundStyle(TR.cream)
         }
@@ -195,10 +241,31 @@ struct CloudAnalysisConsentView: View {
         .accessibilityIdentifier("cloud-analysis-data-details")
     }
 
+    private func handlingPoint(title: String, body: String) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Circle()
+                .fill(TR.accent)
+                .frame(width: 5, height: 5)
+                .padding(.top, 6)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(TR.ui(12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.82))
+                Text(body)
+                    .font(TR.ui(12))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     private var actions: some View {
         VStack(spacing: 13) {
             Button(
-                cloudServiceAvailable ? "Use cloud enhancement" : "Cloud enhancement unavailable",
+                cloudServiceAvailable ? "Use OpenAI for tricky photos" : "OpenAI review unavailable",
                 action: onUseCloudEnhancement
             )
                 .buttonStyle(CreamButtonStyle())
@@ -207,7 +274,7 @@ struct CloudAnalysisConsentView: View {
                 .accessibilityHint("Allows reduced-resolution thumbnail copies to be analyzed by GPT-5.6 Luna")
                 .accessibilityIdentifier("cloud-analysis-accept")
 
-            Button("Keep on device", action: onKeepOnDevice)
+            Button("Keep analysis on this iPhone", action: onKeepOnDevice)
                 .font(TR.ui(15, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.74))
                 .frame(maxWidth: .infinity)
@@ -226,10 +293,31 @@ struct CloudAnalysisConsentView: View {
         }
     }
 
-    private func privacyRow(symbol: String, title: String, body: String) -> some View {
+    private var stepDivider: some View {
+        Divider()
+            .overlay(.white.opacity(0.10))
+            .padding(.leading, 58)
+    }
+
+    private func reviewStep(
+        number: Int,
+        symbol: String,
+        title: String,
+        body: String
+    ) -> some View {
         HStack(alignment: .top, spacing: 13) {
-            RoundedIcon(symbol: symbol, tint: TR.accent, size: 38)
-                .accessibilityHidden(true)
+            ZStack(alignment: .topTrailing) {
+                RoundedIcon(symbol: symbol, tint: TR.accent, size: 40)
+
+                Text("\(number)")
+                    .font(TR.mono(8, weight: .bold))
+                    .foregroundStyle(TR.ink)
+                    .frame(width: 17, height: 17)
+                    .background(TR.accent)
+                    .clipShape(Circle())
+                    .offset(x: 4, y: -4)
+            }
+            .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
@@ -243,7 +331,7 @@ struct CloudAnalysisConsentView: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 14)
+        .padding(.vertical, 13)
     }
 }
 
@@ -262,7 +350,7 @@ struct CloudAnalysisSettingsCard: View {
                     .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Cloud photo intelligence")
+                    Text("Optional OpenAI review")
                         .font(TR.ui(15, weight: .semibold))
                     Text(statusText)
                         .font(TR.ui(12))
@@ -284,14 +372,14 @@ struct CloudAnalysisSettingsCard: View {
             .glassCard(cornerRadius: 18)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Cloud photo intelligence, \(statusText)")
-        .accessibilityHint("Review cloud photo analysis and privacy choices")
+        .accessibilityLabel("Optional OpenAI review, \(statusText)")
+        .accessibilityHint("Review OpenAI photo analysis and privacy choices")
         .accessibilityIdentifier("cloud-analysis-settings-card")
     }
 
     private var statusText: String {
         if isEnabled, !isAvailable { return "On · service setup needed" }
-        return isEnabled ? "On · GPT-5.6 Luna" : "Off · On-device only"
+        return isEnabled ? "On · OpenAI GPT-5.6 Luna" : "Off · On-device only"
     }
 }
 

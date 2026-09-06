@@ -244,6 +244,67 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertTrue(model.showCutHint)
     }
 
+    func testCleanupBulkSelectionSelectsEveryCutLibraryPhotoAndCanClear() {
+        let model = TripReelModel(arguments: [], useDemoData: false)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let assets = [
+            TripAsset(
+                id: "cut-library-one",
+                source: .library("cut-library-one"),
+                creationDate: start,
+                filename: "IMG_1.HEIC"
+            ),
+            TripAsset(
+                id: "cut-library-two",
+                source: .library("cut-library-two"),
+                creationDate: start.addingTimeInterval(1),
+                filename: "IMG_2.HEIC"
+            ),
+            TripAsset(
+                id: "kept-library",
+                source: .library("kept-library"),
+                creationDate: start.addingTimeInterval(2),
+                filename: "IMG_3.HEIC"
+            ),
+            TripAsset(
+                id: "temporary-import",
+                source: .imported("/tmp/temporary-import.jpg"),
+                creationDate: start.addingTimeInterval(3),
+                filename: "IMG_4.JPG"
+            )
+        ]
+        let trip = Trip(
+            id: "cleanup-bulk-trip",
+            place: "Test",
+            dates: "Today",
+            startDate: start,
+            endDate: start.addingTimeInterval(3),
+            assets: assets,
+            coverID: assets[0].id
+        )
+        model.startBuild(trip: trip)
+        model.cutPhotoIDs = ["cut-library-one", "cut-library-two", "temporary-import"]
+
+        XCTAssertEqual(
+            Set(model.cleanupCandidatePhotos.map(\.id)),
+            ["cut-library-one", "cut-library-two"]
+        )
+        XCTAssertFalse(model.areAllCleanupCandidatesSelected)
+
+        model.selectAllCleanupPhotos()
+
+        XCTAssertEqual(model.cleanupSelection, ["cut-library-one", "cut-library-two"])
+        XCTAssertEqual(model.cleanupSelectedCount, 2)
+        XCTAssertTrue(model.areAllCleanupCandidatesSelected)
+
+        model.clearCleanupSelection()
+
+        XCTAssertTrue(model.cleanupSelection.isEmpty)
+        XCTAssertEqual(model.cleanupSelectedCount, 0)
+        XCTAssertFalse(model.areAllCleanupCandidatesSelected)
+        model.go(.trips)
+    }
+
     func testCleanupDeletesOnlyExplicitlySelectedCutLibraryPhotos() async throws {
         let service = DeletionPhotoLibrary()
         let model = TripReelModel(arguments: [], useDemoData: false, photoLibrary: service)
