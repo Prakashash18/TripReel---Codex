@@ -6,6 +6,30 @@ protocol PhotoLibraryServing: AnyObject, Sendable {
     var onLibraryChange: (@Sendable () -> Void)? { get set }
     func fetchAllPhotos() async -> [PhotoMetadata]
     func fetchPhotos(withLocalIdentifiers identifiers: [String]) async -> [PhotoMetadata]
+    func deletePhotos(withLocalIdentifiers identifiers: [String]) async throws -> Int
+}
+
+extension PhotoLibraryServing {
+    func deletePhotos(withLocalIdentifiers identifiers: [String]) async throws -> Int {
+        throw PhotoLibraryDeletionError.unsupported
+    }
+}
+
+enum PhotoLibraryDeletionError: LocalizedError, Sendable {
+    case unsupported
+    case photosUnavailable(expected: Int, found: Int)
+    case rejected(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupported:
+            "These photos can't be deleted by TripReel."
+        case let .photosUnavailable(expected, found):
+            "Only \(found) of \(expected) selected photos are still available. Nothing was deleted."
+        case let .rejected(message):
+            message
+        }
+    }
 }
 
 /// Reads lightweight, value-only metadata from the part of the photo library the
@@ -87,6 +111,48 @@ final class PhotoLibraryService: NSObject, PhotoLibraryServing, PHPhotoLibraryCh
                 continuation.resume(returning: Self.metadata(from: result))
             }
         }
+    }
+
+    /// Requests one atomic deletion from Apple Photos. PhotoKit presents its own
+    /// system confirmation before committing this change.
+    func deletePhotos(withLocalIdentifiers identifiers: [String]) async throws -> Int {
+        let uniqueIdentifiers = Array(Set(identifiers))
+        guard !uniqueIdentifiers.isEmpty else { return 0 }
+
+        let assets: [PHAsset] = await withCheckedContinuation { continuation in
+            queue.async {
+                let result = PHAsset.fetchAssets(
+                    withLocalIdentifiers: uniqueIdentifiers,
+                    options: nil
+                )
+                var values: [PHAsset] = []
+                values.reserveCapacity(result.count)
+                result.enumerateObjects { asset, _, _ in values.append(asset) }
+                continuation.resume(returning: values)
+            }
+        }
+
+        guard assets.count == uniqueIdentifiers.count else {
+            throw PhotoLibraryDeletionError.photosUnavailable(
+                expected: uniqueIdentifiers.count,
+                found: assets.count
+            )
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            photoLibrary.performChanges {
+                PHAssetChangeRequest.deleteAssets(assets as NSArray)
+            } completionHandler: { success, error in
+                if success {
+                    continuation.resume()
+                } else {
+                    let message = error?.localizedDescription
+                        ?? "Apple Photos did not approve the deletion. Nothing was deleted."
+                    continuation.resume(throwing: PhotoLibraryDeletionError.rejected(message))
+                }
+            }
+        }
+        return uniqueIdentifiers.count
     }
 
     func photoLibraryDidChange(_ changeInstance: PHChange) {

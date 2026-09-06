@@ -464,12 +464,12 @@ struct MusicTrack: Identifiable, Hashable {
     let id: String
     let name: String
     let mood: String
-    let bpm: String
-    let bpmValue: Double
+    let tag: String
     let symbol: String
     let tint: Color
     let bars: [CGFloat]
-    let soundProfile: LocalSoundtrackStyle?
+    let resourceName: String?
+    let sourceURL: String?
 }
 
 struct ProjectFormat: Identifiable, Hashable {
@@ -483,6 +483,11 @@ struct PhotoDecision: Equatable {
     let id: String
     let previousIndex: Int
     let previousWasCut: Bool
+}
+
+private struct LibraryDetectionResult: Sendable {
+    let trips: [DetectedTrip]
+    let nearbyEvents: [DetectedTrip]
 }
 
 enum ExportQuality: Equatable {
@@ -504,16 +509,19 @@ final class TripReelModel: ObservableObject {
     @Published var renderProgress = 0.0
     @Published var titleCards: Set<TitleCardKind> = [.opening]
     @Published var titleText = "My trip"
-    @Published var selectedTrackID: String? = "coast"
+    @Published var selectedTrackID: String? = "wanderlust"
     @Published var cutToBeat = true
     @Published var selectedFormatID = "sequence"
     @Published var cleanupSelection: Set<String> = []
     @Published var cleanupShowsGrid = false
+    @Published private(set) var isDeletingPhotos = false
+    @Published private(set) var cleanupDeletionErrorMessage: String?
     @Published var selectedPhotoCount = 0
     @Published var exportQuality: ExportQuality = .standard
     @Published var montageLook: MontageLook = .story
     @Published var montageMotionIntensity: MontageMotionIntensity = .gentle
     @Published private(set) var trips: [Trip] = []
+    @Published private(set) var nearbyEvents: [Trip] = []
     @Published private(set) var selectedTrip: Trip?
     @Published private(set) var photos: [ReelPhoto] = []
     @Published private(set) var libraryPreviewPhotos: [ReelPhoto] = []
@@ -545,7 +553,7 @@ final class TripReelModel: ObservableObject {
     private var photoAnalysisTask: Task<Void, Never>?
     private var photoAnalysisGeneration = UUID()
     private var placeTask: Task<Void, Never>?
-    private var detectorTask: Task<[DetectedTrip], Never>?
+    private var detectorTask: Task<LibraryDetectionResult, Never>?
     private var scanGeneration = UUID()
     private var manualSelectionGeneration = UUID()
     private var pendingResultNavigation = false
@@ -648,11 +656,11 @@ final class TripReelModel: ObservableObject {
     ]
 
     let tracks = [
-        MusicTrack(id: "drift", name: "Slow Drift", mood: "Ambient, spacious", bpm: "72", bpmValue: 72, symbol: "waveform", tint: Color(red: 0.56, green: 0.70, blue: 0.86), bars: [8, 15, 11, 20, 13], soundProfile: .drift),
-        MusicTrack(id: "coast", name: "Coast Road", mood: "Warm, sunlit", bpm: "96", bpmValue: 96, symbol: "guitars", tint: TR.accent, bars: [12, 21, 15, 25, 18], soundProfile: .coast),
-        MusicTrack(id: "market", name: "Night Market", mood: "Percussive, bright", bpm: "118", bpmValue: 118, symbol: "music.quarternote.3", tint: Color(red: 0.88, green: 0.54, blue: 0.42), bars: [17, 26, 20, 29, 23], soundProfile: .market),
-        MusicTrack(id: "pulse", name: "Pulse", mood: "Electronic, driving", bpm: "128", bpmValue: 128, symbol: "waveform.path.ecg", tint: Color(red: 0.71, green: 0.56, blue: 0.86), bars: [21, 28, 23, 29, 26], soundProfile: .pulse),
-        MusicTrack(id: "none", name: "No music", mood: "Just the cut", bpm: "—", bpmValue: 0, symbol: "speaker.slash", tint: Color.white.opacity(0.35), bars: [4, 4, 4, 4, 4], soundProfile: nil)
+        MusicTrack(id: "wanderlust", name: "Wanderlust", mood: "Folksy, warm, carefree", tag: "FOLK", symbol: "guitars", tint: TR.accent, bars: [12, 21, 15, 25, 18], resourceName: "wanderlust", sourceURL: "https://www.scottbuckley.com.au/library/wanderlust/"),
+        MusicTrack(id: "simplicity", name: "Simplicity", mood: "Bright, acoustic, uplifting", tag: "LIGHT", symbol: "music.note", tint: Color(red: 0.64, green: 0.79, blue: 0.57), bars: [13, 20, 16, 24, 19], resourceName: "simplicity", sourceURL: "https://www.scottbuckley.com.au/library/simplicity/"),
+        MusicTrack(id: "castles", name: "Castles in the Sky", mood: "Dreamy, gentle, urban", tag: "DREAMY", symbol: "sparkles", tint: Color(red: 0.56, green: 0.70, blue: 0.86), bars: [8, 15, 11, 20, 13], resourceName: "castles-in-the-sky", sourceURL: "https://www.scottbuckley.com.au/library/castles-in-the-sky/"),
+        MusicTrack(id: "long-way-home", name: "The Long Way Home", mood: "Nostalgic piano and strings", tag: "PIANO", symbol: "pianokeys", tint: Color(red: 0.77, green: 0.62, blue: 0.86), bars: [10, 18, 13, 23, 16], resourceName: "the-long-way-home", sourceURL: "https://www.scottbuckley.com.au/library/the-long-way-home/"),
+        MusicTrack(id: "none", name: "No music", mood: "Just the cut", tag: "—", symbol: "speaker.slash", tint: Color.white.opacity(0.35), bars: [4, 4, 4, 4, 4], resourceName: nil, sourceURL: nil)
     ]
 
     let formats = [
@@ -698,6 +706,11 @@ final class TripReelModel: ObservableObject {
             return "\(trips.count) trip\(trips.count == 1 ? "" : "s") · \(libraryPhotoCount) photos scanned"
         }
         return "\(trips.count) trip\(trips.count == 1 ? "" : "s") found"
+    }
+
+    var nearbyEyebrow: String {
+        if isScanningLibrary { return "Finding nearby moments" }
+        return "\(nearbyEvents.count) local outing\(nearbyEvents.count == 1 ? "" : "s") · on this iPhone"
     }
 
     var tripPlace: String { selectedTrip?.place ?? "Your trip" }
@@ -1078,9 +1091,9 @@ final class TripReelModel: ObservableObject {
         if pendingResultNavigation {
             pendingResultNavigation = false
             showTripResults()
-        } else if screen == .trips && trips.isEmpty {
+        } else if screen == .trips && trips.isEmpty && nearbyEvents.isEmpty {
             go(.empty)
-        } else if screen == .empty && !trips.isEmpty {
+        } else if screen == .empty && (!trips.isEmpty || !nearbyEvents.isEmpty) {
             go(.trips)
         }
 
@@ -1114,7 +1127,15 @@ final class TripReelModel: ObservableObject {
         libraryPreviewPhotos = Self.makePreviewPhotos(from: metadata)
 
         let task = Task.detached(priority: .userInitiated) {
-            TripDetector.detect(in: metadata, shouldCancel: { Task.isCancelled })
+            let trips = TripDetector.detect(in: metadata, shouldCancel: { Task.isCancelled })
+            guard !Task.isCancelled else {
+                return LibraryDetectionResult(trips: [], nearbyEvents: [])
+            }
+            let nearbyEvents = NearbyEventDetector.detect(
+                in: metadata,
+                shouldCancel: { Task.isCancelled }
+            )
+            return LibraryDetectionResult(trips: trips, nearbyEvents: nearbyEvents)
         }
         detectorTask = task
         let detected = await task.value
@@ -1123,13 +1144,14 @@ final class TripReelModel: ObservableObject {
         }
         guard scanGeneration == generation, !Task.isCancelled else { return nil }
 
-        trips = detected.map { Self.makeTrip(from: $0) }
+        trips = detected.trips.map { Self.makeTrip(from: $0) }
+        nearbyEvents = detected.nearbyEvents.map { Self.makeNearbyEvent(from: $0) }
         discardImportedPhotoFiles()
         hasManualSelection = false
         hasPermissionFreeSelection = false
         isManualSelectionInProgress = false
         resolvedCoordinates = Dictionary(
-            uniqueKeysWithValues: detected.compactMap { trip in
+            uniqueKeysWithValues: (detected.trips + detected.nearbyEvents).compactMap { trip in
                 trip.centroid.map { (trip.id, $0) }
             }
         )
@@ -1327,6 +1349,7 @@ final class TripReelModel: ObservableObject {
         hasPermissionFreeSelection = !importedPhotos.isEmpty
         isManualSelectionInProgress = false
         trips = [trip]
+        nearbyEvents = []
         selectedTrip = nil
         photos = []
         selectedPhotoCount = assets.count
@@ -1348,7 +1371,7 @@ final class TripReelModel: ObservableObject {
     }
 
     func showTripResults() {
-        go(trips.isEmpty ? .empty : .trips)
+        go(trips.isEmpty && nearbyEvents.isEmpty ? .empty : .trips)
     }
 
     func startBuild(trip: Trip) {
@@ -1455,22 +1478,102 @@ final class TripReelModel: ObservableObject {
     func restart() {
         cleanupSelection = []
         cleanupShowsGrid = false
+        cleanupDeletionErrorMessage = nil
         showCutHint = true
         go(.trips)
     }
 
+    /// Deletes only explicitly selected, already-cut PhotoKit assets. Imported
+    /// picker files and bundled demo art can never reach the Photos delete API.
+    @discardableResult
+    func deleteCleanupSelection() async -> Int? {
+        guard !isDeletingPhotos, !cleanupSelection.isEmpty else { return nil }
+        cleanupDeletionErrorMessage = nil
+
+        let selectedPhotos = photos.filter { cleanupSelection.contains($0.id) }
+        let libraryPairs = selectedPhotos.compactMap { photo -> (photoID: String, assetID: String)? in
+            guard case let .library(identifier) = photo.source else { return nil }
+            return (photo.id, identifier)
+        }
+        guard libraryPairs.count == cleanupSelection.count,
+              libraryPairs.allSatisfy({ cutPhotoIDs.contains($0.photoID) }) else {
+            cleanupDeletionErrorMessage = "Only cut photos from your Apple Photos library can be deleted. Nothing was deleted."
+            return nil
+        }
+
+        isDeletingPhotos = true
+        defer { isDeletingPhotos = false }
+        do {
+            let count = try await photoLibrary.deletePhotos(
+                withLocalIdentifiers: libraryPairs.map(\.assetID)
+            )
+            let deletedPhotoIDs = Set(libraryPairs.map(\.photoID))
+            let deletedAssetIDs = Set(libraryPairs.map(\.assetID))
+            applySuccessfulDeletion(
+                photoIDs: deletedPhotoIDs,
+                libraryAssetIDs: deletedAssetIDs
+            )
+            return count
+        } catch {
+            cleanupDeletionErrorMessage = (error as? LocalizedError)?.errorDescription
+                ?? "Apple Photos couldn't delete these photos. Nothing was deleted."
+            return nil
+        }
+    }
+
+    private func applySuccessfulDeletion(
+        photoIDs: Set<String>,
+        libraryAssetIDs: Set<String>
+    ) {
+        photos.removeAll { photoIDs.contains($0.id) }
+        cutPhotoIDs.subtract(photoIDs)
+        cleanupSelection.subtract(photoIDs)
+        history.removeAll { photoIDs.contains($0.id) }
+        excludedPhotos.removeAll { photoIDs.contains($0.id) }
+        activePhotoInsights = activePhotoInsights.filter { !photoIDs.contains($0.key) }
+        libraryPreviewPhotos.removeAll { photo in
+            if case let .library(identifier) = photo.source {
+                return libraryAssetIDs.contains(identifier)
+            }
+            return false
+        }
+
+        let retainedIDs: (Trip) -> Set<String> = { trip in
+            Set(trip.assets.compactMap { asset in
+                if case let .library(identifier) = asset.source,
+                   libraryAssetIDs.contains(identifier) { return nil }
+                return asset.id
+            })
+        }
+        trips = trips.compactMap { $0.retainingAssets(withIDs: retainedIDs($0)) }
+        nearbyEvents = nearbyEvents.compactMap { $0.retainingAssets(withIDs: retainedIDs($0)) }
+        if let selectedTrip {
+            self.selectedTrip = selectedTrip.retainingAssets(withIDs: retainedIDs(selectedTrip))
+        }
+        currentPhotoIndex = min(currentPhotoIndex, max(0, photos.count - 1))
+        buildCount = min(buildCount, photos.count)
+        libraryPhotoCount = max(0, libraryPhotoCount - libraryAssetIDs.count)
+        selectedPhotoCount = max(0, selectedPhotoCount - libraryAssetIDs.count)
+    }
+
     private func resolveTripNames(generation: UUID) async {
-        let tripIDs = trips.map(\.id)
+        let tripIDs = trips.map(\.id) + nearbyEvents.map(\.id)
         for tripID in tripIDs {
             guard !Task.isCancelled, scanGeneration == generation else { return }
-            guard trips.contains(where: { $0.id == tripID }) else { continue }
+            guard trips.contains(where: { $0.id == tripID })
+                    || nearbyEvents.contains(where: { $0.id == tripID }) else { continue }
             guard let detectedCoordinate = resolvedCoordinates[tripID] else { continue }
             guard let name = await placeResolver.placeName(for: detectedCoordinate) else { continue }
             guard !Task.isCancelled, scanGeneration == generation else { return }
-            guard let currentIndex = trips.firstIndex(where: { $0.id == tripID }) else { continue }
-            let renamed = trips[currentIndex].renamed(name)
-            trips[currentIndex] = renamed
-            if selectedTrip?.id == tripID { selectedTrip = renamed }
+            if let currentIndex = trips.firstIndex(where: { $0.id == tripID }) {
+                let renamed = trips[currentIndex].renamed(name)
+                trips[currentIndex] = renamed
+                if selectedTrip?.id == tripID { selectedTrip = renamed }
+            } else if let currentIndex = nearbyEvents.firstIndex(where: { $0.id == tripID }) {
+                let renamed = nearbyEvents[currentIndex].renamed(name)
+                nearbyEvents[currentIndex] = renamed
+                if selectedTrip?.id == tripID { selectedTrip = renamed }
+            }
         }
     }
 
@@ -1493,6 +1596,7 @@ final class TripReelModel: ObservableObject {
         hasPermissionFreeSelection = false
         isScanningLibrary = false
         trips = []
+        nearbyEvents = []
         selectedTrip = nil
         photos = []
         libraryPreviewPhotos = []
@@ -1502,6 +1606,9 @@ final class TripReelModel: ObservableObject {
         activePhotoInsights = [:]
         cutPhotoIDs = []
         history = []
+        cleanupSelection = []
+        cleanupDeletionErrorMessage = nil
+        isDeletingPhotos = false
 
         if screen != .welcome && screen != .access {
             go(.access)
@@ -1643,6 +1750,11 @@ final class TripReelModel: ObservableObject {
             assets: assets,
             coverID: detected.coverID
         )
+    }
+
+    private static func makeNearbyEvent(from detected: DetectedTrip) -> Trip {
+        let trip = makeTrip(from: detected)
+        return trip.renamed("Nearby outing")
     }
 
     private static func makePreviewPhotos(from metadata: [PhotoMetadata]) -> [ReelPhoto] {

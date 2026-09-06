@@ -13,7 +13,7 @@ struct TripReelPrivacyPolicyView: View {
                         policyHeader
                         section(
                             "Photos and trip detection",
-                            "With your Photos permission, TripReel reads accessible images, capture dates, and embedded locations to find trips and build a film. Trip detection and grouping happen on your device; TripReel uses Apple's system geocoder to turn one representative coordinate into a place name. Originals remain in Apple Photos and TripReel does not delete them. Photos you pick without broad library access are copied temporarily into TripReel's private on-device cache for the editing session."
+                            "With your Photos permission, TripReel reads accessible images, capture dates, and embedded locations to find trips and build a film. Trip detection and grouping happen on your device; TripReel uses Apple's system geocoder to turn one representative coordinate into a place name. Originals remain in Apple Photos unless you explicitly select cut photos in Cleanup, accept TripReel's warning, and confirm Apple's system deletion prompt. With iCloud Photos, that confirmed deletion can affect your other synced devices. Photos you pick without broad library access are copied temporarily into TripReel's private on-device cache for the editing session."
                         )
                         section(
                             "On-device visual intelligence",

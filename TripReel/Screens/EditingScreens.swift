@@ -865,15 +865,22 @@ private struct MusicSheet: View {
                     .foregroundStyle(.white.opacity(0.57))
                     .lineSpacing(4)
 
-                Label("Original instrumental loops · generated on this iPhone", systemImage: "iphone.and.arrow.forward")
-                    .font(TR.ui(11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.46))
+                Link(destination: URL(string: "https://www.scottbuckley.com.au/library/using-this-music/")!) {
+                    Label("Music by Scott Buckley · CC BY 4.0", systemImage: "checkmark.seal")
+                        .font(TR.ui(11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.52))
+                }
 
                 VStack(spacing: 8) {
                     ForEach(model.tracks) { track in
                         trackRow(track)
                     }
                 }
+
+                Text("Music previews are 90-second excerpts, trimmed, loudness-normalized, faded, and transcoded to AAC for TripReel.")
+                    .font(TR.ui(10))
+                    .foregroundStyle(.white.opacity(0.38))
+                    .lineSpacing(3)
 
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
@@ -938,10 +945,10 @@ private struct MusicSheet: View {
                 }
                 .frame(height: 29)
 
-                Text(track.bpm)
+                Text(track.tag)
                     .font(TR.mono(10))
                     .foregroundStyle(.white.opacity(0.43))
-                    .frame(width: 34, alignment: .trailing)
+                    .frame(width: 48, alignment: .trailing)
             }
             .foregroundStyle(TR.cream)
             .padding(.horizontal, 15)

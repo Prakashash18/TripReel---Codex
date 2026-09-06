@@ -57,13 +57,26 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertNil(model.selectedTrack)
     }
 
-    func testSoundtracksHavePlayableLocalProfiles() {
+    func testSoundtracksHaveBundledAttributedAudio() {
         let model = makeModel()
         let musicTracks = model.tracks.filter { $0.id != "none" }
 
         XCTAssertFalse(musicTracks.isEmpty)
-        XCTAssertTrue(musicTracks.allSatisfy { $0.bpmValue > 0 && $0.soundProfile != nil })
-        XCTAssertNil(model.tracks.first { $0.id == "none" }?.soundProfile)
+        XCTAssertTrue(musicTracks.allSatisfy { $0.resourceName != nil && $0.sourceURL != nil })
+        XCTAssertNil(model.tracks.first { $0.id == "none" }?.resourceName)
+        XCTAssertEqual(model.selectedTrackID, "wanderlust")
+    }
+
+    func testBundledSoundtrackStartsRealAudioPlayback() throws {
+        let model = makeModel()
+        let track = try XCTUnwrap(model.selectedTrack)
+        let player = LocalSoundtrackPlayer()
+
+        player.play(track: track)
+
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertNil(player.errorMessage)
+        player.stop()
     }
 
     func testRestartReturnsToTripsAndClearsCleanupState() {
@@ -77,6 +90,73 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertFalse(model.cleanupShowsGrid)
         XCTAssertTrue(model.cleanupSelection.isEmpty)
         XCTAssertTrue(model.showCutHint)
+    }
+
+    func testCleanupDeletesOnlyExplicitlySelectedCutLibraryPhotos() async throws {
+        let service = DeletionPhotoLibrary()
+        let model = TripReelModel(arguments: [], useDemoData: false, photoLibrary: service)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let assets = (0..<3).map { index in
+            TripAsset(
+                id: "delete-\(index)",
+                source: .library("delete-\(index)"),
+                creationDate: start.addingTimeInterval(Double(index)),
+                filename: "IMG_\(index).HEIC"
+            )
+        }
+        let trip = Trip(
+            id: "delete-trip",
+            place: "Test",
+            dates: "Today",
+            startDate: start,
+            endDate: start.addingTimeInterval(2),
+            assets: assets,
+            coverID: assets[0].id
+        )
+        model.startBuild(trip: trip)
+        model.cutPhotoIDs = ["delete-0", "delete-2"]
+        model.cleanupSelection = ["delete-2"]
+
+        let count = await model.deleteCleanupSelection()
+
+        XCTAssertEqual(count, 1)
+        XCTAssertEqual(service.deletedIdentifiers, ["delete-2"])
+        XCTAssertEqual(model.photos.map(\.id), ["delete-0", "delete-1"])
+        XCTAssertEqual(model.cutPhotoIDs, ["delete-0"])
+        XCTAssertTrue(model.cleanupSelection.isEmpty)
+        XCTAssertEqual(model.selectedTrip?.assets.map(\.id), ["delete-0", "delete-1"])
+        model.go(.trips)
+    }
+
+    func testCleanupFailureKeepsPhotosAndSelection() async {
+        let service = DeletionPhotoLibrary(shouldFail: true)
+        let model = TripReelModel(arguments: [], useDemoData: false, photoLibrary: service)
+        let asset = TripAsset(
+            id: "keep-me",
+            source: .library("keep-me"),
+            creationDate: Date(),
+            filename: "IMG_1.HEIC"
+        )
+        let trip = Trip(
+            id: "failure-trip",
+            place: "Test",
+            dates: "Today",
+            startDate: Date(),
+            endDate: Date(),
+            assets: [asset],
+            coverID: asset.id
+        )
+        model.startBuild(trip: trip)
+        model.cutPhotoIDs = [asset.id]
+        model.cleanupSelection = [asset.id]
+
+        let count = await model.deleteCleanupSelection()
+
+        XCTAssertNil(count)
+        XCTAssertEqual(model.photos.map(\.id), [asset.id])
+        XCTAssertEqual(model.cleanupSelection, [asset.id])
+        XCTAssertNotNil(model.cleanupDeletionErrorMessage)
+        model.go(.trips)
     }
 
     func testChangingDecisionAndUndoRestoresPreviousCutState() {
@@ -346,5 +426,26 @@ private final class StubPhotoLibrary: PhotoLibraryServing, @unchecked Sendable {
     func fetchPhotos(withLocalIdentifiers identifiers: [String]) async -> [PhotoMetadata] {
         let requested = Set(identifiers)
         return photos.filter { requested.contains($0.id) }
+    }
+}
+
+private final class DeletionPhotoLibrary: PhotoLibraryServing, @unchecked Sendable {
+    var onLibraryChange: (@Sendable () -> Void)?
+    private(set) var deletedIdentifiers: [String] = []
+    let shouldFail: Bool
+
+    init(shouldFail: Bool = false) {
+        self.shouldFail = shouldFail
+    }
+
+    func fetchAllPhotos() async -> [PhotoMetadata] { [] }
+    func fetchPhotos(withLocalIdentifiers identifiers: [String]) async -> [PhotoMetadata] { [] }
+
+    func deletePhotos(withLocalIdentifiers identifiers: [String]) async throws -> Int {
+        if shouldFail {
+            throw PhotoLibraryDeletionError.rejected("Deletion was declined for testing.")
+        }
+        deletedIdentifiers = identifiers
+        return identifiers.count
     }
 }

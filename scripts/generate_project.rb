@@ -38,6 +38,12 @@ target.resources_build_phase.add_file_reference(privacy_manifest)
   target.resources_build_phase.add_file_reference(font)
 end
 
+Dir.glob(File.join(ROOT, 'TripReel/Resources/Music/*')).sort.each do |absolute_path|
+  relative_path = absolute_path.delete_prefix(File.join(ROOT, 'TripReel/'))
+  music = app_group.new_file(relative_path)
+  target.resources_build_phase.add_file_reference(music)
+end
+
 app_group.new_file('Resources/Info.plist')
 app_group.new_file('Resources/TripReel.entitlements')
 app_group.new_file('Resources/Fonts/OFL-InstrumentSerif.txt')

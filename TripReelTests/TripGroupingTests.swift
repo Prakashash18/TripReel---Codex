@@ -292,6 +292,79 @@ final class TripGroupingTests: XCTestCase {
         XCTAssertEqual(trips[0].photos.map(\.id), homeVisit.map(\.id))
     }
 
+    func testNearbyDetectorFindsCompactOutingNearHabitualPlace() throws {
+        let evidence = habitualEvidence()
+        let outingStart = utcCalendar.startOfDay(for: origin)
+            .addingTimeInterval((105 * 24 + 10) * 60 * 60)
+        let outing = photos(
+            prefix: "outing",
+            count: 8,
+            hours: 5,
+            coordinate: PhotoCoordinate(latitude: 1.29, longitude: 103.85),
+            start: outingStart
+        )
+
+        let event = try XCTUnwrap(
+            NearbyEventDetector.detect(in: evidence + outing, calendar: utcCalendar).first
+        )
+
+        XCTAssertEqual(event.photos.map(\.id), outing.map(\.id))
+        XCTAssertTrue(event.id.hasPrefix("nearby-"))
+    }
+
+    func testNearbyDetectorRejectsSmallFarAndScreenshotOnlyOutings() {
+        let evidence = habitualEvidence()
+        let outingStart = utcCalendar.startOfDay(for: origin)
+            .addingTimeInterval((105 * 24 + 10) * 60 * 60)
+        let tooSmall = photos(
+            prefix: "small-outing",
+            count: 5,
+            hours: 3,
+            coordinate: .singapore,
+            start: outingStart
+        )
+        let far = photos(
+            prefix: "far-outing",
+            count: 8,
+            hours: 3,
+            coordinate: .tokyo,
+            start: outingStart.addingTimeInterval(24 * 60 * 60)
+        )
+        let screenshots = photos(
+            prefix: "screens",
+            count: 12,
+            hours: 3,
+            coordinate: .singapore,
+            start: outingStart.addingTimeInterval(2 * 24 * 60 * 60),
+            isScreenshot: true
+        )
+
+        let events = NearbyEventDetector.detect(
+            in: evidence + tooSmall + far + screenshots,
+            calendar: utcCalendar
+        )
+
+        XCTAssertTrue(events.isEmpty)
+    }
+
+    func testNearbyDetectorRequiresHabitualPlaceEvidence() {
+        let outing = photos(prefix: "outing", count: 9, hours: 4, coordinate: .singapore)
+
+        XCTAssertTrue(
+            NearbyEventDetector.detect(in: outing, calendar: utcCalendar).isEmpty
+        )
+    }
+
+    private func habitualEvidence() -> [PhotoMetadata] {
+        [0, 14, 28, 42, 56, 70, 84, 91].map { day in
+            photo(
+                id: String(format: "habitual-%03d", day),
+                date: origin.addingTimeInterval(Double(day) * 24 * 60 * 60),
+                coordinate: .singapore
+            )
+        }
+    }
+
     private func photos(
         prefix: String,
         count: Int,

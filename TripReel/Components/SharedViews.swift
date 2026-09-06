@@ -169,6 +169,7 @@ struct MontageView: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.58), value: currentIndex)
         .onChange(of: currentIndex, initial: true) { _, _ in
             motionPhase = false
+            preheatUpcomingPhotos()
             guard !reduceMotion else { return }
             withAnimation(.easeInOut(duration: max(0.7, secondsPerSlide * 0.92))) {
                 motionPhase = true
@@ -184,6 +185,14 @@ struct MontageView: View {
                 currentIndex = (currentIndex + 1) % slideCount
             }
         }
+    }
+
+    private func preheatUpcomingPhotos() {
+        guard !photos.isEmpty else { return }
+        let sources = (0..<min(5, photos.count)).map { offset in
+            photos[(currentIndex + offset) % photos.count].source
+        }
+        PhotoAssetImageLoader.preheat(sources: sources)
     }
 
     private func resolvedFrameStyle(
@@ -490,9 +499,28 @@ private struct PhotoSourceImage: View {
                 } else {
                     ZStack {
                         Color.white.opacity(0.055)
-                        Image(systemName: loader.failed ? "icloud.slash" : "photo")
-                            .font(.system(size: min(size.width, size.height) * 0.23, weight: .light))
+                        if let progress = loader.downloadProgress {
+                            VStack(spacing: 8) {
+                                ProgressView(value: progress)
+                                    .progressViewStyle(.circular)
+                                    .tint(TR.accent)
+                                if min(size.width, size.height) > 96 {
+                                    Text("Downloading from iCloud \(Int(progress * 100))%")
+                                        .font(TR.ui(10, weight: .medium))
+                                        .foregroundStyle(.white.opacity(0.52))
+                                }
+                            }
+                        } else {
+                            VStack(spacing: 7) {
+                                Image(systemName: loader.failed ? "photo.badge.exclamationmark" : "photo")
+                                    .font(.system(size: min(size.width, size.height) * 0.23, weight: .light))
+                                if loader.failed && min(size.width, size.height) > 96 {
+                                    Text("Tap to try again")
+                                        .font(TR.ui(10, weight: .medium))
+                                }
+                            }
                             .foregroundStyle(.white.opacity(0.28))
+                        }
                     }
                 }
             }
@@ -513,7 +541,12 @@ private struct PhotoSourceImage: View {
                 }
             }
         }
+        .onTapGesture {
+            guard loader.failed, let requestKey else { return }
+            loader.retry(requestKey)
+        }
         .onDisappear { loader.cancel() }
+        .accessibilityLabel(loader.failed ? "Photo unavailable. Tap to try again." : "Photo")
     }
 }
 
@@ -528,19 +561,74 @@ private struct PhotoImageRequestKey: Hashable {
 private final class PhotoAssetImageLoader: ObservableObject {
     @Published private(set) var image: UIImage?
     @Published private(set) var failed = false
+    @Published private(set) var downloadProgress: Double?
 
     private static let manager = PHCachingImageManager()
+    private static let imageCache: NSCache<NSString, CachedPhotoImage> = {
+        let cache = NSCache<NSString, CachedPhotoImage>()
+        cache.countLimit = 80
+        cache.totalCostLimit = 96 * 1_024 * 1_024
+        return cache
+    }()
+    private static var preheatInFlight = Set<String>()
     private var requestID = PHInvalidImageRequestID
     private var key: PhotoImageRequestKey?
     private var retryTask: Task<Void, Never>?
     private var fileTask: Task<Void, Never>?
     private var retryCount = 0
+    private var usingDataFallback = false
+
+    static func preheat(sources: [PhotoSource]) {
+        let identifiers = sources.compactMap { source -> String? in
+            guard case let .library(identifier) = source,
+                  imageCache.object(forKey: identifier as NSString) == nil,
+                  !preheatInFlight.contains(identifier) else { return nil }
+            return identifier
+        }
+        guard !identifiers.isEmpty else { return }
+
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
+        result.enumerateObjects { asset, _, _ in
+            let identifier = asset.localIdentifier
+            preheatInFlight.insert(identifier)
+            let options = PHImageRequestOptions()
+            options.deliveryMode = .opportunistic
+            options.resizeMode = .fast
+            options.isNetworkAccessAllowed = true
+            manager.requestImage(
+                for: asset,
+                targetSize: CGSize(width: 1_600, height: 1_600),
+                contentMode: .aspectFit,
+                options: options
+            ) { image, info in
+                let cancelled = (info?[PHImageCancelledKey] as? Bool) == true
+                let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) == true
+                Task { @MainActor in
+                    guard !cancelled else {
+                        preheatInFlight.remove(identifier)
+                        return
+                    }
+                    if let image, !degraded {
+                        store(image, for: .library(identifier))
+                    }
+                    if !degraded {
+                        preheatInFlight.remove(identifier)
+                    }
+                }
+            }
+        }
+    }
 
     func load(_ key: PhotoImageRequestKey) {
         guard self.key != key else { return }
         cancel()
         self.key = key
         failed = false
+        downloadProgress = nil
+        if let cached = Self.cachedImage(for: key) {
+            image = cached
+            return
+        }
         request(key)
     }
 
@@ -553,6 +641,8 @@ private final class PhotoAssetImageLoader: ObservableObject {
         retryTask = nil
         retryCount = 0
         failed = false
+        downloadProgress = nil
+        usingDataFallback = false
         request(key)
     }
 
@@ -583,6 +673,13 @@ private final class PhotoAssetImageLoader: ObservableObject {
         options.deliveryMode = .opportunistic
         options.resizeMode = .fast
         options.isNetworkAccessAllowed = true
+        options.progressHandler = { [weak self] progress, _, _, _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.key == key else { return }
+                self.downloadProgress = min(0.99, max(0, progress))
+                self.failed = false
+            }
+        }
 
         // A full-screen @3x request can otherwise make PhotoKit fetch a much
         // larger iCloud original. Start screen-sized but bounded, then retry at
@@ -599,7 +696,10 @@ private final class PhotoAssetImageLoader: ObservableObject {
         requestID = Self.manager.requestImage(
             for: asset,
             targetSize: targetSize,
-            contentMode: key.contentMode == .fit ? .aspectFit : .aspectFill,
+            // Request the uncropped thumbnail. SwiftUI applies fill/fit later,
+            // so portrait frames can reuse the same pixels without PhotoKit
+            // baking in a landscape crop.
+            contentMode: .aspectFit,
             options: options
         ) { [weak self] image, info in
             let cancelled = (info?[PHImageCancelledKey] as? Bool) == true
@@ -610,14 +710,73 @@ private final class PhotoAssetImageLoader: ObservableObject {
                 if let image {
                     self.image = image
                     if !degraded {
+                        Self.store(image, for: key.source)
                         self.retryTask?.cancel()
                         self.retryTask = nil
                         self.failed = false
+                        self.downloadProgress = nil
                         self.retryCount = 0
+                        self.usingDataFallback = false
                     }
                 } else if error != nil || !degraded {
-                    self.failed = true
+                    if self.retryCount >= 1 && !self.usingDataFallback {
+                        self.requestLibraryImageData(asset: asset, key: key)
+                    } else {
+                        self.scheduleRetry(for: key)
+                    }
+                }
+            }
+        }
+    }
+
+    private func requestLibraryImageData(asset: PHAsset, key: PhotoImageRequestKey) {
+        cancelImageRequest()
+        usingDataFallback = true
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .highQualityFormat
+        options.version = .current
+        options.isNetworkAccessAllowed = true
+        options.progressHandler = { [weak self] progress, _, _, _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.key == key else { return }
+                self.downloadProgress = min(0.99, max(0, progress))
+                self.failed = false
+            }
+        }
+
+        requestID = Self.manager.requestImageDataAndOrientation(
+            for: asset,
+            options: options
+        ) { [weak self] data, _, _, info in
+            let cancelled = (info?[PHImageCancelledKey] as? Bool) == true
+            guard !cancelled, let data else {
+                Task { @MainActor [weak self] in
+                    guard let self, self.key == key else { return }
+                    self.usingDataFallback = false
                     self.scheduleRetry(for: key)
+                }
+                return
+            }
+
+            Task { @MainActor [weak self] in
+                guard let self, self.key == key else { return }
+                self.fileTask?.cancel()
+                self.fileTask = Task { [weak self] in
+                    let maximumPixelSize = max(key.pixelWidth, key.pixelHeight, 1_600)
+                    let decoded = await Task.detached(priority: .userInitiated) {
+                        Self.thumbnail(from: data, maximumPixelSize: maximumPixelSize)
+                    }.value
+                    guard !Task.isCancelled, let self, self.key == key else { return }
+                    self.usingDataFallback = false
+                    if let decoded {
+                        self.image = decoded
+                        Self.store(decoded, for: key.source)
+                        self.downloadProgress = nil
+                        self.failed = false
+                        self.retryCount = 0
+                    } else {
+                        self.scheduleRetry(for: key)
+                    }
                 }
             }
         }
@@ -653,7 +812,9 @@ private final class PhotoAssetImageLoader: ObservableObject {
                 self.retryTask?.cancel()
                 self.retryTask = nil
                 self.image = image
+                Self.store(image, for: key.source)
                 self.failed = false
+                self.downloadProgress = nil
                 self.retryCount = 0
             } else {
                 self.failed = true
@@ -663,16 +824,69 @@ private final class PhotoAssetImageLoader: ObservableObject {
     }
 
     private func scheduleRetry(for key: PhotoImageRequestKey) {
-        guard retryCount < 2, retryTask == nil else { return }
+        guard retryTask == nil else { return }
+        guard retryCount < 4 else {
+            failed = true
+            downloadProgress = nil
+            return
+        }
         retryCount += 1
-        let delay = UInt64(retryCount) * 1_000_000_000
+        let retryDelays: [UInt64] = [1, 2, 4, 7]
+        let delay = retryDelays[retryCount - 1] * 1_000_000_000
         retryTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: delay)
             guard !Task.isCancelled, let self, self.key == key else { return }
             self.retryTask = nil
             self.failed = false
+            self.downloadProgress = nil
             self.request(key)
         }
+    }
+
+    private static func cachedImage(for key: PhotoImageRequestKey) -> UIImage? {
+        guard let identifier = cacheIdentifier(for: key.source),
+              let cached = imageCache.object(forKey: identifier as NSString) else { return nil }
+        let required = max(key.pixelWidth, key.pixelHeight)
+        return cached.longestPixelSide >= Int(Double(required) * 0.72) ? cached.image : nil
+    }
+
+    private static func store(_ image: UIImage, for source: PhotoSource) {
+        guard let identifier = cacheIdentifier(for: source) else { return }
+        let longest = max(image.cgImage?.width ?? Int(image.size.width * image.scale),
+                          image.cgImage?.height ?? Int(image.size.height * image.scale))
+        if let existing = imageCache.object(forKey: identifier as NSString),
+           existing.longestPixelSide >= longest { return }
+        let value = CachedPhotoImage(image: image, longestPixelSide: longest)
+        let cost = max(1, longest * longest * 4)
+        imageCache.setObject(value, forKey: identifier as NSString, cost: cost)
+    }
+
+    private static func cacheIdentifier(for source: PhotoSource) -> String? {
+        switch source {
+        case .bundled:
+            nil
+        case let .library(identifier):
+            identifier
+        case let .imported(path):
+            "file:\(path)"
+        }
+    }
+
+    nonisolated private static func thumbnail(from data: Data, maximumPixelSize: Int) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(
+            data as CFData,
+            [kCGImageSourceShouldCache: false] as CFDictionary
+        ), let thumbnail = CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize
+            ] as CFDictionary
+        ) else { return nil }
+        return UIImage(cgImage: thumbnail)
     }
 
     private func cancelImageRequest() {
@@ -688,10 +902,22 @@ private final class PhotoAssetImageLoader: ObservableObject {
         fileTask?.cancel()
         fileTask = nil
         retryCount = 0
+        usingDataFallback = false
         cancelImageRequest()
         key = nil
         image = nil
         failed = false
+        downloadProgress = nil
+    }
+
+    private final class CachedPhotoImage {
+        let image: UIImage
+        let longestPixelSide: Int
+
+        init(image: UIImage, longestPixelSide: Int) {
+            self.image = image
+            self.longestPixelSide = longestPixelSide
+        }
     }
 }
 
@@ -776,58 +1002,56 @@ struct PlaybackProgressBar: View {
     }
 }
 
-enum LocalSoundtrackStyle: String, Hashable, Sendable {
-    case drift
-    case coast
-    case market
-    case pulse
-}
-
-/// Plays small original instrumental loops synthesized entirely on the device.
-/// This makes music previews real without a network dependency or licensed
-/// catalog audio. A future renderer can schedule the same samples into export.
+/// Plays bundled, attributed CC BY 4.0 music without a network connection.
 @MainActor
 final class LocalSoundtrackPlayer: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var errorMessage: String?
 
-    private let engine = AVAudioEngine()
-    private let player = AVAudioPlayerNode()
-    private var preparationTask: Task<Void, Never>?
+    private var player: AVAudioPlayer?
     private var activeTrackID: String?
 
-    init() {
-        engine.attach(player)
-        let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
-        engine.connect(player, to: engine.mainMixerNode, format: format)
-    }
-
     func play(track: MusicTrack?) {
-        guard let track, let profile = track.soundProfile else {
+        guard let track, let resourceName = track.resourceName else {
             stop()
             return
         }
         if activeTrackID == track.id, isPlaying { return }
 
         stop(deactivateSession: false)
-        activeTrackID = track.id
         errorMessage = nil
-        preparationTask = Task { [weak self] in
-            let samples = await Task.detached(priority: .userInitiated) {
-                LocalSoundtrackSynthesizer.render(profile: profile, bpm: track.bpmValue)
-            }.value
-            guard !Task.isCancelled, let self, self.activeTrackID == track.id else { return }
-            self.start(samples: samples)
+        guard let url = Bundle.main.url(forResource: resourceName, withExtension: "m4a")
+                ?? Bundle.main.url(forResource: resourceName, withExtension: "m4a", subdirectory: "Music") else {
+            errorMessage = "This music preview is missing from the app."
+            return
+        }
+
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .moviePlayback)
+            try session.setActive(true)
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.numberOfLoops = -1
+            player.volume = 0.82
+            player.prepareToPlay()
+            guard player.play() else { throw SoundtrackError.couldNotStart }
+            self.player = player
+            activeTrackID = track.id
+            isPlaying = player.isPlaying
+        } catch {
+            errorMessage = "Audio preview is unavailable on the current output."
+            isPlaying = false
+            activeTrackID = nil
         }
     }
 
     func toggle(track: MusicTrack?) {
-        if isPlaying {
+        if let player, isPlaying {
             player.pause()
             isPlaying = false
-        } else if activeTrackID == track?.id, engine.isRunning {
+        } else if let player, activeTrackID == track?.id {
             player.play()
-            isPlaying = true
+            isPlaying = player.isPlaying
         } else {
             play(track: track)
         }
@@ -837,46 +1061,9 @@ final class LocalSoundtrackPlayer: ObservableObject {
         stop(deactivateSession: true)
     }
 
-    private func start(samples: [Float]) {
-        let frameCount = AVAudioFrameCount(samples.count)
-        guard frameCount > 0,
-              let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2),
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount),
-              let channels = buffer.floatChannelData else {
-            errorMessage = "Audio preview couldn't be prepared."
-            activeTrackID = nil
-            return
-        }
-
-        buffer.frameLength = frameCount
-        for index in samples.indices {
-            channels[0][index] = samples[index]
-            channels[1][index] = samples[index]
-        }
-
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .moviePlayback)
-            try session.setActive(true)
-            if !engine.isRunning {
-                engine.prepare()
-                try engine.start()
-            }
-            player.scheduleBuffer(buffer, at: nil, options: .loops)
-            player.play()
-            isPlaying = true
-        } catch {
-            errorMessage = "Audio preview is unavailable on the current output."
-            isPlaying = false
-            activeTrackID = nil
-        }
-    }
-
     private func stop(deactivateSession: Bool) {
-        preparationTask?.cancel()
-        preparationTask = nil
-        player.stop()
-        engine.pause()
+        player?.stop()
+        player = nil
         isPlaying = false
         activeTrackID = nil
         if deactivateSession {
@@ -886,69 +1073,9 @@ final class LocalSoundtrackPlayer: ObservableObject {
             )
         }
     }
-}
 
-private enum LocalSoundtrackSynthesizer {
-    static func render(profile: LocalSoundtrackStyle, bpm: Double) -> [Float] {
-        let sampleRate = 44_100.0
-        let beats = 16.0
-        let seconds = beats * 60.0 / max(60, bpm)
-        let sampleCount = max(1, Int(seconds * sampleRate))
-        let roots = [48, 53, 45, 50]
-        var output = [Float](repeating: 0, count: sampleCount)
-
-        for frame in 0..<sampleCount {
-            let time = Double(frame) / sampleRate
-            let beatPosition = time * bpm / 60.0
-            let beatPhase = beatPosition.truncatingRemainder(dividingBy: 1)
-            let barPosition = beatPosition / 4
-            let bar = min(3, Int(barPosition) % 4)
-            let barPhase = barPosition.truncatingRemainder(dividingBy: 1)
-            let chordEnvelope = min(1, min(barPhase * 7, (1 - barPhase) * 9))
-            let root = roots[bar]
-
-            let rootTone = sine(midi: root, time: time)
-            let third = sine(midi: root + (bar == 2 ? 3 : 4), time: time)
-            let fifth = sine(midi: root + 7, time: time)
-            var sample = (rootTone * 0.42 + third * 0.28 + fifth * 0.24)
-                * chordEnvelope * 0.20
-
-            switch profile {
-            case .drift:
-                sample += sine(midi: root + 12, time: time) * 0.055
-                    * (0.5 + 0.5 * sin(time * 0.7))
-            case .coast:
-                let pluck = exp(-beatPhase * 7.5)
-                sample += sine(midi: root + 12 + Int(beatPosition) % 5, time: time)
-                    * pluck * 0.16
-            case .market:
-                let mallet = exp(-beatPhase * 11)
-                sample += sine(midi: root + 19 + (Int(beatPosition) % 3) * 2, time: time)
-                    * mallet * 0.18
-                if Int(beatPosition * 2) % 2 == 1 {
-                    sample += deterministicNoise(frame) * exp(-(beatPhase * 2).truncatingRemainder(dividingBy: 1) * 18) * 0.035
-                }
-            case .pulse:
-                let bass = sine(midi: root - 12, time: time) * 0.15
-                sample += bass * (beatPhase < 0.56 ? 1 : 0.24)
-                sample += sin(2 * .pi * (58 - beatPhase * 30) * time)
-                    * exp(-beatPhase * 12) * 0.16
-            }
-
-            let edgeFade = min(1, min(time / 0.06, (seconds - time) / 0.06))
-            output[frame] = Float(max(-0.86, min(0.86, sample * max(0, edgeFade))))
-        }
-        return output
-    }
-
-    private static func sine(midi: Int, time: Double) -> Double {
-        let frequency = 440 * pow(2, Double(midi - 69) / 12)
-        return sin(2 * .pi * frequency * time)
-    }
-
-    private static func deterministicNoise(_ value: Int) -> Double {
-        let raw = sin(Double(value) * 12.9898) * 43_758.5453
-        return ((raw - floor(raw)) * 2) - 1
+    private enum SoundtrackError: Error {
+        case couldNotStart
     }
 }
 

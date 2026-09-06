@@ -40,6 +40,11 @@
 		F6C953390844CEDFC6C1BEC2 /* PhotoAnalysisThumbnailService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1F8E2A45D62E233FE456939 /* PhotoAnalysisThumbnailService.swift */; };
 		F897002B0F9BB807FCB1F01A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 65CF059667A4BDD5C2D4495A /* Assets.xcassets */; };
 		FB4940A8E3141CBF51989301 /* NativePhotoIntelligenceScoringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1661F4C3BF5766186551D2A7 /* NativePhotoIntelligenceScoringTests.swift */; };
+		C0A000000000000000000001 /* wanderlust.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D0A000000000000000000001 /* wanderlust.m4a */; };
+		C0A000000000000000000002 /* simplicity.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D0A000000000000000000002 /* simplicity.m4a */; };
+		C0A000000000000000000003 /* castles-in-the-sky.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D0A000000000000000000003 /* castles-in-the-sky.m4a */; };
+		C0A000000000000000000004 /* the-long-way-home.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D0A000000000000000000004 /* the-long-way-home.m4a */; };
+		C0A000000000000000000005 /* MUSIC-CREDITS.txt in Resources */ = {isa = PBXBuildFile; fileRef = D0A000000000000000000005 /* MUSIC-CREDITS.txt */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -97,6 +102,11 @@
 		D3E8414F01F601C1F1299A6C /* TripReelFlowUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TripReelFlowUITests.swift; sourceTree = "<group>"; };
 		DD4F8BD3DADE8F267D386287 /* SmartPhotoSelectionViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SmartPhotoSelectionViews.swift; path = Screens/SmartPhotoSelectionViews.swift; sourceTree = "<group>"; };
 		E05554B9C707378C118B13B3 /* TripReelTheme.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelTheme.swift; path = DesignSystem/TripReelTheme.swift; sourceTree = "<group>"; };
+		D0A000000000000000000001 /* wanderlust.m4a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = audio.m4a; name = wanderlust.m4a; path = Resources/Music/wanderlust.m4a; sourceTree = "<group>"; };
+		D0A000000000000000000002 /* simplicity.m4a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = audio.m4a; name = simplicity.m4a; path = Resources/Music/simplicity.m4a; sourceTree = "<group>"; };
+		D0A000000000000000000003 /* castles-in-the-sky.m4a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = audio.m4a; name = castles-in-the-sky.m4a; path = Resources/Music/castles-in-the-sky.m4a; sourceTree = "<group>"; };
+		D0A000000000000000000004 /* the-long-way-home.m4a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = audio.m4a; name = the-long-way-home.m4a; path = Resources/Music/the-long-way-home.m4a; sourceTree = "<group>"; };
+		D0A000000000000000000005 /* MUSIC-CREDITS.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = MUSIC-CREDITS.txt; path = Resources/Music/MUSIC-CREDITS.txt; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -157,6 +167,11 @@
 				A689E9B6C2743B25AD899649 /* Info.plist */,
 				AA77E57B589C4DE4A6A97101 /* TripReel.entitlements */,
 				CC3B475300161E9F2A7EB701 /* OFL-InstrumentSerif.txt */,
+				D0A000000000000000000001 /* wanderlust.m4a */,
+				D0A000000000000000000002 /* simplicity.m4a */,
+				D0A000000000000000000003 /* castles-in-the-sky.m4a */,
+				D0A000000000000000000004 /* the-long-way-home.m4a */,
+				D0A000000000000000000005 /* MUSIC-CREDITS.txt */,
 			);
 			name = TripReel;
 			path = TripReel;
@@ -323,6 +338,11 @@
 				17CE2AED3A602FAC46DB2BD2 /* PrivacyInfo.xcprivacy in Resources */,
 				5EB0FD17C0576C8C5A2093A5 /* InstrumentSerif-Regular.ttf in Resources */,
 				050E6A1D8D90DF1515ABDC18 /* InstrumentSerif-Italic.ttf in Resources */,
+				C0A000000000000000000001 /* wanderlust.m4a in Resources */,
+				C0A000000000000000000002 /* simplicity.m4a in Resources */,
+				C0A000000000000000000003 /* castles-in-the-sky.m4a in Resources */,
+				C0A000000000000000000004 /* the-long-way-home.m4a in Resources */,
+				C0A000000000000000000005 /* MUSIC-CREDITS.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

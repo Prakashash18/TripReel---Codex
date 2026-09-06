@@ -3,20 +3,39 @@ import SwiftUI
 
 struct TripsScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @State private var collection: TripCollection = .trips
+
+    private enum TripCollection: String, CaseIterable, Identifiable {
+        case trips = "Trips"
+        case nearby = "Nearby"
+
+        var id: String { rawValue }
+    }
+
+    private var displayedTrips: [Trip] {
+        collection == .trips ? model.trips : model.nearbyEvents
+    }
 
     var body: some View {
         ZStack {
             WarmBackground(variant: .trips)
 
             VStack(spacing: 0) {
-                ScreenHeading(eyebrow: model.tripsEyebrow, title: "Your trips")
+                ScreenHeading(
+                    eyebrow: collection == .trips ? model.tripsEyebrow : model.nearbyEyebrow,
+                    title: collection == .trips ? "Your trips" : "Nearby moments"
+                )
                     .padding(.horizontal, 24)
                     .padding(.top, 4)
-                    .padding(.bottom, 19)
+                    .padding(.bottom, 13)
+
+                collectionPicker
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 14)
 
                 ScrollView(showsIndicators: false) {
                     LazyVStack(spacing: 10) {
-                        if model.isScanningLibrary && model.trips.isEmpty {
+                        if model.isScanningLibrary && model.trips.isEmpty && model.nearbyEvents.isEmpty {
                             VStack(spacing: 12) {
                                 ProgressView()
                                     .tint(TR.accent)
@@ -26,11 +45,23 @@ struct TripsScreen: View {
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 72)
+                        } else if displayedTrips.isEmpty {
+                            emptyCollection
                         } else {
-                            ForEach(model.trips) { trip in
+                            ForEach(displayedTrips) { trip in
                                 TripRow(trip: trip) {
                                     model.requestBuild(trip: trip)
                                 }
+                            }
+
+                            if collection == .nearby {
+                                Text("One-day photo outings near places you visit often. Screenshots never create an event.")
+                                    .font(TR.ui(11))
+                                    .foregroundStyle(.white.opacity(0.39))
+                                    .multilineTextAlignment(.center)
+                                    .lineSpacing(3)
+                                    .padding(.horizontal, 24)
+                                    .padding(.top, 8)
                             }
                         }
 
@@ -62,7 +93,57 @@ struct TripsScreen: View {
                 }
             }
         }
+        .onAppear {
+            if model.trips.isEmpty && !model.nearbyEvents.isEmpty {
+                collection = .nearby
+            }
+        }
         .accessibilityIdentifier("trips-screen")
+    }
+
+    private var collectionPicker: some View {
+        HStack(spacing: 4) {
+            ForEach(TripCollection.allCases) { item in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { collection = item }
+                } label: {
+                    Text(item.rawValue)
+                        .font(TR.ui(13, weight: .semibold))
+                        .foregroundStyle(collection == item ? TR.ink : .white.opacity(0.58))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(collection == item ? TR.cream : .clear)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityValue(collection == item ? "Selected" : "Not selected")
+            }
+        }
+        .padding(4)
+        .background(.white.opacity(0.065))
+        .overlay(Capsule().stroke(.white.opacity(0.11), lineWidth: 1))
+        .clipShape(Capsule())
+    }
+
+    private var emptyCollection: some View {
+        VStack(spacing: 12) {
+            Image(systemName: collection == .trips ? "airplane" : "mappin.and.ellipse")
+                .font(.system(size: 27, weight: .light))
+                .foregroundStyle(TR.accent.opacity(0.8))
+            Text(collection == .trips ? "No multi-day trips found" : "No nearby outings yet")
+                .font(TR.display(22))
+                .foregroundStyle(TR.cream)
+            Text(collection == .trips
+                 ? "Try Nearby for one-day moments, or pull down to scan again."
+                 : "Nearby appears after TripReel recognizes a familiar area and a compact day with six or more photos.")
+                .font(TR.ui(12))
+                .foregroundStyle(.white.opacity(0.5))
+                .multilineTextAlignment(.center)
+                .lineSpacing(3)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 30)
+        .padding(.vertical, 48)
     }
 }
 

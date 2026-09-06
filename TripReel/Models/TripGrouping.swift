@@ -139,7 +139,7 @@ enum TripDetector {
         }
     }
 
-    private static func normalizedUniquePhotos(_ photos: [PhotoMetadata]) -> [PhotoMetadata] {
+    static func normalizedUniquePhotos(_ photos: [PhotoMetadata]) -> [PhotoMetadata] {
         let canonical = photos
             .map(sanitized)
             .sorted(by: canonicalOrder)
@@ -205,7 +205,7 @@ enum TripDetector {
         return lhs.isScreenshot == false && rhs.isScreenshot == true
     }
 
-    private static func chronologicalOrder(_ lhs: PhotoMetadata, _ rhs: PhotoMetadata) -> Bool {
+    static func chronologicalOrder(_ lhs: PhotoMetadata, _ rhs: PhotoMetadata) -> Bool {
         guard let leftDate = lhs.creationDate, let rightDate = rhs.creationDate else {
             return lhs.creationDate != nil
         }
@@ -483,7 +483,7 @@ enum TripDetector {
     /// Learns habitual places from recurrence, not photo volume. This is kept
     /// deliberately conservative: a place must recur in eight calendar weeks
     /// over at least ninety days before it can suppress a trip candidate.
-    private static func habitualPlaceCentroids(
+    static func habitualPlaceCentroids(
         in photos: [PhotoMetadata],
         calendar: Calendar,
         shouldCancel: @Sendable () -> Bool
@@ -570,7 +570,7 @@ enum TripDetector {
         )
     }
 
-    private static func sphericalCentroid(of photos: [PhotoMetadata]) -> PhotoCoordinate? {
+    static func sphericalCentroid(of photos: [PhotoMetadata]) -> PhotoCoordinate? {
         let located = photos.filter { $0.coordinate != nil }
         guard !located.isEmpty else { return nil }
 
@@ -621,7 +621,7 @@ enum TripDetector {
         )
     }
 
-    private static func distanceKilometers(_ lhs: PhotoCoordinate, _ rhs: PhotoCoordinate) -> Double {
+    static func distanceKilometers(_ lhs: PhotoCoordinate, _ rhs: PhotoCoordinate) -> Double {
         let leftLatitude = lhs.latitude * .pi / 180
         let rightLatitude = rhs.latitude * .pi / 180
         let latitudeDelta = (rhs.latitude - lhs.latitude) * .pi / 180
@@ -630,5 +630,117 @@ enum TripDetector {
             + cos(leftLatitude) * cos(rightLatitude) * pow(sin(longitudeDelta / 2), 2)
         let centralAngle = 2 * atan2(sqrt(a), sqrt(max(0, 1 - a)))
         return 6_371.0088 * centralAngle
+    }
+}
+
+/// Finds compact, one-day photo outings near a place the library shows is
+/// habitual. These complement multi-day travel without flooding the main trip
+/// list with every ordinary day at home.
+enum NearbyEventDetector {
+    private static let minimumPhotoCount = 6
+    private static let minimumLocatedPhotoCount = 3
+    private static let maximumSessionGap: TimeInterval = 4 * 60 * 60
+    private static let maximumDuration: TimeInterval = 18 * 60 * 60
+    private static let maximumDistanceFromHabitualPlace = 150.0
+    private static let compactRadiusKilometers = 25.0
+    private static let minimumCompactFraction = 0.75
+    private static let maximumResults = 20
+
+    static func detect(
+        in photos: [PhotoMetadata],
+        calendar: Calendar = .current,
+        shouldCancel: @Sendable () -> Bool = { false }
+    ) -> [DetectedTrip] {
+        guard !shouldCancel() else { return [] }
+        let candidates = TripDetector.normalizedUniquePhotos(photos)
+            .filter { $0.creationDate != nil && !$0.isScreenshot }
+            .sorted(by: TripDetector.chronologicalOrder)
+        guard !candidates.isEmpty else { return [] }
+
+        let habitualPlaces = TripDetector.habitualPlaceCentroids(
+            in: candidates,
+            calendar: calendar,
+            shouldCancel: shouldCancel
+        )
+        guard !habitualPlaces.isEmpty, !shouldCancel() else { return [] }
+
+        var events: [DetectedTrip] = []
+        for session in sessions(from: candidates, calendar: calendar) {
+            guard !shouldCancel() else { return [] }
+            guard let event = makeEvent(
+                from: session,
+                habitualPlaces: habitualPlaces
+            ) else { continue }
+            events.append(event)
+        }
+
+        return Array(events.sorted {
+            if $0.endDate != $1.endDate { return $0.endDate > $1.endDate }
+            return $0.id < $1.id
+        }.prefix(maximumResults))
+    }
+
+    private static func sessions(
+        from photos: [PhotoMetadata],
+        calendar: Calendar
+    ) -> [[PhotoMetadata]] {
+        guard let first = photos.first else { return [] }
+        var sessions: [[PhotoMetadata]] = []
+        var current = [first]
+
+        for photo in photos.dropFirst() {
+            let previous = current[current.count - 1]
+            let previousDate = previous.creationDate!
+            let date = photo.creationDate!
+            if !calendar.isDate(previousDate, inSameDayAs: date)
+                || date.timeIntervalSince(previousDate) > maximumSessionGap {
+                sessions.append(current)
+                current = [photo]
+            } else {
+                current.append(photo)
+            }
+        }
+        sessions.append(current)
+        return sessions
+    }
+
+    private static func makeEvent(
+        from photos: [PhotoMetadata],
+        habitualPlaces: [PhotoCoordinate]
+    ) -> DetectedTrip? {
+        guard photos.count >= minimumPhotoCount,
+              let startDate = photos.first?.creationDate,
+              let endDate = photos.last?.creationDate,
+              endDate.timeIntervalSince(startDate) <= maximumDuration else { return nil }
+
+        let located = photos.filter { $0.coordinate != nil }
+        guard located.count >= minimumLocatedPhotoCount,
+              let centroid = TripDetector.sphericalCentroid(of: located),
+              habitualPlaces.contains(where: {
+                  TripDetector.distanceKilometers(centroid, $0) <= maximumDistanceFromHabitualPlace
+              }) else { return nil }
+
+        let compactCount = located.reduce(into: 0) { count, photo in
+            if TripDetector.distanceKilometers(photo.coordinate!, centroid) <= compactRadiusKilometers {
+                count += 1
+            }
+        }
+        guard Double(compactCount) / Double(located.count) >= minimumCompactFraction else { return nil }
+
+        let cover = located.min { lhs, rhs in
+            let left = TripDetector.distanceKilometers(lhs.coordinate!, centroid)
+            let right = TripDetector.distanceKilometers(rhs.coordinate!, centroid)
+            if left != right { return left < right }
+            return TripDetector.chronologicalOrder(lhs, rhs)
+        } ?? photos[(photos.count - 1) / 2]
+
+        return DetectedTrip(
+            id: "nearby-\(photos[0].id)",
+            photos: photos,
+            startDate: startDate,
+            endDate: endDate,
+            centroid: centroid,
+            coverID: cover.id
+        )
     }
 }

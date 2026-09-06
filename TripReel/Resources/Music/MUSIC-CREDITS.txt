@@ -1,0 +1,25 @@
+TripReel bundled music credits
+==============================
+
+The following tracks are by Scott Buckley and are licensed under the
+Creative Commons Attribution 4.0 International license (CC BY 4.0):
+https://creativecommons.org/licenses/by/4.0/
+
+"Wanderlust" by Scott Buckley
+https://www.scottbuckley.com.au/library/wanderlust/
+
+"Simplicity" by Scott Buckley
+https://www.scottbuckley.com.au/library/simplicity/
+
+"Castles in the Sky" by Scott Buckley
+https://www.scottbuckley.com.au/library/castles-in-the-sky/
+
+"The Long Way Home" by Scott Buckley
+https://www.scottbuckley.com.au/library/the-long-way-home/
+
+Original music: https://www.scottbuckley.com.au
+License and usage guidance: https://www.scottbuckley.com.au/library/using-this-music/
+
+TripReel uses 90-second excerpts. The excerpts were trimmed, loudness-normalized,
+faded, and transcoded to AAC for compact on-device preview playback. No other
+creative changes were made.

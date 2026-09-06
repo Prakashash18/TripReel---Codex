@@ -1,12 +1,12 @@
 # TripReel Privacy Policy
 
-Effective September 5, 2026
+Effective September 6, 2026
 
 TripReel turns photos you choose or make accessible into travel films. This policy explains what the app processes and what happens when you optionally enable cloud photo intelligence.
 
 ## Photos and trip detection
 
-With Photos permission, TripReel reads accessible images, capture dates, and embedded locations to find trips and build a film. Trip detection and grouping happen on your device. TripReel uses Apple's system geocoder to turn one representative coordinate into a place name. Originals remain in Apple Photos, and TripReel does not delete them.
+With Photos permission, TripReel reads accessible images, capture dates, and embedded locations to find trips, nearby outings, and build a film. Trip detection and grouping happen on your device. TripReel uses Apple's system geocoder to turn one representative coordinate into a place name. Originals remain in Apple Photos unless you explicitly select cut photos in Cleanup, accept TripReel's destructive warning, and approve Apple's system deletion prompt. With iCloud Photos, a confirmed deletion can affect other synced devices.
 
 Photos selected without broad library permission are copied temporarily into TripReel's private on-device cache for the editing session.
 
@@ -21,6 +21,8 @@ Cloud enhancement is off until the user explicitly enables it. When enabled, onl
 ## Storage and deletion
 
 TripReel's backend does not persist cloud thumbnails or classification results and discards its in-memory copies after each request. OpenAI is called with `store: false`.
+
+Leaving a photo out of a film never deletes the original. Cleanup can request deletion only for cut Apple Photos assets the user individually selects. The request is batched atomically, requires a clear in-app warning and Apple's system confirmation, and is not made if any selected photo is unavailable. Imported picker copies and bundled demo images cannot be deleted from Apple Photos by TripReel.
 
 Under OpenAI's default API controls, OpenAI may retain API content for abuse monitoring for up to 30 days, or longer when legally or safety-required. Zero Data Retention removes default storage for eligible accounts, but images flagged by OpenAI's child-safety classifier may still be retained for manual review. OpenAI states that API data is not used to train its models by default unless the API organization opts in. See [OpenAI's API data controls](https://developers.openai.com/api/docs/guides/your-data).
 

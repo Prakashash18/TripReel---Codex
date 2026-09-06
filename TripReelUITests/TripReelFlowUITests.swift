@@ -54,4 +54,35 @@ final class TripReelFlowUITests: XCTestCase {
         app.buttons["Save"].tap()
         XCTAssertTrue(screen("cleanup-screen").waitForExistence(timeout: 3))
     }
+
+    func testTripsAndNearbyStayInOneCalmCollectionScreen() {
+        XCTAssertTrue(screen("trips-screen").waitForExistence(timeout: 3))
+
+        app.buttons["Nearby"].tap()
+
+        XCTAssertTrue(app.staticTexts["Nearby moments"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["No nearby outings yet"].exists)
+        XCTAssertTrue(screen("trips-screen").exists)
+    }
+
+    func testCleanupShowsDestructiveWarningBeforePhotosRequest() {
+        app.terminate()
+        app.launchArguments = ["-qaScreen", "cleanup", "-qaNoHint"]
+        app.launch()
+        XCTAssertTrue(screen("cleanup-screen").waitForExistence(timeout: 3))
+
+        app.buttons["Review cut photos"].tap()
+        let firstPhoto = app.buttons
+            .matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Select "))
+            .firstMatch
+        XCTAssertTrue(firstPhoto.waitForExistence(timeout: 2))
+        firstPhoto.tap()
+        app.buttons["Delete 1 photo"].tap()
+
+        let warning = app.alerts["Delete 1 original photo?"]
+        XCTAssertTrue(warning.waitForExistence(timeout: 2))
+        XCTAssertTrue(warning.buttons["Delete from Photos"].exists)
+        XCTAssertTrue(warning.buttons["Cancel"].exists)
+        warning.buttons["Cancel"].tap()
+    }
 }

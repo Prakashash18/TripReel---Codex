@@ -27,7 +27,7 @@
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>TripReel saves the travel films you create to your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>TripReel uses photo dates and locations on your device to find trips and build your film.</string>
+	<string>TripReel uses photos, dates, and locations on your device to find trips and build films, and deletes originals only when you explicitly confirm Cleanup.</string>
 	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
 	<true/>
 	<key>TRIPREEL_PHOTO_ANALYSIS_ENDPOINT</key>

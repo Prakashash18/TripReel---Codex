@@ -479,7 +479,7 @@ struct CleanupScreen: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("They're still in your library. Nothing has been deleted.")
+            Text("They're still in your library. You decide whether any originals are deleted.")
                 .font(TR.ui(14))
                 .foregroundStyle(.white.opacity(0.61))
                 .multilineTextAlignment(.center)
@@ -532,7 +532,7 @@ struct CleanupScreen: View {
 
 private struct CleanupGrid: View {
     @EnvironmentObject private var model: TripReelModel
-    @State private var showDeletedConfirmation = false
+    @State private var activeAlert: CleanupAlert?
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
 
     private var candidatePhotos: [ReelPhoto] {
@@ -561,6 +561,7 @@ private struct CleanupGrid: View {
                 LazyVGrid(columns: columns, spacing: 8) {
                     ForEach(candidatePhotos) { photo in
                         Button {
+                            guard !model.isDeletingPhotos else { return }
                             if model.cleanupSelection.contains(photo.id) {
                                 model.cleanupSelection.remove(photo.id)
                             } else {
@@ -602,7 +603,7 @@ private struct CleanupGrid: View {
             VStack(spacing: 10) {
                 Button(deleteLabel) {
                     guard !model.cleanupSelection.isEmpty else { return }
-                    showDeletedConfirmation = true
+                    activeAlert = .confirm(model.cleanupSelection.count)
                 }
                 .font(TR.ui(16, weight: .semibold))
                 .foregroundStyle(model.cleanupSelection.isEmpty ? .white.opacity(0.36) : Color(red: 0.10, green: 0.025, blue: 0.012))
@@ -611,7 +612,7 @@ private struct CleanupGrid: View {
                 .background(model.cleanupSelection.isEmpty ? .white.opacity(0.08) : TR.cut)
                 .clipShape(Capsule())
                 .buttonStyle(.plain)
-                .disabled(model.cleanupSelection.isEmpty)
+                .disabled(model.cleanupSelection.isEmpty || model.isDeletingPhotos)
 
                 Button("Keep them all") {
                     model.restart()
@@ -620,6 +621,7 @@ private struct CleanupGrid: View {
                 .foregroundStyle(.white.opacity(0.53))
                 .buttonStyle(.plain)
                 .padding(.vertical, 4)
+                .disabled(model.isDeletingPhotos)
             }
             .padding(.horizontal, 20)
             .padding(.top, 14)
@@ -628,10 +630,39 @@ private struct CleanupGrid: View {
             .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.08)).frame(height: 1) }
         }
         .safeAreaPadding(.vertical)
-        .alert("Demo cleanup", isPresented: $showDeletedConfirmation) {
-            Button("Done") { model.restart() }
-        } message: {
-            Text("TripReel would ask Photos for permission before deleting \(model.cleanupSelection.count) selected photos. This prototype leaves your library untouched.")
+        .alert(item: $activeAlert) { alert in
+            switch alert {
+            case let .confirm(count):
+                Alert(
+                    title: Text("Delete \(count) original photo\(count == 1 ? "" : "s")?"),
+                    message: Text("This removes the selected originals from Apple Photos and devices synced with iCloud Photos. TripReel cannot undo it. Apple Photos will ask you to confirm once more."),
+                    primaryButton: .destructive(Text("Delete from Photos")) {
+                        Task {
+                            if let deletedCount = await model.deleteCleanupSelection() {
+                                activeAlert = .success(deletedCount)
+                            } else {
+                                activeAlert = .failure(
+                                    model.cleanupDeletionErrorMessage
+                                        ?? "Nothing was deleted."
+                                )
+                            }
+                        }
+                    },
+                    secondaryButton: .cancel()
+                )
+            case let .success(count):
+                Alert(
+                    title: Text("Deleted from Photos"),
+                    message: Text("\(count) photo\(count == 1 ? " was" : "s were") deleted after Apple Photos confirmed the change."),
+                    dismissButton: .default(Text("Done")) { model.restart() }
+                )
+            case let .failure(message):
+                Alert(
+                    title: Text("Photos weren't deleted"),
+                    message: Text(message),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
         }
     }
 
@@ -643,8 +674,23 @@ private struct CleanupGrid: View {
     }
 
     private var deleteLabel: String {
+        if model.isDeletingPhotos { return "Deleting…" }
         let count = model.cleanupSelection.count
         guard count > 0 else { return "Nothing selected" }
         return "Delete \(count) photo\(count == 1 ? "" : "s")"
+    }
+
+    private enum CleanupAlert: Identifiable {
+        case confirm(Int)
+        case success(Int)
+        case failure(String)
+
+        var id: String {
+            switch self {
+            case let .confirm(count): "confirm-\(count)"
+            case let .success(count): "success-\(count)"
+            case let .failure(message): "failure-\(message)"
+            }
+        }
     }
 }
