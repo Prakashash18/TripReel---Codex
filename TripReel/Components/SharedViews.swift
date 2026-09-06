@@ -4,9 +4,63 @@ import Photos
 import SwiftUI
 import UIKit
 
-enum PhotoDisplayContentMode: Hashable {
+enum PhotoDisplayContentMode: Hashable, Sendable {
     case fill
     case fit
+}
+
+enum PhotoDisplaySizing {
+    static func targetSize(
+        sourcePixelWidth: Int,
+        sourcePixelHeight: Int,
+        destinationPixelWidth: Int,
+        destinationPixelHeight: Int,
+        contentMode: PhotoDisplayContentMode,
+        maximumPixelDimension: CGFloat = 4_096
+    ) -> CGSize {
+        let sourceWidth = CGFloat(max(1, sourcePixelWidth))
+        let sourceHeight = CGFloat(max(1, sourcePixelHeight))
+        let destinationWidth = CGFloat(max(1, destinationPixelWidth))
+        let destinationHeight = CGFloat(max(1, destinationPixelHeight))
+        let sourceAspect = sourceWidth / sourceHeight
+        let destinationAspect = destinationWidth / destinationHeight
+
+        var width: CGFloat
+        var height: CGFloat
+        switch contentMode {
+        case .fill:
+            if sourceAspect >= destinationAspect {
+                height = destinationHeight
+                width = height * sourceAspect
+            } else {
+                width = destinationWidth
+                height = width / sourceAspect
+            }
+        case .fit:
+            if sourceAspect >= destinationAspect {
+                width = destinationWidth
+                height = width / sourceAspect
+            } else {
+                height = destinationHeight
+                width = height * sourceAspect
+            }
+        }
+
+        let overscan: CGFloat = contentMode == .fill ? 1.14 : 1.03
+        width *= overscan
+        height *= overscan
+
+        let downscale = min(
+            1,
+            sourceWidth / width,
+            sourceHeight / height,
+            maximumPixelDimension / max(width, height)
+        )
+        return CGSize(
+            width: max(1, (width * downscale).rounded(.up)),
+            height: max(1, (height * downscale).rounded(.up))
+        )
+    }
 }
 
 struct PhotoAssetView: View {
@@ -550,7 +604,7 @@ private struct PhotoSourceImage: View {
     }
 }
 
-private struct PhotoImageRequestKey: Hashable {
+private struct PhotoImageRequestKey: Hashable, Sendable {
     let source: PhotoSource
     let pixelWidth: Int
     let pixelHeight: Int
@@ -570,6 +624,9 @@ private final class PhotoAssetImageLoader: ObservableObject {
         cache.totalCostLimit = 96 * 1_024 * 1_024
         return cache
     }()
+    private static let preheatPixelDimension: CGFloat = 2_560
+    nonisolated private static let maximumDisplayPixelDimension: CGFloat = 4_096
+    private static let minimumCachedQuality = 0.90
     private static var preheatInFlight = Set<String>()
     private var requestID = PHInvalidImageRequestID
     private var key: PhotoImageRequestKey?
@@ -581,8 +638,11 @@ private final class PhotoAssetImageLoader: ObservableObject {
     static func preheat(sources: [PhotoSource]) {
         let identifiers = sources.compactMap { source -> String? in
             guard case let .library(identifier) = source,
-                  imageCache.object(forKey: identifier as NSString) == nil,
                   !preheatInFlight.contains(identifier) else { return nil }
+            if let cached = imageCache.object(forKey: identifier as NSString),
+               max(cached.pixelWidth, cached.pixelHeight) >= 2_200 {
+                return nil
+            }
             return identifier
         }
         guard !identifiers.isEmpty else { return }
@@ -597,7 +657,10 @@ private final class PhotoAssetImageLoader: ObservableObject {
             options.isNetworkAccessAllowed = true
             manager.requestImage(
                 for: asset,
-                targetSize: CGSize(width: 1_600, height: 1_600),
+                targetSize: CGSize(
+                    width: preheatPixelDimension,
+                    height: preheatPixelDimension
+                ),
                 contentMode: .aspectFit,
                 options: options
             ) { image, info in
@@ -609,7 +672,12 @@ private final class PhotoAssetImageLoader: ObservableObject {
                         return
                     }
                     if let image, !degraded {
-                        store(image, for: .library(identifier))
+                        store(
+                            image,
+                            for: .library(identifier),
+                            sourcePixelWidth: asset.pixelWidth,
+                            sourcePixelHeight: asset.pixelHeight
+                        )
                     }
                     if !degraded {
                         preheatInFlight.remove(identifier)
@@ -625,9 +693,9 @@ private final class PhotoAssetImageLoader: ObservableObject {
         self.key = key
         failed = false
         downloadProgress = nil
-        if let cached = Self.cachedImage(for: key) {
-            image = cached
-            return
+        if let cached = Self.cachedPhoto(for: key.source) {
+            image = cached.image
+            if Self.isSufficient(cached, for: key) { return }
         }
         request(key)
     }
@@ -671,7 +739,7 @@ private final class PhotoAssetImageLoader: ObservableObject {
 
         let options = PHImageRequestOptions()
         options.deliveryMode = .opportunistic
-        options.resizeMode = .fast
+        options.resizeMode = .exact
         options.isNetworkAccessAllowed = true
         options.progressHandler = { [weak self] progress, _, _, _ in
             Task { @MainActor [weak self] in
@@ -681,16 +749,13 @@ private final class PhotoAssetImageLoader: ObservableObject {
             }
         }
 
-        // A full-screen @3x request can otherwise make PhotoKit fetch a much
-        // larger iCloud original. Start screen-sized but bounded, then retry at
-        // progressively smaller thumbnail sizes so the film rarely lands on a
-        // blank cloud frame on a slow connection.
-        let requestedLongestSide = max(key.pixelWidth, key.pixelHeight)
-        let retryBound = max(480, 1_600 / max(1, 1 << retryCount))
-        let scale = min(1, CGFloat(retryBound) / CGFloat(max(1, requestedLongestSide)))
-        let targetSize = CGSize(
-            width: max(160, CGFloat(key.pixelWidth) * scale),
-            height: max(160, CGFloat(key.pixelHeight) * scale)
+        // Ask for enough source pixels to cover the rendered rectangle, not
+        // merely its longest edge. A landscape image filling a portrait screen
+        // needs substantially more width than the view bounds suggest.
+        let targetSize = Self.displayTargetSize(
+            sourcePixelWidth: asset.pixelWidth,
+            sourcePixelHeight: asset.pixelHeight,
+            key: key
         )
 
         requestID = Self.manager.requestImage(
@@ -710,13 +775,25 @@ private final class PhotoAssetImageLoader: ObservableObject {
                 if let image {
                     self.image = image
                     if !degraded {
-                        Self.store(image, for: key.source)
-                        self.retryTask?.cancel()
-                        self.retryTask = nil
-                        self.failed = false
-                        self.downloadProgress = nil
-                        self.retryCount = 0
-                        self.usingDataFallback = false
+                        Self.store(
+                            image,
+                            for: key.source,
+                            sourcePixelWidth: asset.pixelWidth,
+                            sourcePixelHeight: asset.pixelHeight
+                        )
+                        if Self.image(image, satisfies: targetSize) {
+                            self.retryTask?.cancel()
+                            self.retryTask = nil
+                            self.failed = false
+                            self.downloadProgress = nil
+                            self.retryCount = 0
+                            self.usingDataFallback = false
+                        } else if !self.usingDataFallback {
+                            // Keep the preview visible, but replace it with a
+                            // source-data decode rather than freezing on a
+                            // final callback that is still too small.
+                            self.requestLibraryImageData(asset: asset, key: key)
+                        }
                     }
                 } else if error != nil || !degraded {
                     if self.retryCount >= 1 && !self.usingDataFallback {
@@ -762,7 +839,12 @@ private final class PhotoAssetImageLoader: ObservableObject {
                 guard let self, self.key == key else { return }
                 self.fileTask?.cancel()
                 self.fileTask = Task { [weak self] in
-                    let maximumPixelSize = max(key.pixelWidth, key.pixelHeight, 1_600)
+                    let targetSize = Self.displayTargetSize(
+                        sourcePixelWidth: asset.pixelWidth,
+                        sourcePixelHeight: asset.pixelHeight,
+                        key: key
+                    )
+                    let maximumPixelSize = Int(max(targetSize.width, targetSize.height).rounded(.up))
                     let decoded = await Task.detached(priority: .userInitiated) {
                         Self.thumbnail(from: data, maximumPixelSize: maximumPixelSize)
                     }.value
@@ -770,7 +852,12 @@ private final class PhotoAssetImageLoader: ObservableObject {
                     self.usingDataFallback = false
                     if let decoded {
                         self.image = decoded
-                        Self.store(decoded, for: key.source)
+                        Self.store(
+                            decoded,
+                            for: key.source,
+                            sourcePixelWidth: asset.pixelWidth,
+                            sourcePixelHeight: asset.pixelHeight
+                        )
                         self.downloadProgress = nil
                         self.failed = false
                         self.retryCount = 0
@@ -785,34 +872,52 @@ private final class PhotoAssetImageLoader: ObservableObject {
     private func requestImportedImage(path: String, key: PhotoImageRequestKey) {
         fileTask?.cancel()
         fileTask = Task { [weak self] in
-            let maximumPixelSize = max(key.pixelWidth, key.pixelHeight)
-            let image = await Task.detached(priority: .userInitiated) {
+            let decoded = await Task.detached(priority: .userInitiated) {
                 guard !Task.isCancelled,
                       let source = CGImageSourceCreateWithURL(
                         URL(fileURLWithPath: path) as CFURL,
                         [kCGImageSourceShouldCache: false] as CFDictionary
-                      ),
-                      let thumbnail = CGImageSourceCreateThumbnailAtIndex(
+                      ) else {
+                    return nil as DecodedPhotoImage?
+                }
+                let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+                let sourceWidth = properties?[kCGImagePropertyPixelWidth] as? Int ?? key.pixelWidth
+                let sourceHeight = properties?[kCGImagePropertyPixelHeight] as? Int ?? key.pixelHeight
+                let target = Self.displayTargetSize(
+                    sourcePixelWidth: sourceWidth,
+                    sourcePixelHeight: sourceHeight,
+                    key: key
+                )
+                guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(
                         source,
                         0,
                         [
                             kCGImageSourceCreateThumbnailFromImageAlways: true,
                             kCGImageSourceCreateThumbnailWithTransform: true,
                             kCGImageSourceShouldCacheImmediately: true,
-                            kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize
+                            kCGImageSourceThumbnailMaxPixelSize: Int(max(target.width, target.height).rounded(.up))
                         ] as CFDictionary
                       ) else {
-                    return nil as UIImage?
+                    return nil as DecodedPhotoImage?
                 }
-                return UIImage(cgImage: thumbnail)
+                return DecodedPhotoImage(
+                    image: UIImage(cgImage: thumbnail),
+                    sourcePixelWidth: sourceWidth,
+                    sourcePixelHeight: sourceHeight
+                )
             }.value
 
             guard !Task.isCancelled, let self, self.key == key else { return }
-            if let image {
+            if let decoded {
                 self.retryTask?.cancel()
                 self.retryTask = nil
-                self.image = image
-                Self.store(image, for: key.source)
+                self.image = decoded.image
+                Self.store(
+                    decoded.image,
+                    for: key.source,
+                    sourcePixelWidth: decoded.sourcePixelWidth,
+                    sourcePixelHeight: decoded.sourcePixelHeight
+                )
                 self.failed = false
                 self.downloadProgress = nil
                 self.retryCount = 0
@@ -843,22 +948,79 @@ private final class PhotoAssetImageLoader: ObservableObject {
         }
     }
 
-    private static func cachedImage(for key: PhotoImageRequestKey) -> UIImage? {
-        guard let identifier = cacheIdentifier(for: key.source),
-              let cached = imageCache.object(forKey: identifier as NSString) else { return nil }
-        let required = max(key.pixelWidth, key.pixelHeight)
-        return cached.longestPixelSide >= Int(Double(required) * 0.72) ? cached.image : nil
+    private static func cachedPhoto(for source: PhotoSource) -> CachedPhotoImage? {
+        guard let identifier = cacheIdentifier(for: source) else { return nil }
+        return imageCache.object(forKey: identifier as NSString)
     }
 
-    private static func store(_ image: UIImage, for source: PhotoSource) {
+    private static func isSufficient(
+        _ cached: CachedPhotoImage,
+        for key: PhotoImageRequestKey
+    ) -> Bool {
+        let target = displayTargetSize(
+            sourcePixelWidth: cached.sourcePixelWidth,
+            sourcePixelHeight: cached.sourcePixelHeight,
+            key: key
+        )
+        return dimensions(
+            width: cached.pixelWidth,
+            height: cached.pixelHeight,
+            satisfy: target
+        )
+    }
+
+    private static func image(_ image: UIImage, satisfies target: CGSize) -> Bool {
+        let width = image.cgImage?.width ?? Int(image.size.width * image.scale)
+        let height = image.cgImage?.height ?? Int(image.size.height * image.scale)
+        return dimensions(width: width, height: height, satisfy: target)
+    }
+
+    private static func dimensions(width: Int, height: Int, satisfy target: CGSize) -> Bool {
+        let requiredWidth = target.width * minimumCachedQuality
+        let requiredHeight = target.height * minimumCachedQuality
+        let direct = CGFloat(width) >= requiredWidth && CGFloat(height) >= requiredHeight
+        let rotated = CGFloat(height) >= requiredWidth && CGFloat(width) >= requiredHeight
+        return direct || rotated
+    }
+
+    private static func store(
+        _ image: UIImage,
+        for source: PhotoSource,
+        sourcePixelWidth: Int,
+        sourcePixelHeight: Int
+    ) {
         guard let identifier = cacheIdentifier(for: source) else { return }
-        let longest = max(image.cgImage?.width ?? Int(image.size.width * image.scale),
-                          image.cgImage?.height ?? Int(image.size.height * image.scale))
+        let pixelWidth = image.cgImage?.width ?? Int(image.size.width * image.scale)
+        let pixelHeight = image.cgImage?.height ?? Int(image.size.height * image.scale)
         if let existing = imageCache.object(forKey: identifier as NSString),
-           existing.longestPixelSide >= longest { return }
-        let value = CachedPhotoImage(image: image, longestPixelSide: longest)
-        let cost = max(1, longest * longest * 4)
+           existing.pixelWidth * existing.pixelHeight >= pixelWidth * pixelHeight { return }
+        let value = CachedPhotoImage(
+            image: image,
+            pixelWidth: pixelWidth,
+            pixelHeight: pixelHeight,
+            sourcePixelWidth: max(sourcePixelWidth, pixelWidth),
+            sourcePixelHeight: max(sourcePixelHeight, pixelHeight)
+        )
+        let cost = max(1, pixelWidth * pixelHeight * 4)
         imageCache.setObject(value, forKey: identifier as NSString, cost: cost)
+    }
+
+    /// Returns an uncropped source-sized request that is large enough for the
+    /// destination rectangle and a small Ken Burns overscan. This avoids both
+    /// oversized grid requests and undersized full-screen landscape crops.
+    nonisolated private static func displayTargetSize(
+        sourcePixelWidth: Int,
+        sourcePixelHeight: Int,
+        key: PhotoImageRequestKey
+    ) -> CGSize {
+        PhotoDisplaySizing.targetSize(
+            sourcePixelWidth: sourcePixelWidth,
+            sourcePixelHeight: sourcePixelHeight,
+            destinationPixelWidth: key.pixelWidth,
+            destinationPixelHeight: key.pixelHeight,
+            contentMode: key.contentMode,
+            maximumPixelDimension: maximumDisplayPixelDimension
+        )
     }
 
     private static func cacheIdentifier(for source: PhotoSource) -> String? {
@@ -912,12 +1074,30 @@ private final class PhotoAssetImageLoader: ObservableObject {
 
     private final class CachedPhotoImage {
         let image: UIImage
-        let longestPixelSide: Int
+        let pixelWidth: Int
+        let pixelHeight: Int
+        let sourcePixelWidth: Int
+        let sourcePixelHeight: Int
 
-        init(image: UIImage, longestPixelSide: Int) {
+        init(
+            image: UIImage,
+            pixelWidth: Int,
+            pixelHeight: Int,
+            sourcePixelWidth: Int,
+            sourcePixelHeight: Int
+        ) {
             self.image = image
-            self.longestPixelSide = longestPixelSide
+            self.pixelWidth = pixelWidth
+            self.pixelHeight = pixelHeight
+            self.sourcePixelWidth = sourcePixelWidth
+            self.sourcePixelHeight = sourcePixelHeight
         }
+    }
+
+    private struct DecodedPhotoImage: @unchecked Sendable {
+        let image: UIImage
+        let sourcePixelWidth: Int
+        let sourcePixelHeight: Int
     }
 }
 

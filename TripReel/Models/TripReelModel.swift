@@ -1560,10 +1560,13 @@ final class TripReelModel: ObservableObject {
         let tripIDs = trips.map(\.id) + nearbyEvents.map(\.id)
         for tripID in tripIDs {
             guard !Task.isCancelled, scanGeneration == generation else { return }
-            guard trips.contains(where: { $0.id == tripID })
-                    || nearbyEvents.contains(where: { $0.id == tripID }) else { continue }
+            let isNearby = nearbyEvents.contains(where: { $0.id == tripID })
+            guard trips.contains(where: { $0.id == tripID }) || isNearby else { continue }
             guard let detectedCoordinate = resolvedCoordinates[tripID] else { continue }
-            guard let name = await placeResolver.placeName(for: detectedCoordinate) else { continue }
+            guard let name = await placeResolver.placeName(
+                for: detectedCoordinate,
+                style: isNearby ? .nearby : .destination
+            ) else { continue }
             guard !Task.isCancelled, scanGeneration == generation else { return }
             if let currentIndex = trips.firstIndex(where: { $0.id == tripID }) {
                 let renamed = trips[currentIndex].renamed(name)

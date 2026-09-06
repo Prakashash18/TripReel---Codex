@@ -248,54 +248,65 @@ final class PhotoLibraryService: NSObject, PhotoLibraryServing, PHPhotoLibraryCh
 
 }
 
-/// Serializes Core Location reverse-geocoding and caches nearby lookups. One
-/// lookup per detected trip is sufficient; callers should pass the trip centroid.
-actor TripPlaceResolver {
-    private struct CacheKey: Hashable {
-        let latitudeHundredths: Int
-        let longitudeHundredths: Int
+enum TripPlaceLabelStyle: Hashable, Sendable {
+    case destination
+    case nearby
+}
 
-        init(_ coordinate: PhotoCoordinate) {
-            latitudeHundredths = Int((coordinate.latitude * 100).rounded())
-            longitudeHundredths = Int((coordinate.longitude * 100).rounded())
+struct TripPlacemarkComponents: Sendable {
+    let areasOfInterest: [String]
+    let name: String?
+    let thoroughfare: String?
+    let subLocality: String?
+    let locality: String?
+    let subAdministrativeArea: String?
+    let administrativeArea: String?
+    let country: String?
+    let isoCountryCode: String?
+    let inlandWater: String?
+    let ocean: String?
+
+    init(
+        areasOfInterest: [String] = [],
+        name: String? = nil,
+        thoroughfare: String? = nil,
+        subLocality: String? = nil,
+        locality: String? = nil,
+        subAdministrativeArea: String? = nil,
+        administrativeArea: String? = nil,
+        country: String? = nil,
+        isoCountryCode: String? = nil,
+        inlandWater: String? = nil,
+        ocean: String? = nil
+    ) {
+        self.areasOfInterest = areasOfInterest
+        self.name = name
+        self.thoroughfare = thoroughfare
+        self.subLocality = subLocality
+        self.locality = locality
+        self.subAdministrativeArea = subAdministrativeArea
+        self.administrativeArea = administrativeArea
+        self.country = country
+        self.isoCountryCode = isoCountryCode
+        self.inlandWater = inlandWater
+        self.ocean = ocean
+    }
+}
+
+enum TripPlaceLabelFormatter {
+    static func displayName(
+        for placemark: TripPlacemarkComponents,
+        style: TripPlaceLabelStyle
+    ) -> String? {
+        switch style {
+        case .destination:
+            return destinationName(for: placemark)
+        case .nearby:
+            return nearbyName(for: placemark) ?? destinationName(for: placemark)
         }
     }
 
-    private let geocoder = CLGeocoder()
-    private var cache: [CacheKey: String] = [:]
-
-    func placeName(for coordinate: PhotoCoordinate) async -> String? {
-        let rawCoordinate = CLLocationCoordinate2D(
-            latitude: coordinate.latitude,
-            longitude: coordinate.longitude
-        )
-        guard CLLocationCoordinate2DIsValid(rawCoordinate) else { return nil }
-
-        let key = CacheKey(coordinate)
-        if let cachedName = cache[key] {
-            return cachedName
-        }
-
-        do {
-            let location = CLLocation(
-                latitude: coordinate.latitude,
-                longitude: coordinate.longitude
-            )
-            guard let placemark = try await geocoder.reverseGeocodeLocation(location).first,
-                  let name = Self.displayName(for: placemark) else {
-                return nil
-            }
-
-            cache[key] = name
-            return name
-        } catch {
-            // Connectivity and service errors are deliberately not cached so a
-            // later refresh can resolve the same trip successfully.
-            return nil
-        }
-    }
-
-    private static func displayName(for placemark: CLPlacemark) -> String? {
+    private static func destinationName(for placemark: TripPlacemarkComponents) -> String? {
         let locality = firstNonempty(
             placemark.locality,
             placemark.subLocality,
@@ -310,21 +321,140 @@ actor TripPlaceResolver {
             region = firstNonempty(placemark.country, placemark.administrativeArea)
         }
 
-        if let locality, let region, locality.caseInsensitiveCompare(region) != .orderedSame {
+        if let locality, let region, !samePlace(locality, region) {
             return "\(locality), \(region)"
         }
-
         return locality
             ?? region
             ?? firstNonempty(placemark.name, placemark.inlandWater, placemark.ocean)
     }
 
-    private static func firstNonempty(_ values: String?...) -> String? {
-        values.lazy
-            .compactMap { value in
-                let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
-                return trimmed?.isEmpty == false ? trimmed : nil
+    /// Nearby cards should answer “where around here?” rather than repeating a
+    /// city-state or country. Prefer a landmark, then neighborhood or street,
+    /// with one concise piece of city context.
+    private static func nearbyName(for placemark: TripPlacemarkComponents) -> String? {
+        let city = firstNonempty(
+            placemark.locality,
+            placemark.subAdministrativeArea,
+            placemark.administrativeArea
+        )
+        let neighborhood = firstNonempty(placemark.subLocality)
+        let landmark = placemark.areasOfInterest
+            .compactMap(cleaned)
+            .first { candidate in
+                !samePlace(candidate, neighborhood) && !samePlace(candidate, city)
             }
-            .first
+        let namedFallback = cleaned(placemark.name).flatMap { candidate in
+            candidate.first?.isNumber == true ? nil : candidate
+        }
+        let primary = firstNonempty(
+            landmark,
+            neighborhood,
+            placemark.thoroughfare,
+            namedFallback
+        )
+        guard let primary else { return nil }
+
+        let context: String?
+        if landmark != nil {
+            context = firstDistinct(neighborhood, city, from: primary)
+        } else {
+            context = firstDistinct(city, from: primary)
+        }
+        return context.map { "\(primary), \($0)" } ?? primary
     }
+
+    private static func firstDistinct(
+        _ values: String? ...,
+        from reference: String
+    ) -> String? {
+        values.lazy.compactMap(cleaned).first { !samePlace($0, reference) }
+    }
+
+    private static func firstNonempty(_ values: String?...) -> String? {
+        values.lazy.compactMap(cleaned).first
+    }
+
+    private static func cleaned(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
+    }
+
+    private static func samePlace(_ lhs: String?, _ rhs: String?) -> Bool {
+        guard let lhs = cleaned(lhs), let rhs = cleaned(rhs) else { return false }
+        return lhs.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            == rhs.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+}
+
+/// Serializes Core Location reverse-geocoding and caches nearby lookups. One
+/// lookup per detected collection is sufficient; callers pass its centroid.
+actor TripPlaceResolver {
+    private struct CacheKey: Hashable {
+        let latitudeUnits: Int
+        let longitudeUnits: Int
+        let style: TripPlaceLabelStyle
+
+        init(_ coordinate: PhotoCoordinate, style: TripPlaceLabelStyle) {
+            // Destination names can share a roughly 1 km cache cell. Nearby
+            // landmarks and neighborhoods use a roughly 100 m cell.
+            let scale = style == .nearby ? 1_000.0 : 100.0
+            latitudeUnits = Int((coordinate.latitude * scale).rounded())
+            longitudeUnits = Int((coordinate.longitude * scale).rounded())
+            self.style = style
+        }
+    }
+
+    private let geocoder = CLGeocoder()
+    private var cache: [CacheKey: String] = [:]
+
+    func placeName(
+        for coordinate: PhotoCoordinate,
+        style: TripPlaceLabelStyle = .destination
+    ) async -> String? {
+        let rawCoordinate = CLLocationCoordinate2D(
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude
+        )
+        guard CLLocationCoordinate2DIsValid(rawCoordinate) else { return nil }
+
+        let key = CacheKey(coordinate, style: style)
+        if let cachedName = cache[key] {
+            return cachedName
+        }
+
+        do {
+            let location = CLLocation(
+                latitude: coordinate.latitude,
+                longitude: coordinate.longitude
+            )
+            guard let placemark = try await geocoder.reverseGeocodeLocation(location).first,
+                  let name = TripPlaceLabelFormatter.displayName(
+                    for: TripPlacemarkComponents(
+                        areasOfInterest: placemark.areasOfInterest ?? [],
+                        name: placemark.name,
+                        thoroughfare: placemark.thoroughfare,
+                        subLocality: placemark.subLocality,
+                        locality: placemark.locality,
+                        subAdministrativeArea: placemark.subAdministrativeArea,
+                        administrativeArea: placemark.administrativeArea,
+                        country: placemark.country,
+                        isoCountryCode: placemark.isoCountryCode,
+                        inlandWater: placemark.inlandWater,
+                        ocean: placemark.ocean
+                    ),
+                    style: style
+                  ) else {
+                return nil
+            }
+
+            cache[key] = name
+            return name
+        } catch {
+            // Connectivity and service errors are deliberately not cached so a
+            // later refresh can resolve the same trip successfully.
+            return nil
+        }
+    }
+
 }

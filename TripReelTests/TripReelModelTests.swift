@@ -7,6 +7,77 @@ final class TripReelModelTests: XCTestCase {
         TripReelModel(arguments: [], useDemoData: true)
     }
 
+    func testNearbyPlaceLabelPrefersLandmarkAndNeighborhood() {
+        let placemark = TripPlacemarkComponents(
+            areasOfInterest: ["Gardens by the Bay"],
+            name: "18 Marina Gardens Drive",
+            thoroughfare: "Marina Gardens Drive",
+            subLocality: "Marina South",
+            locality: "Singapore",
+            country: "Singapore",
+            isoCountryCode: "SG"
+        )
+
+        XCTAssertEqual(
+            TripPlaceLabelFormatter.displayName(for: placemark, style: .nearby),
+            "Gardens by the Bay, Marina South"
+        )
+        XCTAssertEqual(
+            TripPlaceLabelFormatter.displayName(for: placemark, style: .destination),
+            "Singapore"
+        )
+    }
+
+    func testNearbyPlaceLabelUsesNeighborhoodWithCityContext() {
+        let placemark = TripPlacemarkComponents(
+            subLocality: "Tiong Bahru",
+            locality: "Singapore",
+            country: "Singapore",
+            isoCountryCode: "SG"
+        )
+
+        XCTAssertEqual(
+            TripPlaceLabelFormatter.displayName(for: placemark, style: .nearby),
+            "Tiong Bahru, Singapore"
+        )
+    }
+
+    func testFullScreenFillRequestsEnoughPixelsForLandscapeCrop() {
+        let target = PhotoDisplaySizing.targetSize(
+            sourcePixelWidth: 4_032,
+            sourcePixelHeight: 3_024,
+            destinationPixelWidth: 1_206,
+            destinationPixelHeight: 2_622,
+            contentMode: .fill
+        )
+
+        XCTAssertGreaterThan(target.width, 3_900)
+        XCTAssertGreaterThan(target.height, 2_900)
+
+        let fitted = PhotoDisplaySizing.targetSize(
+            sourcePixelWidth: 4_032,
+            sourcePixelHeight: 3_024,
+            destinationPixelWidth: 1_206,
+            destinationPixelHeight: 2_622,
+            contentMode: .fit
+        )
+        XCTAssertLessThan(fitted.width, 1_300)
+        XCTAssertLessThan(fitted.height, 1_000)
+    }
+
+    func testDisplaySizingNeverUpscalesBeyondOriginalPixels() {
+        let target = PhotoDisplaySizing.targetSize(
+            sourcePixelWidth: 1_200,
+            sourcePixelHeight: 900,
+            destinationPixelWidth: 1_206,
+            destinationPixelHeight: 2_622,
+            contentMode: .fill
+        )
+
+        XCTAssertLessThanOrEqual(target.width, 1_200)
+        XCTAssertLessThanOrEqual(target.height, 900)
+    }
+
     func testPaceMapsToExpectedDurations() {
         let model = makeModel()
 
