@@ -58,6 +58,36 @@ final class TripReelModelTests: XCTestCase {
         )
     }
 
+    func testExportMotionUsesSmoothBoundedProgress() {
+        XCTAssertEqual(TripReelVideoExporter.easedMotionPhase(-1), 0, accuracy: 0.0001)
+        XCTAssertEqual(TripReelVideoExporter.easedMotionPhase(0.25), 0.15625, accuracy: 0.0001)
+        XCTAssertEqual(TripReelVideoExporter.easedMotionPhase(0.5), 0.5, accuracy: 0.0001)
+        XCTAssertEqual(TripReelVideoExporter.easedMotionPhase(2), 1, accuracy: 0.0001)
+        XCTAssertEqual(
+            TripReelVideoExporter.transitionProgress(frame: 1, transitionFrames: 2),
+            0.5,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            TripReelVideoExporter.transitionProgress(frame: 0, transitionFrames: 0),
+            1,
+            accuracy: 0.0001
+        )
+    }
+
+    func testNavigationTracksForwardBackwardAndReplacementMotion() {
+        let model = makeModel()
+
+        model.go(.access)
+        XCTAssertEqual(model.navigationDirection, .forward)
+
+        model.go(.welcome)
+        XCTAssertEqual(model.navigationDirection, .backward)
+
+        model.go(.welcome)
+        XCTAssertEqual(model.navigationDirection, .replace)
+    }
+
     func testNearbyPlaceLabelPrefersLandmarkAndNeighborhood() {
         let placemark = TripPlacemarkComponents(
             areasOfInterest: ["Gardens by the Bay"],

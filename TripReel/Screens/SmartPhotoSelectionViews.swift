@@ -13,6 +13,10 @@ struct PhotoAnalysisProgressOverlay: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var glow = false
 
+    private var motionReduced: Bool {
+        reduceMotion
+    }
+
     private var backdropAsset: TripAsset? {
         currentAsset ?? recentAssets.last
     }
@@ -78,9 +82,10 @@ struct PhotoAnalysisProgressOverlay: View {
                             min(274, proxy.size.width * 0.68),
                             proxy.size.height * 0.32
                         ),
-                        reduceMotion: reduceMotion
+                        reduceMotion: motionReduced
                     )
                     .frame(height: min(358, proxy.size.height * 0.41))
+                    .trEntrance(0, distance: 12)
 
                     VStack(spacing: 8) {
                         Text("Finding your story")
@@ -92,6 +97,7 @@ struct PhotoAnalysisProgressOverlay: View {
                             .contentTransition(.numericText())
                     }
                     .padding(.top, 20)
+                    .trEntrance(1, distance: 8)
 
                     AnalysisContactStrip(assets: recentAssets)
                         .frame(height: 48)
@@ -110,6 +116,7 @@ struct PhotoAnalysisProgressOverlay: View {
                                         )
                                     )
                                     .frame(width: bar.size.width * max(0.015, min(1, progress)))
+                                    .animation(motionReduced ? nil : TRMotion.progress, value: progress)
                             }
                         }
                         .frame(height: 4)
@@ -150,12 +157,21 @@ struct PhotoAnalysisProgressOverlay: View {
             }
         }
         .ignoresSafeArea()
-        .onAppear { glow = !reduceMotion }
+        .task(id: motionReduced) {
+            glow = false
+            guard !motionReduced else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            glow = true
+        }
         .animation(
-            reduceMotion ? nil : .easeInOut(duration: 1.8).repeatForever(autoreverses: true),
+            motionReduced ? nil : .easeInOut(duration: 1.8).repeatForever(autoreverses: true),
             value: glow
         )
-        .animation(.easeInOut(duration: 0.35), value: currentAsset?.id)
+        .animation(
+            motionReduced ? .easeInOut(duration: 0.16) : TRMotion.cardArrival,
+            value: currentAsset?.id
+        )
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Analyzing photos, \(Int(progress * 100)) percent")
         .accessibilityIdentifier("smart-photo-analysis-progress")
@@ -206,6 +222,11 @@ private struct AnalysisPhotoDeck: View {
                         )
                         .rotationEffect(.degrees(Double(depth) * (index.isMultiple(of: 2) ? -3.4 : 3.4)))
                         .zIndex(Double(index))
+                        .transition(
+                            reduceMotion
+                                ? .opacity
+                                : .opacity.combined(with: .scale(scale: 0.94))
+                        )
                 }
             }
         }
@@ -264,7 +285,7 @@ private struct ProcessingPhotoCard: View {
             )
             .shadow(color: .black.opacity(0.64), radius: 28, y: 20)
         }
-        .task(id: asset.id) {
+        .task(id: AnalysisCardMotionKey(assetID: asset.id, reduceMotion: reduceMotion)) {
             scanning = false
             guard active, !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
@@ -274,8 +295,14 @@ private struct ProcessingPhotoCard: View {
     }
 }
 
+private struct AnalysisCardMotionKey: Hashable {
+    let assetID: String
+    let reduceMotion: Bool
+}
+
 private struct AnalysisContactStrip: View {
     let assets: [TripAsset]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 7) {
@@ -293,16 +320,25 @@ private struct AnalysisContactStrip: View {
                         .overlay(Circle().stroke(.black.opacity(0.28), lineWidth: 1))
                         .offset(x: 3, y: 3)
                 }
-                .transition(.opacity.combined(with: .scale(scale: 0.82)))
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .opacity.combined(with: .scale(scale: 0.82))
+                )
             }
         }
-        .animation(.spring(response: 0.34, dampingFraction: 0.78), value: assets.map(\.id))
+        .animation(
+            reduceMotion ? .easeInOut(duration: 0.16) : TRMotion.cardArrival,
+            value: assets.map(\.id)
+        )
     }
 }
 
 struct SmartSelectionReviewView: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var includeFeedback = 0
 
     var body: some View {
         ZStack {
@@ -341,6 +377,11 @@ struct SmartSelectionReviewView: View {
                         LazyVStack(spacing: 10) {
                             ForEach(model.excludedPhotos) { excluded in
                                 excludedRow(excluded)
+                                    .transition(
+                                        reduceMotion
+                                            ? .opacity
+                                            : .opacity.combined(with: .offset(x: 18))
+                                    )
                             }
                         }
                         .padding(.horizontal, 16)
@@ -350,6 +391,7 @@ struct SmartSelectionReviewView: View {
             }
         }
         .foregroundStyle(TR.cream)
+        .sensoryFeedback(.selection, trigger: includeFeedback)
         .accessibilityIdentifier("smart-selection-review")
     }
 
@@ -412,7 +454,7 @@ struct SmartSelectionReviewView: View {
                     .background(TR.cream)
                     .clipShape(Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(TactileButtonStyle())
             .accessibilityIdentifier("photo-analysis-retry-button")
             .accessibilityHint("Checks the source trip again and refreshes the preview")
         }
@@ -469,7 +511,10 @@ struct SmartSelectionReviewView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Button("Include") {
-                model.includeExcludedPhoto(id: excluded.id)
+                withAnimation(reduceMotion ? .easeInOut(duration: 0.16) : TRMotion.cardDismiss) {
+                    model.includeExcludedPhoto(id: excluded.id)
+                }
+                includeFeedback += 1
             }
             .font(TR.ui(12, weight: .semibold))
             .foregroundStyle(TR.ink)
@@ -477,7 +522,7 @@ struct SmartSelectionReviewView: View {
             .padding(.vertical, 9)
             .background(TR.cream)
             .clipShape(Capsule())
-            .buttonStyle(.plain)
+            .buttonStyle(TactileButtonStyle(pressedScale: 0.94))
             .accessibilityLabel("Include \(excluded.asset.filename.isEmpty ? "photo" : excluded.asset.filename)")
         }
         .padding(10)

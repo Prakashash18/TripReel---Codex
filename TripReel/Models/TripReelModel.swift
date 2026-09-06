@@ -19,6 +19,23 @@ enum AppScreen: String {
     case rendering
     case done
     case cleanup
+
+    fileprivate var motionOrder: Int {
+        switch self {
+        case .welcome: 0
+        case .access: 1
+        case .limited: 2
+        case .trips, .empty: 3
+        case .building: 4
+        case .firstWatch: 5
+        case .secondWatch: 6
+        case .cut, .pace: 7
+        case .export: 8
+        case .paywall, .rendering: 9
+        case .done: 10
+        case .cleanup: 11
+        }
+    }
 }
 
 enum PhotoSource: Hashable, Sendable {
@@ -774,6 +791,7 @@ enum ExportQuality: Equatable, Sendable {
 @MainActor
 final class TripReelModel: ObservableObject {
     @Published var screen: AppScreen = .welcome
+    @Published private(set) var navigationDirection: TRNavigationDirection = .replace
     @Published var buildCount = 0
     @Published var currentPhotoIndex = 0
     @Published var cutPhotoIDs: Set<String> = []
@@ -1063,11 +1081,28 @@ final class TripReelModel: ObservableObject {
         return photos[index.modulo(photos.count)].source
     }
 
-    func go(_ next: AppScreen) {
+    func go(
+        _ next: AppScreen,
+        direction explicitDirection: TRNavigationDirection? = nil
+    ) {
         workTask?.cancel()
-        withAnimation(.easeInOut(duration: 0.32)) {
-            screen = next
+        navigationDirection = explicitDirection ?? Self.navigationDirection(
+            from: screen,
+            to: next
+        )
+        screen = next
+    }
+
+    private static func navigationDirection(
+        from current: AppScreen,
+        to next: AppScreen
+    ) -> TRNavigationDirection {
+        guard current != next else { return .replace }
+        if next == .trips && (current == .cleanup || current == .done || current == .empty) {
+            return .replace
         }
+        if next.motionOrder == current.motionOrder { return .replace }
+        return next.motionOrder > current.motionOrder ? .forward : .backward
     }
 
     func dismissLibraryMessage() {
@@ -1859,13 +1894,13 @@ final class TripReelModel: ObservableObject {
     func editPhotoSelection() {
         currentPhotoIndex = 0
         history.removeAll()
-        go(.cut)
+        go(.cut, direction: .forward)
     }
 
     func finishPhotoSelection() {
         history.removeAll()
         currentPhotoIndex = min(currentPhotoIndex, max(0, photos.count - 1))
-        go(.secondWatch)
+        go(.secondWatch, direction: .backward)
     }
 
     func selectTrack(_ track: MusicTrack) {
@@ -2007,7 +2042,7 @@ final class TripReelModel: ObservableObject {
         workTask?.cancel()
         workTask = nil
         renderProgress = 0
-        go(.export)
+        go(.export, direction: .backward)
     }
 
     @discardableResult

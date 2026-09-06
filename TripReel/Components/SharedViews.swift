@@ -196,10 +196,26 @@ struct MontageView: View {
 
     private var contentKey: MontageContentKey {
         MontageContentKey(
-            items: timeline,
-            look: look,
-            motionIntensity: motionIntensity
+            itemIDs: timeline.map(\.id),
+            itemDurationsMilliseconds: timeline.map {
+                Int(($0.duration(defaultPhotoDuration: secondsPerSlide) * 1_000).rounded())
+            }
         )
+    }
+
+    private var currentMotionKey: MontageMotionPlaybackKey {
+        MontageMotionPlaybackKey(
+            itemID: currentItem?.id,
+            look: look,
+            intensity: motionIntensity,
+            frameStyle: currentSlide?.frameStyle,
+            motionStyle: currentSlide?.motionStyle,
+            reduceMotion: motionReduced
+        )
+    }
+
+    private var motionReduced: Bool {
+        reduceMotion
     }
 
     var body: some View {
@@ -209,20 +225,24 @@ struct MontageView: View {
                     card: card,
                     backgroundSource: photos.first?.source,
                     motionPhase: motionPhase,
-                    reduceMotion: reduceMotion
+                    reduceMotion: motionReduced
                 )
                 .id(card.id)
-                .transition(.opacity.combined(with: .scale(scale: 1.012)))
+                .transition(
+                    motionReduced
+                        ? .opacity
+                        : .opacity.combined(with: .scale(scale: 1.012))
+                )
             } else if let slide = currentSlide {
                 MontageSlideArtwork(
                     slide: slide,
                     showLabel: showLabels,
                     motionPhase: motionPhase,
-                    reduceMotion: reduceMotion,
+                    reduceMotion: motionReduced,
                     motionIntensity: motionIntensity
                 )
-                .id(slide.id)
-                .transition(slide.motionStyle.transition)
+                .id("\(slide.id)-\(slide.frameStyle.rawValue)")
+                .transition(motionReduced ? .opacity : slide.motionStyle.transition)
             } else {
                 ZStack {
                     Color.white.opacity(0.045)
@@ -274,13 +294,18 @@ struct MontageView: View {
         }
         .background(Color(red: 0.051, green: 0.035, blue: 0.024))
         .accessibilityHidden(true)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.58), value: currentIndex)
-        .onChange(of: currentIndex, initial: true) { _, _ in
+        .animation(
+            motionReduced ? .easeInOut(duration: 0.18) : .easeInOut(duration: 0.46),
+            value: currentIndex
+        )
+        .task(id: currentMotionKey) {
             motionPhase = false
             preheatUpcomingPhotos()
-            guard !reduceMotion else { return }
+            guard !motionReduced else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
             let duration = currentItem?.duration(defaultPhotoDuration: secondsPerSlide) ?? secondsPerSlide
-            withAnimation(.easeInOut(duration: max(0.7, duration * 0.92))) {
+            withAnimation(TRMotion.montageDrift(duration: duration)) {
                 motionPhase = true
             }
         }
@@ -356,6 +381,7 @@ private struct MontageTitleArtwork: View {
 
             VStack(spacing: 13) {
                 MetadataText(text: card.kind.name, color: TR.accent.opacity(0.78))
+                    .trEntrance(0, distance: 7)
                 Text(card.title)
                     .font(TR.display(card.kind == .opening ? 42 : 34))
                     .tracking(-0.6)
@@ -363,10 +389,12 @@ private struct MontageTitleArtwork: View {
                     .lineLimit(3)
                     .minimumScaleFactor(0.62)
                     .foregroundStyle(TR.cream)
+                    .trEntrance(1, distance: 10)
                 Text(card.subtitle)
                     .font(TR.ui(13, weight: .medium))
                     .foregroundStyle(.white.opacity(0.58))
                     .multilineTextAlignment(.center)
+                    .trEntrance(2, distance: 8)
             }
             .padding(.horizontal, 30)
             .offset(y: motionPhase && !reduceMotion ? -5 : 5)
@@ -652,9 +680,17 @@ private struct MontageSlideArtwork: View {
 }
 
 private struct MontageContentKey: Hashable {
-    let items: [MontageTimelineItem]
+    let itemIDs: [String]
+    let itemDurationsMilliseconds: [Int]
+}
+
+private struct MontageMotionPlaybackKey: Hashable {
+    let itemID: String?
     let look: MontageLook
-    let motionIntensity: MontageMotionIntensity
+    let intensity: MontageMotionIntensity
+    let frameStyle: MontageFrameStyle?
+    let motionStyle: MontageMotionStyle?
+    let reduceMotion: Bool
 }
 
 private struct PhotoSourceImage: View {
@@ -733,6 +769,7 @@ private struct PhotoSourceImage: View {
                 }
             }
         }
+        .animation(TRMotion.imageLoad, value: loader.image != nil)
         .onChange(of: requestKey, initial: true) { _, newValue in
             guard let newValue else {
                 loader.cancel()
@@ -1302,7 +1339,7 @@ struct CircleIconButton: View {
                 .overlay(Circle().stroke(tint.opacity(0.46), lineWidth: 1))
                 .clipShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TactileButtonStyle(pressedScale: 0.92))
         .disabled(disabled)
         .opacity(disabled ? 0.45 : 1)
         .accessibilityLabel(symbol == "xmark" ? "Cut photo" : "Keep photo")
@@ -1320,14 +1357,21 @@ struct PlaybackProgressBar: View {
                 Capsule()
                     .fill(TR.cream)
                     .frame(width: proxy.size.width * progress)
+                Circle()
+                    .fill(TR.accent)
+                    .frame(width: 6, height: 6)
+                    .shadow(color: TR.accent.opacity(0.75), radius: 6)
+                    .offset(x: max(0, proxy.size.width * progress - 3))
             }
         }
         .frame(height: 2)
-        .onAppear {
+        .task(id: reduceMotion) {
             if reduceMotion {
                 progress = 0.35
             } else {
                 progress = 0
+                await Task.yield()
+                guard !Task.isCancelled else { return }
                 withAnimation(.linear(duration: 13.2).repeatForever(autoreverses: false)) {
                     progress = 1
                 }
@@ -1425,7 +1469,7 @@ struct CloseButton: View {
                 .background(.white.opacity(0.09))
                 .clipShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TactileButtonStyle(pressedScale: 0.92))
         .accessibilityLabel("Close")
     }
 }

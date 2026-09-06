@@ -1,8 +1,9 @@
 # TripReel design QA
 
-> September 6 update: the new Film Studio hub, full-person safe framing, and
-> similarity clustering pass strict source checks but are not represented by
-> the older screenshots below. Fresh native capture is blocked because this
+> September 6 update: the Film Studio hub, full-person safe framing, similarity
+> clustering, directional navigation, cinematic montage transitions, and the
+> accessible app-wide motion system pass strict source checks but are not
+> represented by the older screenshots below. Fresh native capture is blocked because this
 > Mac's obsolete iOS 9 runtime crashes CoreSimulator/asset catalog services;
 > validate this updated flow in Xcode Cloud or the next TestFlight build.
 
@@ -35,7 +36,7 @@
 - Colors and visual tokens: cream, ink, amber, keep green, cut red, translucent strokes, materials, shadows, and per-state warm gradients match the supplied palette and contrast balance.
 - Image quality and asset fidelity: six coherent 1024 × 1536 generated travel images are bundled as raster assets with stable focal crops. The source provided only placeholder gradients, so the photography is an intentional asset completion rather than a missing-source substitution.
 - Copy and content: all source app-specific labels, trip data, pricing, export descriptions, and cleanup language are represented. Native permission denial adds a necessary system Settings recovery path.
-- Accessibility and behavior: semantic buttons, selection values, descriptive labels, Reduced Motion handling, native photo permission/picker behavior, cut/undo state, export quality, and compact-height layout were checked. The last full simulator baseline reported 9 passed, 0 failed, and 0 skipped. The current Nearby, title, export, and per-photo editor additions pass strict app/test source checks; a fresh runtime pass still needs Xcode Cloud or a healthy simulator.
+- Accessibility and behavior: semantic buttons, selection values, descriptive labels, Reduced Motion handling, native photo permission/picker behavior, cut/undo state, export quality, and compact-height layout were checked. The new motion pass uses restrained shared springs, direct gesture tracking, brief fades for reduced motion, cancelable task-driven ambient effects, and matching eased motion/cross-dissolves in exported video. The last full simulator baseline reported 9 passed, 0 failed, and 0 skipped. The current Nearby, title, export, per-photo editor, and motion additions pass strict app/test source checks; a fresh runtime pass still needs Xcode Cloud or a healthy simulator.
 
 **Comparison history**
 

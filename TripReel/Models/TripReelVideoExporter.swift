@@ -191,6 +191,9 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         }
         var completedFrames = 0
         var lastPhotoImage: CGImage?
+        var previousItem: MontageTimelineItem?
+        var previousItemImage: CGImage?
+        var previousItemPhotoIndex = 0
 
         for item in timeline {
             try Task.checkCancellation()
@@ -227,14 +230,25 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 }
 
                 let phase = frameCount <= 1 ? 1 : Double(localFrame) / Double(frameCount - 1)
+                let transitionFrames = previousItem == nil
+                    ? 0
+                    : min(frameCount - 1, max(2, Int((0.24 * Double(frameRate)).rounded())))
+                let transitionProgress = Self.transitionProgress(
+                    frame: localFrame,
+                    transitionFrames: transitionFrames
+                )
                 try autoreleasepool {
                     try Self.draw(
                         item: item,
                         photoImage: photoImage,
+                        previousItem: previousItem,
+                        previousPhotoImage: previousItemImage,
                         into: pixelBuffer,
                         outputSize: outputSize,
                         phase: phase,
                         photoIndex: itemPhotoIndex,
+                        previousPhotoIndex: previousItemPhotoIndex,
+                        transitionProgress: transitionProgress,
                         request: request
                     )
                 }
@@ -249,6 +263,10 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                     progress(min(0.90, (Double(completedFrames) / Double(max(1, totalFrames))) * 0.90))
                 }
             }
+
+            previousItem = item
+            previousItemImage = photoImage
+            previousItemPhotoIndex = itemPhotoIndex
         }
 
         input.markAsFinished()
@@ -416,10 +434,14 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
     private static func draw(
         item: MontageTimelineItem,
         photoImage: CGImage?,
+        previousItem: MontageTimelineItem?,
+        previousPhotoImage: CGImage?,
         into pixelBuffer: CVPixelBuffer,
         outputSize: CGSize,
         phase: Double,
         photoIndex: Int,
+        previousPhotoIndex: Int,
+        transitionProgress: Double,
         request: TripReelVideoExportRequest
     ) throws {
         let rendererFormat = UIGraphicsImageRendererFormat()
@@ -431,22 +453,27 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             UIColor(red: 0.035, green: 0.025, blue: 0.020, alpha: 1).setFill()
             rendererContext.fill(bounds)
 
-            switch item {
-            case let .photo(photo):
-                if let photoImage {
-                    drawPhoto(
-                        photo,
-                        image: photoImage,
-                        bounds: bounds,
-                        phase: phase,
-                        index: photoIndex,
-                        look: request.look,
-                        intensity: request.motionIntensity
-                    )
-                }
-            case let .title(card):
-                drawTitle(card, background: photoImage, bounds: bounds, phase: phase)
+            if let previousItem, transitionProgress < 1 {
+                drawContent(
+                    previousItem,
+                    photoImage: previousPhotoImage,
+                    bounds: bounds,
+                    phase: 1,
+                    photoIndex: previousPhotoIndex,
+                    alpha: 1 - transitionProgress,
+                    request: request
+                )
             }
+
+            drawContent(
+                item,
+                photoImage: photoImage,
+                bounds: bounds,
+                phase: phase,
+                photoIndex: photoIndex,
+                alpha: transitionProgress,
+                request: request
+            )
 
             if request.quality.includesWatermark {
                 drawWatermark(in: bounds)
@@ -457,6 +484,54 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         }
 
         try copyRenderedFrame(cgImage, into: pixelBuffer, outputSize: outputSize)
+    }
+
+    private static func drawContent(
+        _ item: MontageTimelineItem,
+        photoImage: CGImage?,
+        bounds: CGRect,
+        phase: Double,
+        photoIndex: Int,
+        alpha: Double,
+        request: TripReelVideoExportRequest
+    ) {
+        guard alpha > 0 else { return }
+        let context = UIGraphicsGetCurrentContext()
+        context?.saveGState()
+        context?.setAlpha(CGFloat(min(1, max(0, alpha))))
+        defer { context?.restoreGState() }
+
+        switch item {
+        case let .photo(photo):
+            if let photoImage {
+                drawPhoto(
+                    photo,
+                    image: photoImage,
+                    bounds: bounds,
+                    phase: easedMotionPhase(phase),
+                    index: photoIndex,
+                    look: request.look,
+                    intensity: request.motionIntensity
+                )
+            }
+        case let .title(card):
+            drawTitle(
+                card,
+                background: photoImage,
+                bounds: bounds,
+                phase: easedMotionPhase(phase)
+            )
+        }
+    }
+
+    static func easedMotionPhase(_ phase: Double) -> Double {
+        let progress = min(1, max(0, phase))
+        return progress * progress * (3 - (2 * progress))
+    }
+
+    static func transitionProgress(frame: Int, transitionFrames: Int) -> Double {
+        guard transitionFrames > 0 else { return 1 }
+        return easedMotionPhase(Double(max(0, frame)) / Double(transitionFrames))
     }
 
     /// Copies an already top-to-bottom UIKit image into the equally oriented
@@ -632,29 +707,42 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         }
 
         let eyebrow = card.kind.name.uppercased()
+        let eyebrowReveal = staggeredReveal(phase, start: 0, duration: 0.24)
         drawCenteredText(
             eyebrow,
             in: CGRect(x: 50, y: bounds.midY - 142 + CGFloat(phase * 6), width: bounds.width - 100, height: 30),
             font: UIFont.monospacedSystemFont(ofSize: 16, weight: .medium),
-            color: UIColor(red: 0.94, green: 0.71, blue: 0.37, alpha: 0.86),
+            color: UIColor(red: 0.94, green: 0.71, blue: 0.37, alpha: 0.86 * eyebrowReveal),
             tracking: 2.4
         )
         let titleFont = UIFont(name: "InstrumentSerif-Regular", size: card.kind == .opening ? 70 : 59)
             ?? UIFont.systemFont(ofSize: card.kind == .opening ? 70 : 59, weight: .regular)
+        let titleReveal = staggeredReveal(phase, start: 0.05, duration: 0.34)
         drawCenteredText(
             card.title,
             in: CGRect(x: 54, y: bounds.midY - 88 + CGFloat(phase * -8), width: bounds.width - 108, height: 180),
             font: titleFont,
-            color: UIColor(red: 0.992, green: 0.980, blue: 0.956, alpha: 1),
+            color: UIColor(red: 0.992, green: 0.980, blue: 0.956, alpha: titleReveal),
             tracking: -0.6
         )
         drawCenteredText(
             card.subtitle,
             in: CGRect(x: 58, y: bounds.midY + 102 + CGFloat(phase * -8), width: bounds.width - 116, height: 55),
             font: UIFont.systemFont(ofSize: 20, weight: .medium),
-            color: UIColor.white.withAlphaComponent(0.58),
+            color: UIColor.white.withAlphaComponent(
+                0.58 * staggeredReveal(phase, start: 0.18, duration: 0.34)
+            ),
             tracking: 0
         )
+    }
+
+    private static func staggeredReveal(
+        _ phase: Double,
+        start: Double,
+        duration: Double
+    ) -> CGFloat {
+        let local = min(1, max(0, (phase - start) / max(0.001, duration)))
+        return CGFloat(local * local * (3 - (2 * local)))
     }
 
     private static func drawCenteredText(

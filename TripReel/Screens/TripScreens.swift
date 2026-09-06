@@ -3,7 +3,9 @@ import SwiftUI
 
 struct TripsScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var collection: TripCollection = .trips
+    @Namespace private var collectionSelection
 
     private enum TripCollection: String, CaseIterable, Identifiable {
         case trips = "Trips"
@@ -28,10 +30,12 @@ struct TripsScreen: View {
                     .padding(.horizontal, 24)
                     .padding(.top, 4)
                     .padding(.bottom, 13)
+                    .trEntrance(0, distance: 10)
 
                 collectionPicker
                     .padding(.horizontal, 18)
                     .padding(.bottom, 14)
+                    .trEntrance(1, distance: 8)
 
                 ScrollView(showsIndicators: false) {
                     LazyVStack(spacing: 10) {
@@ -48,10 +52,11 @@ struct TripsScreen: View {
                         } else if displayedTrips.isEmpty {
                             emptyCollection
                         } else {
-                            ForEach(displayedTrips) { trip in
+                            ForEach(Array(displayedTrips.enumerated()), id: \.element.id) { index, trip in
                                 TripRow(trip: trip) {
                                     model.requestBuild(trip: trip)
                                 }
+                                .trEntrance(min(index, 4), distance: 8)
                             }
 
                             if collection == .nearby {
@@ -88,6 +93,7 @@ struct TripsScreen: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 32)
                 }
+                .trEntrance(2, distance: 10)
                 .refreshable {
                     await model.refreshPhotoLibraryIfAuthorized(force: true)
                 }
@@ -105,15 +111,33 @@ struct TripsScreen: View {
         HStack(spacing: 4) {
             ForEach(TripCollection.allCases) { item in
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { collection = item }
+                    withAnimation(
+                        reduceMotion
+                            ? .easeInOut(duration: 0.16)
+                            : TRMotion.selection
+                    ) {
+                        collection = item
+                    }
                 } label: {
                     Text(item.rawValue)
                         .font(TR.ui(13, weight: .semibold))
                         .foregroundStyle(collection == item ? TR.ink : .white.opacity(0.58))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .background(collection == item ? TR.cream : .clear)
-                        .clipShape(Capsule())
+                        .background {
+                            if collection == item {
+                                if reduceMotion {
+                                    Capsule().fill(TR.cream)
+                                } else {
+                                    Capsule()
+                                        .fill(TR.cream)
+                                        .matchedGeometryEffect(
+                                            id: "trip-collection-selection",
+                                            in: collectionSelection
+                                        )
+                                }
+                            }
+                        }
                 }
                 .buttonStyle(.plain)
                 .accessibilityValue(collection == item ? "Selected" : "Not selected")
@@ -123,6 +147,7 @@ struct TripsScreen: View {
         .background(.white.opacity(0.065))
         .overlay(Capsule().stroke(.white.opacity(0.11), lineWidth: 1))
         .clipShape(Capsule())
+        .sensoryFeedback(.selection, trigger: collection)
     }
 
     private var emptyCollection: some View {
@@ -182,7 +207,7 @@ private struct TripRow: View {
             .padding(11)
             .glassCard(cornerRadius: 18)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TactileButtonStyle())
         .accessibilityLabel("\(trip.place), \(trip.photoCount) photos")
     }
 }
@@ -200,6 +225,7 @@ struct EmptyTripsScreen: View {
                 ScreenHeading(eyebrow: nil, title: "Your trips")
                     .padding(.horizontal, 24)
                     .padding(.top, 30)
+                    .trEntrance(0, distance: 8)
 
                 Spacer()
 
@@ -219,6 +245,7 @@ struct EmptyTripsScreen: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, 34)
+                .trEntrance(1, distance: 12)
 
                 Spacer()
 
@@ -249,6 +276,7 @@ struct EmptyTripsScreen: View {
                 }
                 .padding(.horizontal, 30)
                 .padding(.bottom, 20)
+                .trEntrance(2, distance: 9)
             }
             .safeAreaPadding(.vertical)
         }
@@ -297,21 +325,47 @@ struct BuildingScreen: View {
                     flyingPhoto(model.previewSource(at: 3), size: 48, x: -114, y: 124, phase: -6)
                 }
                 .padding(.bottom, 38)
+                .trEntrance(0, distance: 14)
 
                 MetadataText(text: model.tripPlace, color: .white.opacity(0.58))
+                    .trEntrance(1, distance: 7)
 
                 Text("Building your film")
                     .font(TR.display(34))
                     .padding(.top, 14)
                     .padding(.bottom, 10)
+                    .trEntrance(2, distance: 8)
 
                 Text("\(model.buildCount) of \(model.photos.count) photos placed")
                     .font(TR.ui(15))
                     .foregroundStyle(.white.opacity(0.61))
                     .contentTransition(.numericText())
+                    .animation(reduceMotion ? nil : TRMotion.progress, value: model.buildCount)
+
+                GeometryReader { bar in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.white.opacity(0.10))
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [TR.accent.opacity(0.62), TR.accent],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(
+                                width: bar.size.width * CGFloat(model.buildCount)
+                                    / CGFloat(max(1, model.photos.count))
+                            )
+                    }
+                }
+                .frame(width: 188, height: 4)
+                .padding(.top, 16)
+                .animation(reduceMotion ? nil : TRMotion.progress, value: model.buildCount)
+                .trEntrance(3, distance: 6)
             }
         }
-        .onAppear { floating = !reduceMotion }
+        .task(id: reduceMotion) { floating = !reduceMotion }
         .accessibilityIdentifier("building-screen")
     }
 

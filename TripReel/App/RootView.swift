@@ -40,8 +40,16 @@ struct RootView: View {
             }
         }
         .id(model.screen.rawValue)
-        .transition(.opacity.combined(with: .scale(scale: 1.008)))
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.30), value: model.screen)
+        .transition(
+            TRMotion.screenTransition(
+                direction: model.navigationDirection,
+                prefersCrossFade: reduceMotion
+            )
+        )
+        .animation(
+            reduceMotion ? .easeInOut(duration: 0.16) : TRMotion.navigation,
+            value: model.screen
+        )
         .background(Color.black)
         .foregroundStyle(TR.cream)
         .tint(TR.accent)
@@ -101,6 +109,6 @@ struct RootView: View {
                 .zIndex(20)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: model.isAnalyzingPhotos)
+        .animation(reduceMotion ? .easeInOut(duration: 0.16) : TRMotion.overlay, value: model.isAnalyzingPhotos)
     }
 }

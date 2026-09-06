@@ -16,6 +16,7 @@ struct ExportScreen: View {
                 )
                 .padding(.horizontal, 26)
                 .padding(.top, 4)
+                .trEntrance(0, distance: 10)
 
                 Spacer(minLength: 20)
 
@@ -77,7 +78,7 @@ struct ExportScreen: View {
                         .padding(14)
                         .glassCard(cornerRadius: 20)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(TactileButtonStyle())
                     .accessibilityIdentifier("export-project")
 
                     Text("The watermark sits in the top-right corner, as shown.")
@@ -87,6 +88,7 @@ struct ExportScreen: View {
                         .padding(.horizontal, 16)
                 }
                 .padding(.horizontal, 26)
+                .trEntrance(1, distance: 12)
 
                 Spacer(minLength: 16)
 
@@ -173,7 +175,7 @@ private struct ExportOptionCard: View {
             .padding(14)
             .glassCard(cornerRadius: 20, highlighted: highlighted)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TactileButtonStyle())
         .accessibilityIdentifier(accessibilityID ?? "")
     }
 }
@@ -181,8 +183,10 @@ private struct ExportOptionCard: View {
 private struct ProjectFormatSheet: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var projectURL: URL?
     @State private var projectError: String?
+    @State private var selectionFeedback = 0
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -247,12 +251,16 @@ private struct ProjectFormatSheet: View {
         }
         .onAppear { prepareProjectFile() }
         .onChange(of: model.selectedFormatID) { _, _ in prepareProjectFile() }
+        .sensoryFeedback(.selection, trigger: selectionFeedback)
     }
 
     private func formatRow(_ format: ProjectFormat) -> some View {
         let active = model.selectedFormatID == format.id
         return Button {
-            model.selectedFormatID = format.id
+            withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                model.selectedFormatID = format.id
+            }
+            selectionFeedback += 1
         } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
@@ -275,7 +283,7 @@ private struct ProjectFormatSheet: View {
             .overlay(RoundedRectangle(cornerRadius: 15).stroke(active ? TR.accent.opacity(0.46) : .white.opacity(0.10), lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TactileButtonStyle())
         .accessibilityValue(active ? "Selected" : "Not selected")
     }
 
@@ -425,6 +433,7 @@ struct PaywallScreen: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 18)
             .safeAreaPadding(.bottom)
+            .trEntrance(0, distance: 14)
         }
         .accessibilityIdentifier("paywall-screen")
     }
@@ -453,12 +462,14 @@ struct PaywallScreen: View {
             .overlay(RoundedRectangle(cornerRadius: 18).stroke(highlighted ? TR.accent.opacity(0.56) : .white.opacity(0.16), lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TactileButtonStyle())
     }
 }
 
 struct RenderingScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var sweep = false
 
     var body: some View {
         ZStack {
@@ -476,17 +487,36 @@ struct RenderingScreen: View {
                     .frame(width: 172, height: 230)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .shadow(color: .black.opacity(0.56), radius: 26, y: 20)
+                    .overlay {
+                        if motionAllowed {
+                            GeometryReader { proxy in
+                                LinearGradient(
+                                    colors: [.clear, TR.accent.opacity(0.34), .clear],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                                .frame(height: 46)
+                                .blur(radius: 5)
+                                .offset(y: sweep ? proxy.size.height + 24 : -70)
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .allowsHitTesting(false)
+                        }
+                    }
+                    .trEntrance(0, distance: 12)
 
                 Text("Rendering")
                     .font(TR.display(32))
                     .padding(.top, 32)
                     .padding(.bottom, 8)
+                    .trEntrance(1, distance: 8)
 
                 MetadataText(
                     text: "\(Int(model.renderProgress * 100))% · full-resolution video",
                     color: .white.opacity(0.62)
                 )
                 .contentTransition(.numericText())
+                .animation(reduceMotion ? nil : TRMotion.progress, value: model.renderProgress)
 
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
@@ -496,6 +526,7 @@ struct RenderingScreen: View {
                 }
                 .frame(width: 236, height: 5)
                 .padding(.top, 22)
+                .animation(reduceMotion ? nil : TRMotion.progress, value: model.renderProgress)
 
                 Button("Cancel") {
                     model.cancelRender()
@@ -506,12 +537,26 @@ struct RenderingScreen: View {
                 .padding(.top, 26)
             }
         }
+        .task(id: reduceMotion) {
+            sweep = false
+            guard motionAllowed else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) {
+                sweep = true
+            }
+        }
         .accessibilityIdentifier("rendering-screen")
+    }
+
+    private var motionAllowed: Bool {
+        !reduceMotion
     }
 }
 
 struct FilmReadyScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @State private var readyFeedback = false
 
     var body: some View {
         ZStack {
@@ -522,6 +567,8 @@ struct FilmReadyScreen: View {
                 readyContent(previewWidth: 236, compact: true)
             }
         }
+        .onAppear { readyFeedback.toggle() }
+        .sensoryFeedback(.success, trigger: readyFeedback)
         .alert(
             "Couldn't save the film",
             isPresented: Binding(
@@ -542,6 +589,7 @@ struct FilmReadyScreen: View {
 
             MetadataText(text: "\(model.tripShortPlace) · \(model.filmDurationText)", color: .white.opacity(0.57))
                 .padding(.bottom, compact ? 10 : 20)
+                .trEntrance(0, distance: 6)
 
             MontageView(
                 photos: model.keptPhotos,
@@ -555,11 +603,13 @@ struct FilmReadyScreen: View {
                 .frame(width: previewWidth, height: previewWidth * 14 / 9)
                 .clipShape(RoundedRectangle(cornerRadius: compact ? 18 : 22, style: .continuous))
                 .shadow(color: .black.opacity(0.58), radius: 30, y: 22)
+                .trEntrance(1, distance: 12)
 
             Text("Your film is ready")
                 .font(TR.display(compact ? 27 : 30))
                 .multilineTextAlignment(.center)
                 .padding(.top, compact ? 12 : 20)
+                .trEntrance(2, distance: 8)
 
             Spacer(minLength: compact ? 4 : 14)
 
@@ -615,6 +665,7 @@ struct FilmReadyScreen: View {
                 .padding(.vertical, compact ? 3 : 6)
             }
             .padding(.horizontal, 26)
+            .trEntrance(3, distance: 10)
         }
         .padding(.bottom, compact ? 0 : 12)
     }
@@ -680,6 +731,7 @@ struct CleanupScreen: View {
         .padding(.horizontal, 30)
         .safeAreaPadding(.vertical)
         .offset(y: -8)
+        .trEntrance(0, distance: 12)
     }
 
     private var cleanupCount: Int {
@@ -699,6 +751,7 @@ struct CleanupScreen: View {
 
 private struct CleanupGrid: View {
     @EnvironmentObject private var model: TripReelModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var activeAlert: CleanupAlert?
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
 
@@ -729,10 +782,12 @@ private struct CleanupGrid: View {
                     ForEach(candidatePhotos) { photo in
                         Button {
                             guard !model.isDeletingPhotos else { return }
-                            if model.cleanupSelection.contains(photo.id) {
-                                model.cleanupSelection.remove(photo.id)
-                            } else {
-                                model.cleanupSelection.insert(photo.id)
+                            withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                                if model.cleanupSelection.contains(photo.id) {
+                                    model.cleanupSelection.remove(photo.id)
+                                } else {
+                                    model.cleanupSelection.insert(photo.id)
+                                }
                             }
                         } label: {
                             ZStack(alignment: .topTrailing) {
@@ -747,6 +802,7 @@ private struct CleanupGrid: View {
                                         Image(systemName: "checkmark")
                                             .font(.system(size: 11, weight: .bold))
                                             .foregroundStyle(TR.ink)
+                                            .transition(.scale.combined(with: .opacity))
                                     }
                                 }
                                 .frame(width: 23, height: 23)
@@ -754,7 +810,7 @@ private struct CleanupGrid: View {
                             }
                             .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(TactileButtonStyle(pressedScale: 0.94))
                         .accessibilityLabel(
                             model.cleanupSelection.contains(photo.id)
                                 ? "Deselect \(photo.label) from deletion"
@@ -778,7 +834,7 @@ private struct CleanupGrid: View {
                 .padding(.vertical, 18)
                 .background(model.cleanupSelection.isEmpty ? .white.opacity(0.08) : TR.cut)
                 .clipShape(Capsule())
-                .buttonStyle(.plain)
+                .buttonStyle(TactileButtonStyle(pressedScale: 0.98))
                 .disabled(model.cleanupSelection.isEmpty || model.isDeletingPhotos)
 
                 Button("Keep them all") {
@@ -797,6 +853,7 @@ private struct CleanupGrid: View {
             .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.08)).frame(height: 1) }
         }
         .safeAreaPadding(.vertical)
+        .sensoryFeedback(.selection, trigger: model.cleanupSelection.count)
         .alert(item: $activeAlert) { alert in
             switch alert {
             case let .confirm(count):

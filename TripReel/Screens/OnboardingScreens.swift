@@ -35,11 +35,13 @@ struct WelcomeScreen: View {
                         .tracking(-0.65)
                         .foregroundStyle(TR.cream)
                 }
+                .trEntrance(0, distance: 14)
 
                 Button("Get started") {
                     model.go(.access)
                 }
                 .buttonStyle(CreamButtonStyle())
+                .trEntrance(1, distance: 10)
             }
             .padding(.horizontal, 30)
             .safeAreaPadding(.bottom, 12)
@@ -115,6 +117,7 @@ struct PhotoAccessScreen: View {
                     .lineSpacing(compact ? 2 : 5)
                     .frame(maxWidth: 300)
             }
+            .trEntrance(0, distance: compact ? 8 : 14)
 
             Spacer(minLength: compact ? 8 : 28)
 
@@ -148,6 +151,7 @@ struct PhotoAccessScreen: View {
                     photoLibrary: .shared()
                 )
             }
+            .trEntrance(1, distance: 10)
         }
         .padding(.horizontal, 30)
         .padding(.bottom, compact ? 0 : 20)
@@ -220,6 +224,7 @@ struct LimitedAccessScreen: View {
                         .lineSpacing(5)
                         .frame(maxWidth: 300)
                 }
+                .trEntrance(0, distance: 12)
 
                 Spacer(minLength: 48)
 
@@ -237,6 +242,7 @@ struct LimitedAccessScreen: View {
                     .foregroundStyle(.white.opacity(0.57))
                     .buttonStyle(.plain)
                 }
+                .trEntrance(1, distance: 9)
             }
             .padding(.horizontal, 30)
             .padding(.bottom, 20)

@@ -29,6 +29,7 @@ struct FirstWatchScreen: View {
                         .foregroundStyle(.white.opacity(0.52))
                 }
                 .padding(.top, 4)
+                .trEntrance(0, distance: 7)
 
                 Spacer()
 
@@ -81,7 +82,7 @@ struct FirstWatchScreen: View {
                             .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
                             .clipShape(Capsule())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(TactileButtonStyle())
                         .accessibilityIdentifier("photo-analysis-follow-up-button")
                         .accessibilityLabel("Preview ready. \(followUp.previewMessage)")
                         .accessibilityHint("Shows optional ways to check more photos")
@@ -105,7 +106,7 @@ struct FirstWatchScreen: View {
                             .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
                             .clipShape(Capsule())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(TactileButtonStyle())
                         .accessibilityIdentifier("smart-selection-review-button")
                     }
 
@@ -124,6 +125,7 @@ struct FirstWatchScreen: View {
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 8)
+                .trEntrance(1, distance: 12)
             }
         }
         .accessibilityIdentifier("first-watch-screen")
@@ -132,8 +134,10 @@ struct FirstWatchScreen: View {
 
 struct CutScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dragOffset: CGSize = .zero
     @State private var locked = false
+    @State private var decisionFeedback = 0
 
     private var dragStrength: Double {
         min(abs(dragOffset.width) / 105, 1)
@@ -203,7 +207,14 @@ struct CutScreen: View {
                             }
 
                             Button("Undo") {
-                                model.undoLastDecision()
+                                withAnimation(
+                                    motionReduced
+                                        ? .easeInOut(duration: 0.14)
+                                        : TRMotion.cardArrival
+                                ) {
+                                    model.undoLastDecision()
+                                }
+                                decisionFeedback += 1
                             }
                             .font(TR.ui(12, weight: .semibold))
                             .foregroundStyle(model.history.isEmpty ? .white.opacity(0.28) : .white.opacity(0.72))
@@ -212,7 +223,7 @@ struct CutScreen: View {
                             .background(.white.opacity(0.06))
                             .overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1))
                             .clipShape(Capsule())
-                            .buttonStyle(.plain)
+                            .buttonStyle(TactileButtonStyle(pressedScale: 0.96))
                             .disabled(model.history.isEmpty || locked)
 
                             CircleIconButton(symbol: "checkmark", tint: TR.keep, disabled: locked) {
@@ -241,7 +252,12 @@ struct CutScreen: View {
             locked = false
             dragOffset = .zero
         }
+        .sensoryFeedback(.selection, trigger: decisionFeedback)
         .accessibilityIdentifier("cut-screen")
+    }
+
+    private var motionReduced: Bool {
+        reduceMotion
     }
 
     private var photoCard: some View {
@@ -306,6 +322,12 @@ struct CutScreen: View {
                 .padding(.trailing, 18)
                 .padding(.top, 60)
         }
+        .id(model.currentPhoto.id)
+        .transition(
+            motionReduced
+                ? .opacity
+                : .opacity.combined(with: .scale(scale: 0.985))
+        )
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .shadow(color: .black.opacity(0.60), radius: 30, y: 24)
         .offset(x: dragOffset.width, y: dragOffset.height * 0.15)
@@ -321,7 +343,7 @@ struct CutScreen: View {
                     if abs(value.translation.width) > 92 {
                         sendCard(cut: value.translation.width < 0)
                     } else {
-                        withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) {
+                        withAnimation(motionReduced ? nil : TRMotion.gestureReturn) {
                             dragOffset = .zero
                         }
                     }
@@ -335,15 +357,28 @@ struct CutScreen: View {
         guard !locked else { return }
         let photoID = model.currentPhoto.id
         locked = true
-        withAnimation(.easeOut(duration: 0.24)) {
+
+        if motionReduced {
+            decisionFeedback += 1
+            withAnimation(.easeInOut(duration: 0.14)) {
+                model.decidePhoto(id: photoID, cut: cut)
+                dragOffset = .zero
+                locked = false
+            }
+            return
+        }
+
+        decisionFeedback += 1
+        withAnimation(TRMotion.cardDismiss, completionCriteria: .logicallyComplete) {
             dragOffset.width = cut ? -520 : 520
             dragOffset.height = 0
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+        } completion: {
             guard locked else { return }
-            model.decidePhoto(id: photoID, cut: cut)
-            dragOffset = .zero
-            locked = false
+            withAnimation(TRMotion.cardArrival) {
+                model.decidePhoto(id: photoID, cut: cut)
+                dragOffset = .zero
+                locked = false
+            }
         }
     }
 }
@@ -387,6 +422,7 @@ private struct CutHintOverlay: View {
 
 struct PaceScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showAdvanced = false
 
     var body: some View {
@@ -400,6 +436,7 @@ struct PaceScreen: View {
                 )
                 .padding(.horizontal, 26)
                 .padding(.top, 4)
+                .trEntrance(0, distance: 10)
 
                 VStack(spacing: 30) {
                     VStack(alignment: .leading, spacing: 12) {
@@ -417,6 +454,7 @@ struct PaceScreen: View {
                         }
                         .frame(height: 78)
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .animation(reduceMotion ? nil : TRMotion.scrub, value: model.pace)
 
                         HStack(alignment: .firstTextBaseline) {
                             Text(String(format: "%.1fs per photo", model.secondsPerPhoto))
@@ -445,6 +483,7 @@ struct PaceScreen: View {
                 }
                 .padding(.horizontal, 26)
                 .padding(.top, 22)
+                .trEntrance(1, distance: 10)
 
                 Spacer()
 
@@ -463,6 +502,7 @@ struct PaceScreen: View {
                 }
                 .padding(.horizontal, 26)
                 .padding(.bottom, 7)
+                .trEntrance(2, distance: 8)
             }
         }
         .sheet(isPresented: $showAdvanced) {
@@ -515,6 +555,7 @@ private struct AdvancedTimingSheet: View {
 
 struct SecondWatchScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showTitles = false
     @State private var showMusic = false
     @State private var showStyle = false
@@ -548,6 +589,7 @@ struct SecondWatchScreen: View {
                         .foregroundStyle(.white.opacity(0.53))
                 }
                 .padding(.top, 4)
+                .trEntrance(0, distance: 7)
 
                 Spacer()
 
@@ -563,8 +605,10 @@ struct SecondWatchScreen: View {
                                 .background(.black.opacity(0.34))
                                 .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
                                 .clipShape(Circle())
+                                .contentTransition(.symbolEffect(.replace))
+                                .animation(reduceMotion ? nil : TRMotion.selection, value: soundtrack.isPlaying)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(TactileButtonStyle(pressedScale: 0.92))
                         .disabled(model.selectedTrack == nil)
                         .opacity(model.selectedTrack == nil ? 0.42 : 1)
                         .accessibilityLabel(soundtrack.isPlaying ? "Pause soundtrack" : "Play soundtrack")
@@ -610,7 +654,7 @@ struct SecondWatchScreen: View {
                         .padding(.vertical, 10)
                         .glassCard(cornerRadius: 15)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(TactileButtonStyle())
                     .accessibilityIdentifier("full-preview-button")
 
                     LazyVGrid(
@@ -666,6 +710,7 @@ struct SecondWatchScreen: View {
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 8)
+                .trEntrance(1, distance: 12)
             }
         }
         .sheet(isPresented: $showTitles) {
@@ -734,6 +779,7 @@ private struct FullFilmPreview: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var soundtrack = LocalSoundtrackPlayer()
     @State private var controlsVisible = true
 
@@ -755,7 +801,7 @@ private struct FullFilmPreview: View {
                 .contentShape(Rectangle())
                 .ignoresSafeArea()
                 .onTapGesture {
-                    withAnimation(.easeInOut(duration: 0.22)) {
+                    withAnimation(.easeInOut(duration: motionReduced ? 0.14 : 0.22)) {
                         controlsVisible.toggle()
                     }
                 }
@@ -812,7 +858,7 @@ private struct FullFilmPreview: View {
             guard controlsVisible, !voiceOverEnabled else { return }
             try? await Task.sleep(nanoseconds: 3_200_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.3)) {
+            withAnimation(.easeInOut(duration: motionReduced ? 0.14 : 0.3)) {
                 controlsVisible = false
             }
         }
@@ -824,6 +870,10 @@ private struct FullFilmPreview: View {
     private var trackSuffix: String {
         guard let track = model.selectedTrack else { return "" }
         return " · \(track.name)"
+    }
+
+    private var motionReduced: Bool {
+        reduceMotion
     }
 
     private func previewControl(
@@ -840,7 +890,7 @@ private struct FullFilmPreview: View {
                 .overlay(Circle().stroke(.white.opacity(0.20), lineWidth: 1))
                 .clipShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TactileButtonStyle(pressedScale: 0.92))
         .accessibilityLabel(label)
     }
 }
@@ -848,10 +898,12 @@ private struct FullFilmPreview: View {
 private struct PhotoEditorSheet: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedID: String?
     @State private var pinchStartScale: Double?
     @State private var dragStartX: Double?
     @State private var dragStartY: Double?
+    @State private var editFeedback = 0
 
     private var selectedPhoto: ReelPhoto? {
         let photos = model.keptPhotos
@@ -876,7 +928,10 @@ private struct PhotoEditorSheet: View {
                     timingControls(photo)
 
                     Button("Reset this photo to Auto") {
-                        model.resetPhotoEdit(id: photo.id)
+                        withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                            model.resetPhotoEdit(id: photo.id)
+                        }
+                        editFeedback += 1
                     }
                     .font(TR.ui(13, weight: .semibold))
                     .foregroundStyle(TR.accent)
@@ -899,6 +954,7 @@ private struct PhotoEditorSheet: View {
         .onAppear {
             if selectedID == nil { selectedID = model.keptPhotos.first?.id }
         }
+        .sensoryFeedback(.selection, trigger: editFeedback)
         .accessibilityIdentifier("photo-editor-sheet")
     }
 
@@ -908,7 +964,7 @@ private struct PhotoEditorSheet: View {
                 photos: [photo],
                 showLabels: false,
                 look: .story,
-                motionIntensity: .still,
+                motionIntensity: model.montageMotionIntensity,
                 secondsPerSlide: model.duration(for: photo)
             )
             .overlay(alignment: .topLeading) {
@@ -956,8 +1012,11 @@ private struct PhotoEditorSheet: View {
                 HStack(spacing: 8) {
                     ForEach(model.keptPhotos) { photo in
                         Button {
-                            selectedID = photo.id
-                            reader.scrollTo(photo.id, anchor: .center)
+                            withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                                selectedID = photo.id
+                                reader.scrollTo(photo.id, anchor: .center)
+                            }
+                            editFeedback += 1
                         } label: {
                             PhotoAssetView(source: photo.source)
                                 .frame(width: 54, height: 54)
@@ -970,7 +1029,7 @@ private struct PhotoEditorSheet: View {
                                 )
                                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(TactileButtonStyle(pressedScale: 0.94))
                         .id(photo.id)
                         .accessibilityLabel("Edit \(photo.label)")
                     }
@@ -989,7 +1048,10 @@ private struct PhotoEditorSheet: View {
                         symbol: style.symbol,
                         selected: photo.frameStyle == style
                     ) {
-                        model.setFrameStyle(style, forPhotoID: photo.id)
+                        withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                            model.setFrameStyle(style, forPhotoID: photo.id)
+                        }
+                        editFeedback += 1
                     }
                 }
             }
@@ -1003,7 +1065,10 @@ private struct PhotoEditorSheet: View {
                 HStack(spacing: 7) {
                     ForEach(MontageMotionStyle.allCases) { motion in
                         Button {
-                            model.setMotionStyle(motion, forPhotoID: photo.id)
+                            withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                                model.setMotionStyle(motion, forPhotoID: photo.id)
+                            }
+                            editFeedback += 1
                         } label: {
                             Text(motion.name)
                                 .font(TR.ui(11, weight: .semibold))
@@ -1013,7 +1078,7 @@ private struct PhotoEditorSheet: View {
                                 .background(photo.motionStyle == motion ? TR.cream : .white.opacity(0.055))
                                 .clipShape(Capsule())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(TactileButtonStyle(pressedScale: 0.96))
                     }
                 }
             }
@@ -1060,7 +1125,7 @@ private struct PhotoEditorSheet: View {
             .background(selected ? TR.cream : .white.opacity(0.055))
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TactileButtonStyle(pressedScale: 0.96))
     }
 
     private func pinchGesture(for photo: ReelPhoto) -> some Gesture {
@@ -1104,6 +1169,8 @@ private struct PhotoEditorSheet: View {
 private struct FilmStyleSheet: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var selectionFeedback = 0
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -1129,7 +1196,10 @@ private struct FilmStyleSheet: View {
                     HStack(spacing: 7) {
                         ForEach(MontageMotionIntensity.allCases) { intensity in
                             Button {
-                                model.montageMotionIntensity = intensity
+                                withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                                    model.montageMotionIntensity = intensity
+                                }
+                                selectionFeedback += 1
                             } label: {
                                 Text(intensity.name)
                                     .font(TR.ui(12, weight: .semibold))
@@ -1147,7 +1217,7 @@ private struct FilmStyleSheet: View {
                                     )
                                     .clipShape(Capsule())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(TactileButtonStyle(pressedScale: 0.96))
                             .accessibilityValue(
                                 model.montageMotionIntensity == intensity ? "Selected" : "Not selected"
                             )
@@ -1163,6 +1233,7 @@ private struct FilmStyleSheet: View {
             .padding(.top, 20)
             .padding(.bottom, 34)
         }
+        .sensoryFeedback(.selection, trigger: selectionFeedback)
         .accessibilityIdentifier("film-style-sheet")
     }
 
@@ -1175,7 +1246,6 @@ private struct FilmStyleSheet: View {
                 motionIntensity: model.montageMotionIntensity,
                 secondsPerSlide: max(1.15, model.secondsPerPhoto)
             )
-            .id("\(model.montageLook.rawValue)-\(model.montageMotionIntensity.rawValue)")
             .frame(width: 126, height: 224)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
@@ -1203,8 +1273,8 @@ private struct FilmStyleSheet: View {
         }
         .padding(13)
         .glassCard(cornerRadius: 20)
-        .animation(.easeInOut(duration: 0.24), value: model.montageLook)
-        .animation(.easeInOut(duration: 0.24), value: model.montageMotionIntensity)
+        .animation(reduceMotion ? nil : TRMotion.selection, value: model.montageLook)
+        .animation(reduceMotion ? nil : TRMotion.selection, value: model.montageMotionIntensity)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Live \(model.montageLook.name) film preview")
         .accessibilityIdentifier("film-style-live-preview")
@@ -1238,9 +1308,10 @@ private struct FilmStyleSheet: View {
     private func lookRow(_ look: MontageLook) -> some View {
         let selected = model.montageLook == look
         return Button {
-            withAnimation(.easeInOut(duration: 0.24)) {
+            withAnimation(reduceMotion ? nil : TRMotion.selection) {
                 model.montageLook = look
             }
+            selectionFeedback += 1
         } label: {
             HStack(spacing: 13) {
                 Image(systemName: look.symbol)
@@ -1273,7 +1344,7 @@ private struct FilmStyleSheet: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TactileButtonStyle())
         .accessibilityValue(selected ? "Selected" : "Not selected")
         .accessibilityIdentifier("film-look-\(look.rawValue)")
     }
@@ -1305,7 +1376,7 @@ private struct EditOptionButton: View {
             .padding(.vertical, 13)
             .glassCard(cornerRadius: 16)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TactileButtonStyle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
         .accessibilityValue(badge)
@@ -1315,6 +1386,8 @@ private struct EditOptionButton: View {
 private struct TitlesSheet: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var selectionFeedback = 0
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -1353,6 +1426,7 @@ private struct TitlesSheet: View {
             .padding(.top, 20)
             .padding(.bottom, 38)
         }
+        .sensoryFeedback(.selection, trigger: selectionFeedback)
     }
 
     private func titleCardRow(_ card: TitleCardKind, index: Int) -> some View {
@@ -1366,11 +1440,14 @@ private struct TitlesSheet: View {
         }()
 
         return Button {
-            if active {
-                model.titleCards.remove(card)
-            } else {
-                model.titleCards.insert(card)
+            withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                if active {
+                    model.titleCards.remove(card)
+                } else {
+                    model.titleCards.insert(card)
+                }
             }
+            selectionFeedback += 1
         } label: {
             HStack(spacing: 0) {
                 ZStack {
@@ -1406,7 +1483,7 @@ private struct TitlesSheet: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TactileButtonStyle())
         .accessibilityValue(active ? "Selected" : "Not selected")
     }
 }
@@ -1414,6 +1491,8 @@ private struct TitlesSheet: View {
 private struct MusicSheet: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var selectionFeedback = 0
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -1465,6 +1544,7 @@ private struct MusicSheet: View {
             .padding(.top, 20)
             .padding(.bottom, 38)
         }
+        .sensoryFeedback(.selection, trigger: selectionFeedback)
     }
 
     private var beatNote: String {
@@ -1476,7 +1556,10 @@ private struct MusicSheet: View {
         let active = track.id == "none" ? model.selectedTrackID == nil : model.selectedTrackID == track.id
 
         return Button {
-            model.selectTrack(track)
+            withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                model.selectTrack(track)
+            }
+            selectionFeedback += 1
         } label: {
             HStack(spacing: 13) {
                 Image(systemName: track.symbol)
@@ -1496,14 +1579,11 @@ private struct MusicSheet: View {
 
                 Spacer()
 
-                HStack(alignment: .bottom, spacing: 2) {
-                    ForEach(Array(track.bars.enumerated()), id: \.offset) { _, height in
-                        Capsule()
-                            .fill(active ? track.tint : .white.opacity(0.23))
-                            .frame(width: 2, height: height)
-                    }
-                }
-                .frame(height: 29)
+                MusicLevelBars(
+                    heights: track.bars,
+                    tint: active ? track.tint : .white.opacity(0.23),
+                    animated: active && track.resourceName != nil
+                )
 
                 Text(track.tag)
                     .font(TR.mono(10))
@@ -1517,7 +1597,58 @@ private struct MusicSheet: View {
             .overlay(RoundedRectangle(cornerRadius: 15).stroke(active ? TR.accent.opacity(0.46) : .white.opacity(0.10), lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TactileButtonStyle())
         .accessibilityValue(active ? "Selected" : "Not selected")
     }
+}
+
+private struct MusicLevelBars: View {
+    let heights: [CGFloat]
+    let tint: Color
+    let animated: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var lifted = false
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 2) {
+            ForEach(Array(heights.enumerated()), id: \.offset) { index, height in
+                Capsule()
+                    .fill(tint)
+                    .frame(
+                        width: 2,
+                        height: animated && !reduceMotion
+                            ? height * (lifted ? highScale(for: index) : lowScale(for: index))
+                            : height
+                    )
+                    .animation(
+                        animated && !reduceMotion
+                            ? .easeInOut(duration: 0.46 + Double(index) * 0.06)
+                                .repeatForever(autoreverses: true)
+                            : nil,
+                        value: lifted
+                    )
+            }
+        }
+        .frame(height: 29)
+        .task(id: MusicBarsMotionKey(animated: animated, reduceMotion: reduceMotion)) {
+            lifted = false
+            guard animated, !reduceMotion else { return }
+            await Task.yield()
+            lifted = true
+        }
+    }
+
+    private func lowScale(for index: Int) -> CGFloat {
+        index.isMultiple(of: 2) ? 0.42 : 0.76
+    }
+
+    private func highScale(for index: Int) -> CGFloat {
+        index.isMultiple(of: 2) ? 1 : 0.55
+    }
+}
+
+private struct MusicBarsMotionKey: Hashable {
+    let animated: Bool
+    let reduceMotion: Bool
 }
