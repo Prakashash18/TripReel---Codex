@@ -517,6 +517,7 @@ struct SecondWatchScreen: View {
     @State private var showMusic = false
     @State private var showStyle = false
     @State private var showPhotoEditor = false
+    @State private var showFullPreview = false
     @StateObject private var soundtrack = LocalSoundtrackPlayer()
 
     var body: some View {
@@ -580,6 +581,37 @@ struct SecondWatchScreen: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     Button {
+                        soundtrack.stop()
+                        showFullPreview = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(TR.ink)
+                                .frame(width: 34, height: 34)
+                                .background(TR.accent)
+                                .clipShape(Circle())
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Preview full film")
+                                    .font(TR.ui(14, weight: .semibold))
+                                Text("Watch every title and photo with the selected song")
+                                    .font(TR.ui(10))
+                                    .foregroundStyle(.white.opacity(0.50))
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.48))
+                        }
+                        .foregroundStyle(TR.cream)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .glassCard(cornerRadius: 15)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("full-preview-button")
+
+                    Button {
                         showPhotoEditor = true
                     } label: {
                         HStack(spacing: 11) {
@@ -622,18 +654,22 @@ struct SecondWatchScreen: View {
                         }
                     }
 
+                    MetadataText(text: "STYLE · TITLES · MUSIC · PACE", color: .white.opacity(0.38))
+                        .frame(maxWidth: .infinity, alignment: .center)
+
                     VStack(spacing: 11) {
                         Button("Export") {
                             model.go(.export)
                         }
                         .buttonStyle(CreamButtonStyle())
 
-                        Button("Back to cutting") {
-                            model.go(.cut)
+                        Button("Refine photo selection") {
+                            model.returnToRefine()
                         }
                         .font(TR.ui(14, weight: .medium))
                         .foregroundStyle(.white.opacity(0.53))
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("refine-photos-button")
                     }
                 }
                 .padding(.horizontal, 24)
@@ -672,8 +708,19 @@ struct SecondWatchScreen: View {
                 .presentationCornerRadius(26)
                 .presentationBackground(TR.sheet)
         }
+        .fullScreenCover(isPresented: $showFullPreview) {
+            FullFilmPreview()
+                .environmentObject(model)
+        }
         .task(id: model.selectedTrackID) {
             soundtrack.play(track: model.selectedTrack)
+        }
+        .onChange(of: showFullPreview) { _, isShowing in
+            if isShowing {
+                soundtrack.stop()
+            } else {
+                soundtrack.play(track: model.selectedTrack)
+            }
         }
         .onDisappear {
             soundtrack.stop()
@@ -688,6 +735,121 @@ struct SecondWatchScreen: View {
 
     private var titleBadge: String {
         model.titleCards.isEmpty ? "NONE" : "\(model.titleCards.count) ON"
+    }
+}
+
+private struct FullFilmPreview: View {
+    @EnvironmentObject private var model: TripReelModel
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @StateObject private var soundtrack = LocalSoundtrackPlayer()
+    @State private var controlsVisible = true
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            MontageView(
+                photos: model.keptPhotos,
+                titleCards: model.montageTitleCards,
+                showLabels: false,
+                look: model.montageLook,
+                motionIntensity: model.montageMotionIntensity,
+                secondsPerSlide: model.secondsPerPhoto
+            )
+            .ignoresSafeArea()
+
+            Color.clear
+                .contentShape(Rectangle())
+                .ignoresSafeArea()
+                .onTapGesture {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        controlsVisible.toggle()
+                    }
+                }
+
+            if controlsVisible {
+                LinearGradient(
+                    colors: [.black.opacity(0.66), .clear, .black.opacity(0.72)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+
+                VStack(spacing: 0) {
+                    HStack {
+                        previewControl(symbol: "xmark", label: "Close preview") {
+                            dismiss()
+                        }
+
+                        Spacer()
+
+                        previewControl(
+                            symbol: soundtrack.isPlaying ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                            label: soundtrack.isPlaying ? "Pause soundtrack" : "Play soundtrack"
+                        ) {
+                            soundtrack.toggle(track: model.selectedTrack)
+                        }
+                        .disabled(model.selectedTrack == nil)
+                        .opacity(model.selectedTrack == nil ? 0.46 : 1)
+                    }
+
+                    Spacer()
+
+                    VStack(spacing: 6) {
+                        MetadataText(text: "FULL FILM PREVIEW", color: .white.opacity(0.66))
+                        Text("\(model.keptCount) photos · \(model.filmDurationText)\(trackSuffix)")
+                            .font(TR.ui(12, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                        Text("Tap anywhere to hide controls")
+                            .font(TR.ui(10))
+                            .foregroundStyle(.white.opacity(0.42))
+                    }
+                    .padding(.bottom, 12)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .transition(.opacity)
+            }
+        }
+        .task(id: model.selectedTrackID) {
+            soundtrack.play(track: model.selectedTrack)
+        }
+        .task(id: controlsVisible) {
+            guard controlsVisible, !voiceOverEnabled else { return }
+            try? await Task.sleep(nanoseconds: 3_200_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.3)) {
+                controlsVisible = false
+            }
+        }
+        .onDisappear { soundtrack.stop() }
+        .statusBarHidden(true)
+        .accessibilityIdentifier("full-film-preview")
+    }
+
+    private var trackSuffix: String {
+        guard let track = model.selectedTrack else { return "" }
+        return " · \(track.name)"
+    }
+
+    private func previewControl(
+        symbol: String,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(TR.cream)
+                .frame(width: 38, height: 38)
+                .background(.black.opacity(0.46))
+                .overlay(Circle().stroke(.white.opacity(0.20), lineWidth: 1))
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 }
 
@@ -709,7 +871,7 @@ private struct PhotoEditorSheet: View {
             VStack(alignment: .leading, spacing: 17) {
                 SheetHeader(title: "Edit photos") { dismiss() }
 
-                Text("TripReel starts with an automatic crop and motion. Pinch to zoom, drag to reframe, then fine-tune only the shots that need it.")
+                Text("TripReel starts with an on-device face and subject-aware crop. Pinch to zoom, drag to reframe, then fine-tune only the shots that need it.")
                     .font(TR.ui(12))
                     .foregroundStyle(.white.opacity(0.56))
                     .lineSpacing(4)

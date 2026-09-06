@@ -494,7 +494,13 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             drawImage(image, in: bounds, fill: true, scale: 1.12, alpha: 0.42)
             UIColor.black.withAlphaComponent(0.35).setFill()
             UIRectFill(bounds)
-            let frame = bounds.insetBy(dx: bounds.width * 0.12, dy: bounds.height * 0.07)
+            let frame = aspectFitRect(
+                imageSize: CGSize(width: image.width, height: image.height),
+                inside: bounds.insetBy(
+                    dx: bounds.width * 0.03,
+                    dy: bounds.height * 0.06
+                )
+            )
             drawImage(
                 image,
                 in: frame,
@@ -691,6 +697,18 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         context?.setAlpha(alpha)
         UIImage(cgImage: image).draw(in: drawRect)
         context?.restoreGState()
+    }
+
+    private static func aspectFitRect(imageSize: CGSize, inside bounds: CGRect) -> CGRect {
+        guard imageSize.width > 0, imageSize.height > 0 else { return bounds }
+        let scale = min(bounds.width / imageSize.width, bounds.height / imageSize.height)
+        let size = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+        return CGRect(
+            x: bounds.midX - size.width / 2,
+            y: bounds.midY - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
     }
 
     private static func resolvedFrameStyle(_ photo: ReelPhoto, look: MontageLook) -> MontageFrameStyle {

@@ -84,6 +84,87 @@ struct NativePhotoFaceSignal: Codable, Hashable, Sendable {
     }
 }
 
+enum NativePhotoFocalSource: String, Codable, Hashable, Sendable {
+    case faces
+    case saliency
+}
+
+/// A normalized point of interest in Vision coordinates (origin at the lower
+/// left). It is used only to suggest a reversible starting crop on device.
+struct NativePhotoFocalPoint: Codable, Hashable, Sendable {
+    let x: Double
+    let y: Double
+    let coverage: Double
+    let source: NativePhotoFocalSource
+
+    init(
+        x: Double,
+        y: Double,
+        coverage: Double,
+        source: NativePhotoFocalSource
+    ) {
+        self.x = Self.clamp(x, fallback: 0.5)
+        self.y = Self.clamp(y, fallback: 0.5)
+        self.coverage = Self.clamp(coverage, fallback: 0)
+        self.source = source
+    }
+
+    private static func clamp(_ value: Double, fallback: Double) -> Double {
+        guard value.isFinite else { return fallback }
+        return min(max(value, 0), 1)
+    }
+}
+
+/// Keeps Vision geometry out of the montage planner and makes the preference
+/// for human subjects over generic saliency deterministic and testable.
+enum NativePhotoFocalPointResolver {
+    static func resolve(
+        faceBoxes: [CGRect],
+        salientBoxes: [CGRect]
+    ) -> NativePhotoFocalPoint? {
+        let faces = faceBoxes.compactMap(sanitizedUnitRect)
+        if let union = union(of: faces) {
+            return NativePhotoFocalPoint(
+                x: union.midX,
+                y: union.midY,
+                coverage: union.width * union.height,
+                source: .faces
+            )
+        }
+
+        guard let salient = salientBoxes
+            .compactMap(sanitizedUnitRect)
+            .max(by: { ($0.width * $0.height) < ($1.width * $1.height) }) else {
+            return nil
+        }
+        return NativePhotoFocalPoint(
+            x: salient.midX,
+            y: salient.midY,
+            coverage: salient.width * salient.height,
+            source: .saliency
+        )
+    }
+
+    private static func sanitizedUnitRect(_ rect: CGRect) -> CGRect? {
+        guard rect.origin.x.isFinite,
+              rect.origin.y.isFinite,
+              rect.width.isFinite,
+              rect.height.isFinite,
+              rect.width > 0,
+              rect.height > 0 else { return nil }
+        let clipped = rect.standardized.intersection(
+            CGRect(x: 0, y: 0, width: 1, height: 1)
+        )
+        return clipped.isNull || clipped.isEmpty ? nil : clipped
+    }
+
+    private static func union(of rects: [CGRect]) -> CGRect? {
+        guard var result = rects.first else { return nil }
+        for rect in rects.dropFirst() { result = result.union(rect) }
+        return result
+    }
+}
+
 struct NativePhotoDocumentSignal: Codable, Hashable, Sendable {
     let detected: Bool
     let confidence: Float
@@ -210,6 +291,7 @@ struct NativePhotoIntelligenceSignals: Codable, Hashable, Sendable {
     let document: NativePhotoDocumentSignal
     let aesthetics: NativePhotoAestheticsSignal?
     let featurePrint: NativePhotoFeaturePrint?
+    let focalPoint: NativePhotoFocalPoint?
     let availability: NativePhotoSignalAvailability
 
     init(
@@ -220,6 +302,7 @@ struct NativePhotoIntelligenceSignals: Codable, Hashable, Sendable {
         document: NativePhotoDocumentSignal = .init(),
         aesthetics: NativePhotoAestheticsSignal? = nil,
         featurePrint: NativePhotoFeaturePrint? = nil,
+        focalPoint: NativePhotoFocalPoint? = nil,
         availability: NativePhotoSignalAvailability = .init()
     ) {
         self.isScreenshot = isScreenshot
@@ -229,6 +312,7 @@ struct NativePhotoIntelligenceSignals: Codable, Hashable, Sendable {
         self.document = document
         self.aesthetics = aesthetics
         self.featurePrint = featurePrint
+        self.focalPoint = focalPoint
         self.availability = availability
     }
 }
@@ -663,6 +747,8 @@ actor NativePhotoIntelligenceService {
 
         let documentRequest = VNDetectDocumentSegmentationRequest()
 
+        let saliencyRequest = VNGenerateAttentionBasedSaliencyImageRequest()
+
         let featureRequest = VNGenerateImageFeaturePrintRequest()
         if VNGenerateImageFeaturePrintRequest.supportedRevisions.contains(
             VNGenerateImageFeaturePrintRequestRevision2
@@ -682,7 +768,9 @@ actor NativePhotoIntelligenceService {
             requests.append(VNCalculateImageAestheticsScoresRequest())
         }
 
-        let cancellation = NativeVisionRequestCancellation(requests: requests)
+        let cancellation = NativeVisionRequestCancellation(
+            requests: requests + [saliencyRequest]
+        )
         let handler = VNImageRequestHandler(
             cgImage: image,
             orientation: orientation,
@@ -693,6 +781,21 @@ actor NativePhotoIntelligenceService {
             try await withTaskCancellationHandler {
                 try Task.checkCancellation()
                 try handler.perform(requests)
+                try Task.checkCancellation()
+                // Saliency is a best-effort enhancement. Run it only when
+                // faces did not already provide a stronger focal point, and
+                // never discard an otherwise valid analysis if it fails.
+                if (faceRequest.results ?? []).isEmpty {
+                    do {
+                        try VNImageRequestHandler(
+                            cgImage: image,
+                            orientation: orientation,
+                            options: [:]
+                        ).perform([saliencyRequest])
+                    } catch {
+                        if Task.isCancelled { throw CancellationError() }
+                    }
+                }
                 try Task.checkCancellation()
             } onCancel: {
                 cancellation.cancel()
@@ -720,6 +823,10 @@ actor NativePhotoIntelligenceService {
         )
         let faceSignal = Self.faceSignal(from: faceRequest.results ?? [])
         let documentSignal = Self.documentSignal(from: documentRequest.results ?? [])
+        let focalPoint = NativePhotoFocalPointResolver.resolve(
+            faceBoxes: (faceRequest.results ?? []).map(\.boundingBox),
+            salientBoxes: saliencyRequest.results?.first?.salientObjects?.map(\.boundingBox) ?? []
+        )
 
         let featurePrint = featureRequest.results?.first.map {
             NativePhotoFeaturePrint(
@@ -754,6 +861,7 @@ actor NativePhotoIntelligenceService {
             document: documentSignal,
             aesthetics: aesthetics,
             featurePrint: featurePrint,
+            focalPoint: focalPoint,
             availability: NativePhotoSignalAvailability(
                 classification: true,
                 textRecognition: true,

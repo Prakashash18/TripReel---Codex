@@ -3,6 +3,40 @@ import XCTest
 @testable import TripReel
 
 final class NativePhotoIntelligenceScoringTests: XCTestCase {
+    func testFocalPointPrefersTheUnionOfFacesOverGenericSaliency() throws {
+        let focalPoint = try XCTUnwrap(
+            NativePhotoFocalPointResolver.resolve(
+                faceBoxes: [
+                    CGRect(x: 0.12, y: 0.48, width: 0.16, height: 0.24),
+                    CGRect(x: 0.64, y: 0.42, width: 0.20, height: 0.28)
+                ],
+                salientBoxes: [CGRect(x: 0.40, y: 0.05, width: 0.12, height: 0.12)]
+            )
+        )
+
+        XCTAssertEqual(focalPoint.source, .faces)
+        XCTAssertEqual(focalPoint.x, 0.48, accuracy: 0.001)
+        XCTAssertEqual(focalPoint.y, 0.57, accuracy: 0.001)
+        XCTAssertEqual(focalPoint.coverage, 0.72 * 0.30, accuracy: 0.001)
+    }
+
+    func testFocalPointUsesLargestSalientRegionWhenNoFaceExists() throws {
+        let focalPoint = try XCTUnwrap(
+            NativePhotoFocalPointResolver.resolve(
+                faceBoxes: [],
+                salientBoxes: [
+                    CGRect(x: 0.08, y: 0.08, width: 0.12, height: 0.12),
+                    CGRect(x: 0.55, y: 0.52, width: 0.30, height: 0.32)
+                ]
+            )
+        )
+
+        XCTAssertEqual(focalPoint.source, .saliency)
+        XCTAssertEqual(focalPoint.x, 0.70, accuracy: 0.001)
+        XCTAssertEqual(focalPoint.y, 0.68, accuracy: 0.001)
+        XCTAssertEqual(focalPoint.coverage, 0.096, accuracy: 0.001)
+    }
+
     func testAppealingGroupPhotoRanksAsStrongMemoryWithoutCloudReview() {
         let signals = NativePhotoIntelligenceSignals(
             classifications: [

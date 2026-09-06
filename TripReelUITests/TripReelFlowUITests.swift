@@ -65,6 +65,21 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("trips-screen").exists)
     }
 
+    func testSecondWatchOffersFullPreviewAndReturnsToRefine() {
+        app.terminate()
+        app.launchArguments = ["-qaScreen", "secondWatch", "-qaNoHint"]
+        app.launch()
+        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
+
+        screen("full-preview-button").tap()
+        XCTAssertTrue(screen("full-film-preview").waitForExistence(timeout: 3))
+        app.buttons["Close preview"].tap()
+
+        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
+        screen("refine-photos-button").tap()
+        XCTAssertTrue(screen("cut-screen").waitForExistence(timeout: 3))
+    }
+
     func testCleanupShowsDestructiveWarningBeforePhotosRequest() {
         app.terminate()
         app.launchArguments = ["-qaScreen", "cleanup", "-qaNoHint"]

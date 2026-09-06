@@ -140,6 +140,9 @@ struct ReelPhoto: Identifiable, Hashable, Sendable {
     let pixelHeight: Int
     let automaticFrameStyle: MontageFrameStyle
     let automaticMotionStyle: MontageMotionStyle
+    let automaticCropScale: Double
+    let automaticCropOffsetX: Double
+    let automaticCropOffsetY: Double
     var frameStyle: MontageFrameStyle
     var motionStyle: MontageMotionStyle
     var hasCustomFrameStyle: Bool
@@ -172,12 +175,15 @@ struct ReelPhoto: Identifiable, Hashable, Sendable {
         self.pixelHeight = pixelHeight
         automaticFrameStyle = frameStyle
         automaticMotionStyle = motionStyle
+        automaticCropScale = min(max(cropScale, 1), 3)
+        automaticCropOffsetX = min(max(cropOffsetX, -1), 1)
+        automaticCropOffsetY = min(max(cropOffsetY, -1), 1)
         self.frameStyle = frameStyle
         self.motionStyle = motionStyle
         hasCustomFrameStyle = false
-        self.cropScale = min(max(cropScale, 1), 3)
-        self.cropOffsetX = min(max(cropOffsetX, -1), 1)
-        self.cropOffsetY = min(max(cropOffsetY, -1), 1)
+        self.cropScale = automaticCropScale
+        self.cropOffsetX = automaticCropOffsetX
+        self.cropOffsetY = automaticCropOffsetY
         self.durationSeconds = durationSeconds.map { min(max($0, 0.6), 4) }
     }
 
@@ -317,17 +323,20 @@ struct MontagePhotoInsight: Hashable, Sendable {
     let aestheticScore: Double
     let contentKind: MontageContentKind
     let featurePrint: NativePhotoFeaturePrint?
+    let focalPoint: NativePhotoFocalPoint?
 
     init(
         memoryScore: Double = 0.5,
         aestheticScore: Double = 0.5,
         contentKind: MontageContentKind = .moment,
-        featurePrint: NativePhotoFeaturePrint? = nil
+        featurePrint: NativePhotoFeaturePrint? = nil,
+        focalPoint: NativePhotoFocalPoint? = nil
     ) {
         self.memoryScore = min(max(memoryScore, 0), 1)
         self.aestheticScore = min(max(aestheticScore, 0), 1)
         self.contentKind = contentKind
         self.featurePrint = featurePrint
+        self.focalPoint = focalPoint
     }
 
     init(result: NativePhotoIntelligenceResult) {
@@ -345,7 +354,8 @@ struct MontagePhotoInsight: Hashable, Sendable {
             memoryScore: result.scores.memoryScore,
             aestheticScore: result.scores.aestheticScore ?? 0.5,
             contentKind: kind,
-            featurePrint: result.signals.featurePrint
+            featurePrint: result.signals.featurePrint,
+            focalPoint: result.signals.focalPoint
         )
     }
 }
@@ -355,6 +365,9 @@ struct MontagePlanItem: Hashable, Sendable {
     let frameStyle: MontageFrameStyle
     let motionStyle: MontageMotionStyle
     let isSimilar: Bool
+    let cropScale: Double
+    let cropOffsetX: Double
+    let cropOffsetY: Double
 }
 
 /// Creates a small editorial arc for each day while keeping the trip's days in
@@ -381,7 +394,10 @@ enum MontageSequencePlanner {
             let ratio = aspectRatio(of: asset)
             let style: MontageFrameStyle
             if ratio < 0.88 {
-                style = index % 4 == 1 ? .postcard : .portraitMatte
+                // Portrait photos should start large and legible. Postcards can
+                // still be selected manually, but are too small as an automatic
+                // default on a phone-sized vertical film.
+                style = .portraitMatte
             } else if ratio >= 1.72 {
                 style = .cinematic
             } else if index % 5 == 2 {
@@ -391,6 +407,11 @@ enum MontageSequencePlanner {
             }
 
             let previous = index > 0 ? editorial[index - 1] : nil
+            let crop = cropRecommendation(
+                frameStyle: style,
+                aspectRatio: ratio,
+                insight: insights[asset.id]
+            )
             return MontagePlanItem(
                 asset: asset,
                 frameStyle: style,
@@ -401,7 +422,10 @@ enum MontageSequencePlanner {
                 ),
                 isSimilar: previous.map {
                     areVisuallySimilar($0, asset, insights: insights)
-                } ?? false
+                } ?? false,
+                cropScale: crop.scale,
+                cropOffsetX: crop.offsetX,
+                cropOffsetY: crop.offsetY
             )
         }
     }
@@ -502,6 +526,47 @@ enum MontageSequencePlanner {
             return index.isMultiple(of: 2) ? .panLeft : .panRight
         }
         return MontageMotionStyle.allCases[index % MontageMotionStyle.allCases.count]
+    }
+
+    private static func cropRecommendation(
+        frameStyle: MontageFrameStyle,
+        aspectRatio: Double,
+        insight: MontagePhotoInsight?
+    ) -> (scale: Double, offsetX: Double, offsetY: Double) {
+        guard let focalPoint = insight?.focalPoint else {
+            // A small overscan keeps portrait motion fluid and makes the
+            // preserve-composition matte feel intentional rather than tiny.
+            return aspectRatio < 0.88 ? (1.06, 0, 0) : (1, 0, 0)
+        }
+
+        // A wide union usually represents a group. Keep that composition roomy;
+        // a small single subject can tolerate a little more emphasis.
+        let protectsGroup = focalPoint.source == .faces && focalPoint.coverage >= 0.24
+        let scale: Double
+        if protectsGroup {
+            scale = 1.06
+        } else if aspectRatio < 0.88 || frameStyle == .portraitMatte {
+            scale = 1.10
+        } else {
+            scale = 1.06
+        }
+
+        let focusStrength = protectsGroup ? 0.78 : 1.35
+        // The crop transform moves by 24% of the frame per normalized unit.
+        // Limit the offset to the extra image supplied by the zoom so Auto can
+        // never reveal a blank edge.
+        let offsetLimit = min(0.52, max(0, (scale - 1) / 0.48))
+        let horizontal = min(
+            max((0.5 - focalPoint.x) * focusStrength, -offsetLimit),
+            offsetLimit
+        )
+        // Vision uses a lower-left origin; SwiftUI and the exporter use a
+        // top-left visual coordinate system, hence the inverted sign here.
+        let vertical = min(
+            max((focalPoint.y - 0.5) * focusStrength, -offsetLimit),
+            offsetLimit
+        )
+        return (scale, horizontal, vertical)
     }
 
     private static func chronologicalOrder(_ lhs: TripAsset, _ rhs: TripAsset) -> Bool {
@@ -1714,6 +1779,12 @@ final class TripReelModel: ObservableObject {
         currentPhotoIndex = last.previousIndex
     }
 
+    func returnToRefine() {
+        currentPhotoIndex = 0
+        history.removeAll()
+        go(.cut)
+    }
+
     func selectTrack(_ track: MusicTrack) {
         if track.id == "none" {
             selectedTrackID = nil
@@ -1775,9 +1846,9 @@ final class TripReelModel: ObservableObject {
         photos[index].frameStyle = photos[index].automaticFrameStyle
         photos[index].hasCustomFrameStyle = false
         photos[index].motionStyle = photos[index].automaticMotionStyle
-        photos[index].cropScale = 1
-        photos[index].cropOffsetX = 0
-        photos[index].cropOffsetY = 0
+        photos[index].cropScale = photos[index].automaticCropScale
+        photos[index].cropOffsetX = photos[index].automaticCropOffsetX
+        photos[index].cropOffsetY = photos[index].automaticCropOffsetY
         photos[index].durationSeconds = nil
     }
 
@@ -2215,7 +2286,10 @@ final class TripReelModel: ObservableObject {
                 pixelWidth: asset.pixelWidth,
                 pixelHeight: asset.pixelHeight,
                 frameStyle: item.frameStyle,
-                motionStyle: item.motionStyle
+                motionStyle: item.motionStyle,
+                cropScale: item.cropScale,
+                cropOffsetX: item.cropOffsetX,
+                cropOffsetY: item.cropOffsetY
             )
         }
     }
@@ -2227,9 +2301,9 @@ final class TripReelModel: ObservableObject {
             edited.frameStyle = edit.frameStyle ?? photo.automaticFrameStyle
             edited.hasCustomFrameStyle = edit.frameStyle != nil
             edited.motionStyle = edit.motionStyle ?? photo.automaticMotionStyle
-            edited.cropScale = edit.cropScale ?? photo.cropScale
-            edited.cropOffsetX = edit.cropOffsetX ?? photo.cropOffsetX
-            edited.cropOffsetY = edit.cropOffsetY ?? photo.cropOffsetY
+            edited.cropScale = edit.cropScale ?? photo.automaticCropScale
+            edited.cropOffsetX = edit.cropOffsetX ?? photo.automaticCropOffsetX
+            edited.cropOffsetY = edit.cropOffsetY ?? photo.automaticCropOffsetY
             edited.durationSeconds = edit.durationSeconds
             return edited
         }

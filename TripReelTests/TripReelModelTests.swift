@@ -304,8 +304,28 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(model.photos[0].frameStyle, photo.automaticFrameStyle)
         XCTAssertFalse(model.photos[0].hasCustomFrameStyle)
         XCTAssertEqual(model.photos[0].motionStyle, photo.automaticMotionStyle)
-        XCTAssertEqual(model.photos[0].cropScale, 1, accuracy: 0.001)
+        XCTAssertEqual(model.photos[0].cropScale, photo.automaticCropScale, accuracy: 0.001)
+        XCTAssertEqual(model.photos[0].cropOffsetX, photo.automaticCropOffsetX, accuracy: 0.001)
+        XCTAssertEqual(model.photos[0].cropOffsetY, photo.automaticCropOffsetY, accuracy: 0.001)
         XCTAssertNil(model.photos[0].durationSeconds)
+    }
+
+    func testReturningToRefineStartsAtTheBeginningWithoutLosingCuts() {
+        let model = makeModel()
+        let firstID = model.photos[0].id
+        model.currentPhotoIndex = min(5, model.photos.count - 1)
+        model.cutPhotoIDs = [firstID]
+        model.history = [
+            PhotoDecision(id: firstID, previousIndex: 0, previousWasCut: false)
+        ]
+        model.go(.secondWatch)
+
+        model.returnToRefine()
+
+        XCTAssertEqual(model.screen, .cut)
+        XCTAssertEqual(model.currentPhotoIndex, 0)
+        XCTAssertTrue(model.history.isEmpty)
+        XCTAssertTrue(model.cutPhotoIDs.contains(firstID))
     }
 
     func testProductionRenderUsesEditedTimelineAndProducesShareableURL() async throws {
@@ -430,6 +450,39 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertNotEqual(plan[1].asset.id, "people-b")
         XCTAssertEqual(plan.first?.frameStyle, .cinematic)
         XCTAssertEqual(plan.first(where: { $0.asset.id == "food" })?.frameStyle, .portraitMatte)
+    }
+
+    func testMontagePlannerUsesLocalFocalPointForPortraitStartingCrop() throws {
+        let asset = makeAsset(
+            "portrait-subject",
+            start: Date(timeIntervalSince1970: 1_800_000_000),
+            minutes: 0,
+            width: 3_024,
+            height: 4_032
+        )
+        let insight = MontagePhotoInsight(
+            memoryScore: 0.91,
+            aestheticScore: 0.84,
+            contentKind: .people,
+            focalPoint: NativePhotoFocalPoint(
+                x: 0.80,
+                y: 0.74,
+                coverage: 0.08,
+                source: .faces
+            )
+        )
+
+        let item = try XCTUnwrap(
+            MontageSequencePlanner.plan(
+                assets: [asset],
+                insights: [asset.id: insight]
+            ).first
+        )
+
+        XCTAssertEqual(item.frameStyle, .portraitMatte)
+        XCTAssertGreaterThan(item.cropScale, 1)
+        XCTAssertLessThan(item.cropOffsetX, 0)
+        XCTAssertGreaterThan(item.cropOffsetY, 0)
     }
 
     func testMontagePlannerKeepsDaysInStoryOrder() {

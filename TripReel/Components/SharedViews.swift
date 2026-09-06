@@ -68,17 +68,26 @@ struct PhotoAssetView: View {
     var label: String? = nil
     var dim = false
     var contentMode: PhotoDisplayContentMode = .fill
+    var contentScale: CGFloat = 1
+    var contentOffset: CGSize = .zero
+    var samplingScale: CGFloat = 1
 
     init(
         source: PhotoSource,
         label: String? = nil,
         dim: Bool = false,
-        contentMode: PhotoDisplayContentMode = .fill
+        contentMode: PhotoDisplayContentMode = .fill,
+        contentScale: CGFloat = 1,
+        contentOffset: CGSize = .zero,
+        samplingScale: CGFloat? = nil
     ) {
         self.source = source
         self.label = label
         self.dim = dim
         self.contentMode = contentMode
+        self.contentScale = max(1, contentScale)
+        self.contentOffset = contentOffset
+        self.samplingScale = max(1, samplingScale ?? contentScale)
     }
 
     init(imageName: String, label: String? = nil, dim: Bool = false) {
@@ -87,7 +96,15 @@ struct PhotoAssetView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            PhotoSourceImage(source: source, size: proxy.size, contentMode: contentMode)
+            PhotoSourceImage(
+                source: source,
+                size: proxy.size,
+                contentMode: contentMode,
+                samplingScale: samplingScale
+            )
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .scaleEffect(contentScale)
+                .offset(contentOffset)
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 .clipped()
                 .overlay {
@@ -405,13 +422,18 @@ private struct MontageSlideArtwork: View {
     }
 
     private func fullBleed(size: CGSize) -> some View {
-        PhotoAssetView(source: slide.source, label: showLabel ? slide.label : nil)
-            .scaleEffect(fullBleedScale * CGFloat(slide.cropScale))
-            .offset(combinedOffset(in: size))
+        PhotoAssetView(
+            source: slide.source,
+            label: showLabel ? slide.label : nil,
+            contentScale: fullBleedScale * CGFloat(slide.cropScale),
+            contentOffset: combinedOffset(in: size),
+            samplingScale: CGFloat(slide.cropScale) * (1 + 0.085 * amplitude)
+        )
     }
 
     private func portraitMatte(size: CGSize) -> some View {
-        ZStack {
+        let frameSize = portraitFrameSize(in: size)
+        return ZStack {
             PhotoAssetView(source: slide.source)
                 .scaleEffect(1.22)
                 .blur(radius: 30)
@@ -427,9 +449,12 @@ private struct MontageSlideArtwork: View {
             PhotoAssetView(
                 source: slide.source,
                 label: showLabel ? slide.label : nil,
-                contentMode: .fit
+                contentMode: .fit,
+                contentScale: CGFloat(slide.cropScale),
+                contentOffset: cropOffset(in: frameSize),
+                samplingScale: CGFloat(slide.cropScale) * (1 + 0.028 * amplitude)
             )
-            .frame(width: size.width * 0.76, height: size.height * 0.86)
+            .frame(width: frameSize.width, height: frameSize.height)
             .background(.black.opacity(0.34))
             .overlay(
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
@@ -437,18 +462,26 @@ private struct MontageSlideArtwork: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
             .shadow(color: .black.opacity(0.62), radius: 26, y: 16)
-            .scaleEffect(framedScale * CGFloat(slide.cropScale))
-            .offset(combinedFramedOffset(in: size))
+            .scaleEffect(framedScale)
+            .offset(framedOffset(in: size))
         }
     }
 
     private func cinematic(size: CGSize) -> some View {
         ZStack {
             Color(red: 0.035, green: 0.027, blue: 0.021)
-            PhotoAssetView(source: slide.source, contentMode: .fit)
+            PhotoAssetView(
+                source: slide.source,
+                contentMode: .fit,
+                contentScale: CGFloat(slide.cropScale),
+                contentOffset: cropOffset(
+                    in: CGSize(width: size.width, height: size.height * 0.62)
+                ),
+                samplingScale: CGFloat(slide.cropScale) * (1 + 0.028 * amplitude)
+            )
                 .frame(height: size.height * 0.62)
-                .scaleEffect(framedScale * CGFloat(slide.cropScale))
-                .offset(combinedFramedOffset(in: size))
+                .scaleEffect(framedScale)
+                .offset(framedOffset(in: size))
 
             VStack {
                 filmEdge
@@ -472,7 +505,18 @@ private struct MontageSlideArtwork: View {
                 .overlay(.black.opacity(0.46))
 
             VStack(spacing: 0) {
-                PhotoAssetView(source: slide.source, contentMode: .fit)
+                PhotoAssetView(
+                    source: slide.source,
+                    contentMode: .fit,
+                    contentScale: CGFloat(slide.cropScale),
+                    contentOffset: cropOffset(
+                        in: CGSize(
+                            width: max(1, size.width * 0.82 - 16),
+                            height: size.height * 0.62
+                        )
+                    ),
+                    samplingScale: CGFloat(slide.cropScale) * (1 + 0.028 * amplitude)
+                )
                     .frame(height: size.height * 0.62)
                     .background(Color(red: 0.12, green: 0.09, blue: 0.07))
 
@@ -492,8 +536,8 @@ private struct MontageSlideArtwork: View {
             .padding(8)
             .background(TR.cream)
             .rotationEffect(.degrees(postcardRotation))
-            .scaleEffect(framedScale * CGFloat(slide.cropScale))
-            .offset(combinedFramedOffset(in: size))
+            .scaleEffect(framedScale)
+            .offset(framedOffset(in: size))
             .shadow(color: .black.opacity(0.62), radius: 24, y: 17)
         }
     }
@@ -560,14 +604,17 @@ private struct MontageSlideArtwork: View {
         )
     }
 
-    private func combinedOffset(in size: CGSize) -> CGSize {
-        let motion = motionOffset(in: size)
-        let crop = cropOffset(in: size)
-        return CGSize(width: motion.width + crop.width, height: motion.height + crop.height)
+    private func portraitFrameSize(in size: CGSize) -> CGSize {
+        let maximum = CGSize(width: size.width * 0.94, height: size.height * 0.88)
+        let ratio = max(CGFloat(slide.aspectRatio), 0.1)
+        if maximum.width / maximum.height > ratio {
+            return CGSize(width: maximum.height * ratio, height: maximum.height)
+        }
+        return CGSize(width: maximum.width, height: maximum.width / ratio)
     }
 
-    private func combinedFramedOffset(in size: CGSize) -> CGSize {
-        let motion = framedOffset(in: size)
+    private func combinedOffset(in size: CGSize) -> CGSize {
+        let motion = motionOffset(in: size)
         let crop = cropOffset(in: size)
         return CGSize(width: motion.width + crop.width, height: motion.height + crop.height)
     }
@@ -614,6 +661,7 @@ private struct PhotoSourceImage: View {
     let source: PhotoSource
     let size: CGSize
     let contentMode: PhotoDisplayContentMode
+    let samplingScale: CGFloat
     @Environment(\.displayScale) private var displayScale
     @StateObject private var loader = PhotoAssetImageLoader()
 
@@ -628,8 +676,14 @@ private struct PhotoSourceImage: View {
         }
         return PhotoImageRequestKey(
             source: source,
-            pixelWidth: max(80, Int((size.width * displayScale).rounded(.up))),
-            pixelHeight: max(80, Int((size.height * displayScale).rounded(.up))),
+            pixelWidth: max(
+                80,
+                Int((size.width * displayScale * samplingScale).rounded(.up))
+            ),
+            pixelHeight: max(
+                80,
+                Int((size.height * displayScale * samplingScale).rounded(.up))
+            ),
             contentMode: contentMode
         )
     }
