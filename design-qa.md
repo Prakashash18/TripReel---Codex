@@ -1,6 +1,9 @@
 # TripReel design QA
 
-> September 6 update: the Film Studio hub, full-person safe framing, similarity
+> September 6 update: the Film Studio now keeps its 9:16 film completely
+> unobstructed and reduces the screen to Edit film and Export film. Persistent
+> Back, an edge swipe, and VoiceOver escape restore predictable reverse
+> navigation without turning Back into another primary action. Full-person safe framing, similarity
 > clustering, directional navigation, cinematic montage transitions, and the
 > accessible app-wide motion system pass strict source checks. The optional
 > OpenAI consent is now a numbered plain-language flow, and Cleanup exposes
@@ -48,7 +51,7 @@
 2. Pass 2 found remaining heading rhythm, Pace vertical offset, Cleanup spacing, and uneven Welcome multiline leading. Heading spacing and section padding were tightened, Cleanup was rebalanced, and Welcome was rebuilt as three individually controlled display lines. Evidence: `qa/compare-welcome-pass2.png`, `qa/compare-welcome-pass3.png`, and `qa/compare-welcome-final.png`.
 3. Responsive review identified fixed-height pressure on Photo Access and Film Ready. Compact compositions were added and validated across the full compact workflow. Evidence: `qa/access-375x667.png`, `qa/done-375x667.png`, and `qa/responsive-375x667-final.png`.
 4. Final pass found no actionable P0/P1/P2 visual differences. Evidence: `qa/compare-states-final.png`.
-5. The latest flow removes the mandatory Refine → Pace → Edit sequence. First Watch now opens one Film Studio where Photos, Framing, Style, Titles, Music, and Pace are peer tools, and each tool returns to the same preview. This pass is code- and UI-test-backed; fresh screenshot comparison remains pending for the runtime reason above.
+5. The latest flow removes the mandatory Refine → Pace → Edit sequence. First Watch now opens one Film Studio where the film is shown as an unobstructed 9:16 canvas. Preview and sound transport sit below it, while Photos, Framing, Style, Titles, Music, and Pace are grouped into one native Edit film menu beside a single Export film CTA. Persistent Back and left-edge swipe return choice screens to an explicit parent, and Export returns to the screen that opened it instead of relying on enum order. This pass is code- and UI-test-backed; fresh screenshot comparison remains pending for the runtime reason above.
 
 **Open Questions**
 

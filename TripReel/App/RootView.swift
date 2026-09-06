@@ -50,9 +50,44 @@ struct RootView: View {
             reduceMotion ? .easeInOut(duration: 0.16) : TRMotion.navigation,
             value: model.screen
         )
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 18, coordinateSpace: .global)
+                .onEnded { value in
+                    guard model.canNavigateBack,
+                          value.startLocation.x <= 24,
+                          value.translation.width >= 72,
+                          abs(value.translation.height) < 54 else { return }
+                    model.navigateBack()
+                }
+        )
+        .accessibilityAction(.escape) {
+            if model.canNavigateBack { model.navigateBack() }
+        }
         .background(Color.black)
         .foregroundStyle(TR.cream)
         .tint(TR.accent)
+        .overlay(alignment: .topLeading) {
+            if model.canNavigateBack {
+                Button {
+                    model.navigateBack()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(TR.cream)
+                        .frame(width: 42, height: 42)
+                        .background(.black.opacity(0.58))
+                        .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(TactileButtonStyle(pressedScale: 0.92))
+                .padding(.leading, 16)
+                .safeAreaPadding(.top, 7)
+                .accessibilityLabel("Back")
+                .accessibilityHint("Returns to the previous step")
+                .accessibilityIdentifier("app-back-button")
+                .zIndex(10)
+            }
+        }
         .alert(
             "Photo Library",
             isPresented: Binding(

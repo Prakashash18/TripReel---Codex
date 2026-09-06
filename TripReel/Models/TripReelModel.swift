@@ -858,6 +858,7 @@ final class TripReelModel: ObservableObject {
     private var photoAnalysisTask: Task<Void, Never>?
     private var photoAnalysisGeneration = UUID()
     private var exportGeneration = UUID()
+    private var exportReturnScreen: AppScreen = .secondWatch
     private var placeTask: Task<Void, Never>?
     private var detectorTask: Task<LibraryDetectionResult, Never>?
     private var scanGeneration = UUID()
@@ -1160,6 +1161,48 @@ final class TripReelModel: ObservableObject {
             to: next
         )
         screen = next
+    }
+
+    /// Back is navigation chrome, not another decision in the film-making
+    /// flow. Every destination is explicit so transient processing screens are
+    /// never accidentally revisited.
+    var canNavigateBack: Bool {
+        switch screen {
+        case .access, .limited, .firstWatch, .secondWatch, .pace, .export, .paywall, .done:
+            true
+        case .welcome, .trips, .empty, .building, .cut, .rendering, .cleanup:
+            false
+        }
+    }
+
+    func navigateBack() {
+        switch screen {
+        case .access:
+            go(.welcome, direction: .backward)
+        case .limited:
+            go(.access, direction: .backward)
+        case .firstWatch:
+            go(.trips, direction: .backward)
+        case .secondWatch:
+            go(.firstWatch, direction: .backward)
+        case .pace:
+            go(.secondWatch, direction: .backward)
+        case .export:
+            go(exportReturnScreen, direction: .backward)
+        case .paywall:
+            go(.export, direction: .backward)
+        case .done:
+            go(.export, direction: .backward)
+        case .welcome, .trips, .empty, .building, .cut, .rendering, .cleanup:
+            break
+        }
+    }
+
+    func openExport() {
+        if screen == .firstWatch || screen == .secondWatch {
+            exportReturnScreen = screen
+        }
+        go(.export, direction: .forward)
     }
 
     private static func navigationDirection(

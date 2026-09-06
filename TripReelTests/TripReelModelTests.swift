@@ -88,6 +88,46 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(model.navigationDirection, .replace)
     }
 
+    func testBackNavigationReturnsToTheScreenThatOpenedExport() {
+        let model = makeModel()
+
+        model.go(.firstWatch)
+        model.openExport()
+        XCTAssertEqual(model.screen, .export)
+        XCTAssertTrue(model.canNavigateBack)
+
+        model.navigateBack()
+        XCTAssertEqual(model.screen, .firstWatch)
+        XCTAssertEqual(model.navigationDirection, .backward)
+
+        model.go(.secondWatch)
+        model.openExport()
+        model.go(.paywall)
+        model.navigateBack()
+        XCTAssertEqual(model.screen, .export)
+
+        model.navigateBack()
+        XCTAssertEqual(model.screen, .secondWatch)
+    }
+
+    func testBackNavigationSkipsTransientProcessingScreens() {
+        let model = makeModel()
+
+        model.go(.secondWatch)
+        model.go(.pace)
+        model.navigateBack()
+        XCTAssertEqual(model.screen, .secondWatch)
+
+        model.go(.done)
+        model.navigateBack()
+        XCTAssertEqual(model.screen, .export)
+
+        model.go(.trips)
+        XCTAssertFalse(model.canNavigateBack)
+        model.navigateBack()
+        XCTAssertEqual(model.screen, .trips)
+    }
+
     func testNearbyPlaceLabelPrefersLandmarkAndNeighborhood() {
         let placemark = TripPlacemarkComponents(
             areasOfInterest: ["Gardens by the Bay"],

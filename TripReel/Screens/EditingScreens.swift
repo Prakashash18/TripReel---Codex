@@ -29,6 +29,7 @@ struct FirstWatchScreen: View {
                         .foregroundStyle(.white.opacity(0.52))
                 }
                 .padding(.top, 4)
+                .padding(.horizontal, 62)
                 .trEntrance(0, distance: 7)
 
                 Spacer()
@@ -118,7 +119,7 @@ struct FirstWatchScreen: View {
                         .accessibilityIdentifier("edit-film-button")
 
                         Button("Export this cut") {
-                            model.go(.export)
+                            model.openExport()
                         }
                         .buttonStyle(GlassButtonStyle())
                     }
@@ -435,6 +436,7 @@ struct PaceScreen: View {
                     title: "Set the pace"
                 )
                 .padding(.horizontal, 26)
+                .padding(.leading, 48)
                 .padding(.top, 4)
                 .trEntrance(0, distance: 10)
 
@@ -489,7 +491,7 @@ struct PaceScreen: View {
 
                 VStack(spacing: 14) {
                     Button("Apply pace") {
-                        model.go(.secondWatch)
+                        model.navigateBack()
                     }
                     .buttonStyle(CreamButtonStyle())
 
@@ -565,152 +567,11 @@ struct SecondWatchScreen: View {
 
     var body: some View {
         ZStack {
-            MontageView(
-                photos: model.keptPhotos,
-                titleCards: model.montageTitleCards,
-                look: model.montageLook,
-                motionIntensity: model.montageMotionIntensity,
-                secondsPerSlide: model.secondsPerPhoto
-            )
-                .ignoresSafeArea()
+            WarmBackground(variant: .cutting)
 
-            LinearGradient(
-                colors: [.black.opacity(0.56), .clear, .clear, .black.opacity(0.95)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                VStack(spacing: 7) {
-                    MetadataText(text: "FILM STUDIO · \(model.tripShortPlace)", color: .white.opacity(0.82))
-                    Text("\(model.keptCount) photos · \(model.filmDurationText)\(trackSuffix)")
-                        .font(TR.ui(12))
-                        .foregroundStyle(.white.opacity(0.53))
-                }
-                .padding(.top, 4)
-                .trEntrance(0, distance: 7)
-
-                Spacer()
-
-                VStack(alignment: .leading, spacing: 18) {
-                    HStack(spacing: 12) {
-                        Button {
-                            soundtrack.toggle(track: model.selectedTrack)
-                        } label: {
-                            Image(systemName: soundtrack.isPlaying ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(TR.cream)
-                                .frame(width: 31, height: 31)
-                                .background(.black.opacity(0.34))
-                                .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
-                                .clipShape(Circle())
-                                .contentTransition(.symbolEffect(.replace))
-                                .animation(reduceMotion ? nil : TRMotion.selection, value: soundtrack.isPlaying)
-                        }
-                        .buttonStyle(TactileButtonStyle(pressedScale: 0.92))
-                        .disabled(model.selectedTrack == nil)
-                        .opacity(model.selectedTrack == nil ? 0.42 : 1)
-                        .accessibilityLabel(soundtrack.isPlaying ? "Pause soundtrack" : "Play soundtrack")
-
-                        PlaybackProgressBar()
-                    }
-
-                    if let errorMessage = soundtrack.errorMessage {
-                        Text(errorMessage)
-                            .font(TR.ui(11, weight: .medium))
-                            .foregroundStyle(TR.accent)
-                    }
-
-                    Text("Make it yours.")
-                        .font(TR.display(29))
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Button {
-                        soundtrack.stop()
-                        showFullPreview = true
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(TR.ink)
-                                .frame(width: 34, height: 34)
-                                .background(TR.accent)
-                                .clipShape(Circle())
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Preview full film")
-                                    .font(TR.ui(14, weight: .semibold))
-                                Text("Watch every title and photo with the selected song")
-                                    .font(TR.ui(10))
-                                    .foregroundStyle(.white.opacity(0.50))
-                            }
-                            Spacer()
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.48))
-                        }
-                        .foregroundStyle(TR.cream)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .glassCard(cornerRadius: 15)
-                    }
-                    .buttonStyle(TactileButtonStyle())
-                    .accessibilityIdentifier("full-preview-button")
-
-                    LazyVGrid(
-                        columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 3),
-                        spacing: 7
-                    ) {
-                        EditOptionButton(
-                            symbol: "photo.stack",
-                            label: "Photos",
-                            badge: "\(model.keptCount) IN",
-                            badgeColor: TR.keep
-                        ) {
-                            model.editPhotoSelection()
-                        }
-                        .accessibilityIdentifier("photo-selection-button")
-
-                        EditOptionButton(
-                            symbol: "crop.rotate",
-                            label: "Framing",
-                            badge: model.customizedPhotoCount == 0
-                                ? "AUTO"
-                                : "\(model.customizedPhotoCount) EDITED",
-                            badgeColor: model.customizedPhotoCount == 0
-                                ? .white.opacity(0.48)
-                                : TR.keep
-                        ) {
-                            showPhotoEditor = true
-                        }
-                        .accessibilityIdentifier("photo-editor-button")
-
-                        EditOptionButton(symbol: "wand.and.stars", label: "Style", badge: model.montageLook.name.uppercased(), badgeColor: TR.accent) {
-                            showStyle = true
-                        }
-                        .accessibilityIdentifier("film-style-button")
-                        EditOptionButton(symbol: "textformat", label: "Titles", badge: titleBadge, badgeColor: model.titleCards.isEmpty ? .white.opacity(0.46) : TR.keep) {
-                            showTitles = true
-                        }
-                        EditOptionButton(symbol: "music.note", label: "Music", badge: model.selectedTrack?.name.uppercased() ?? "NONE", badgeColor: model.selectedTrack == nil ? .white.opacity(0.46) : TR.keep) {
-                            showMusic = true
-                        }
-                        EditOptionButton(symbol: "metronome", label: "Pace", badge: String(format: "%.1FS", model.secondsPerPhoto), badgeColor: .white.opacity(0.48)) {
-                            model.go(.pace)
-                        }
-                    }
-
-                    MetadataText(text: "EVERY EDIT RETURNS HERE", color: .white.opacity(0.38))
-                        .frame(maxWidth: .infinity, alignment: .center)
-
-                    Button("Export film") {
-                        model.go(.export)
-                    }
-                    .buttonStyle(CreamButtonStyle())
-                }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 8)
-                .trEntrance(1, distance: 12)
+            ViewThatFits(in: .vertical) {
+                studioContent(previewHeight: 458, compact: false)
+                studioContent(previewHeight: 294, compact: true)
             }
         }
         .sheet(isPresented: $showTitles) {
@@ -765,6 +626,173 @@ struct SecondWatchScreen: View {
         .accessibilityIdentifier("second-watch-screen")
     }
 
+    private func studioContent(previewHeight: CGFloat, compact: Bool) -> some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 6) {
+                MetadataText(text: "FILM STUDIO · \(model.tripShortPlace)", color: .white.opacity(0.82))
+                Text("\(model.keptCount) photos · \(model.filmDurationText)\(trackSuffix)")
+                    .font(TR.ui(12))
+                    .foregroundStyle(.white.opacity(0.53))
+            }
+            .padding(.horizontal, 62)
+            .padding(.top, 4)
+            .trEntrance(0, distance: 7)
+
+            Spacer(minLength: compact ? 5 : 12)
+
+            ZStack {
+                MontageView(
+                    photos: model.keptPhotos,
+                    titleCards: model.montageTitleCards,
+                    showLabels: false,
+                    look: model.montageLook,
+                    motionIntensity: model.montageMotionIntensity,
+                    secondsPerSlide: model.secondsPerPhoto
+                )
+                .frame(width: previewHeight * 9 / 16, height: previewHeight)
+            }
+            .frame(width: previewHeight * 9 / 16, height: previewHeight)
+            .clipShape(RoundedRectangle(cornerRadius: compact ? 18 : 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: compact ? 18 : 22, style: .continuous)
+                    .stroke(.white.opacity(0.17), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.56), radius: 28, y: 20)
+            .trEntrance(1, distance: 12)
+
+            HStack(spacing: 9) {
+                Button {
+                    soundtrack.stop()
+                    showFullPreview = true
+                } label: {
+                    Label("Preview full film", systemImage: "play.fill")
+                        .font(TR.ui(11, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 34)
+                }
+                .buttonStyle(TactileButtonStyle(pressedScale: 0.96))
+                .foregroundStyle(TR.cream)
+                .background(.white.opacity(0.07))
+                .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
+                .clipShape(Capsule())
+                .accessibilityIdentifier("full-preview-button")
+
+                Button {
+                    soundtrack.toggle(track: model.selectedTrack)
+                } label: {
+                    Image(systemName: soundtrack.isPlaying ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(TR.cream)
+                        .frame(width: 36, height: 36)
+                        .background(.white.opacity(0.07))
+                        .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
+                        .clipShape(Circle())
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                .buttonStyle(TactileButtonStyle(pressedScale: 0.92))
+                .disabled(model.selectedTrack == nil)
+                .opacity(model.selectedTrack == nil ? 0.42 : 1)
+                .accessibilityLabel(soundtrack.isPlaying ? "Pause soundtrack" : "Play soundtrack")
+            }
+            .frame(width: max(previewHeight * 9 / 16, 214))
+            .padding(.top, compact ? 7 : 9)
+
+            if let errorMessage = soundtrack.errorMessage {
+                Text(errorMessage)
+                    .font(TR.ui(10, weight: .medium))
+                    .foregroundStyle(TR.accent)
+                    .lineLimit(1)
+                    .padding(.top, 6)
+            }
+
+            Spacer(minLength: compact ? 7 : 14)
+
+            VStack(spacing: 10) {
+                Menu {
+                    Button {
+                        model.editPhotoSelection()
+                    } label: {
+                        Label("Photos · \(model.keptCount) in", systemImage: "photo.stack")
+                    }
+                    .accessibilityIdentifier("studio-tool-photos")
+
+                    Button {
+                        showPhotoEditor = true
+                    } label: {
+                        Label("Framing · \(framingBadge)", systemImage: "crop.rotate")
+                    }
+                    .accessibilityIdentifier("studio-tool-framing")
+
+                    Button {
+                        showStyle = true
+                    } label: {
+                        Label("Style · \(model.montageLook.name)", systemImage: "wand.and.stars")
+                    }
+                    .accessibilityIdentifier("studio-tool-style")
+
+                    Button {
+                        showTitles = true
+                    } label: {
+                        Label("Titles · \(titleBadge.lowercased())", systemImage: "textformat")
+                    }
+                    .accessibilityIdentifier("studio-tool-titles")
+
+                    Button {
+                        showMusic = true
+                    } label: {
+                        Label("Music · \(model.selectedTrack?.name ?? "None")", systemImage: "music.note")
+                    }
+                    .accessibilityIdentifier("studio-tool-music")
+
+                    Button {
+                        model.go(.pace)
+                    } label: {
+                        Label("Pace · \(String(format: "%.1fs", model.secondsPerPhoto))", systemImage: "metronome")
+                    }
+                    .accessibilityIdentifier("studio-tool-pace")
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(TR.accent)
+                            .frame(width: 34, height: 34)
+                            .background(TR.accent.opacity(0.12))
+                            .clipShape(Circle())
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Edit film")
+                                .font(TR.ui(14, weight: .semibold))
+                            Text("Photos, framing, look, titles, music and pace")
+                                .font(TR.ui(10))
+                                .foregroundStyle(.white.opacity(0.50))
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.42))
+                    }
+                    .foregroundStyle(TR.cream)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .glassCard(cornerRadius: 16)
+                }
+                .buttonStyle(TactileButtonStyle())
+                .accessibilityLabel("Edit film")
+                .accessibilityHint("Choose photos, framing, style, titles, music or pace")
+                .accessibilityIdentifier("studio-edit-menu")
+
+                Button("Export film") {
+                    model.openExport()
+                }
+                .buttonStyle(CreamButtonStyle())
+                .accessibilityIdentifier("studio-export-button")
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, compact ? 2 : 8)
+            .trEntrance(2, distance: 8)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private var trackSuffix: String {
         guard let track = model.selectedTrack else { return "" }
         return " · \(track.name)"
@@ -772,6 +800,10 @@ struct SecondWatchScreen: View {
 
     private var titleBadge: String {
         model.titleCards.isEmpty ? "NONE" : "\(model.titleCards.count) ON"
+    }
+
+    private var framingBadge: String {
+        model.customizedPhotoCount == 0 ? "Auto" : "\(model.customizedPhotoCount) edited"
     }
 }
 
@@ -1347,39 +1379,6 @@ private struct FilmStyleSheet: View {
         .buttonStyle(TactileButtonStyle())
         .accessibilityValue(selected ? "Selected" : "Not selected")
         .accessibilityIdentifier("film-look-\(look.rawValue)")
-    }
-}
-
-private struct EditOptionButton: View {
-    let symbol: String
-    let label: String
-    let badge: String
-    let badgeColor: Color
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 7) {
-                Image(systemName: symbol)
-                    .font(.system(size: 17, weight: .regular))
-                Text(label)
-                    .font(TR.ui(11, weight: .semibold))
-                Text(badge)
-                    .font(TR.mono(9))
-                    .tracking(0.7)
-                    .foregroundStyle(badgeColor)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
-            .foregroundStyle(TR.cream)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 13)
-            .glassCard(cornerRadius: 16)
-        }
-        .buttonStyle(TactileButtonStyle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(label)
-        .accessibilityValue(badge)
     }
 }
 

@@ -15,6 +15,7 @@ struct ExportScreen: View {
                     size: 38
                 )
                 .padding(.horizontal, 26)
+                .padding(.leading, 48)
                 .padding(.top, 4)
                 .trEntrance(0, distance: 10)
 
@@ -90,15 +91,7 @@ struct ExportScreen: View {
                 .padding(.horizontal, 26)
                 .trEntrance(1, distance: 12)
 
-                Spacer(minLength: 16)
-
-                Button("Back") {
-                    model.go(.secondWatch)
-                }
-                .font(TR.ui(14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.53))
-                .buttonStyle(.plain)
-                .padding(.bottom, 7)
+                Spacer(minLength: 12)
             }
         }
         .sheet(isPresented: $showProjectSheet) {
@@ -608,6 +601,7 @@ struct FilmReadyScreen: View {
             Spacer(minLength: compact ? 4 : 10)
 
             MetadataText(text: "\(model.tripShortPlace) · \(model.filmDurationText)", color: .white.opacity(0.57))
+                .padding(.horizontal, 62)
                 .padding(.bottom, compact ? 10 : 20)
                 .trEntrance(0, distance: 6)
 
