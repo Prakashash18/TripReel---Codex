@@ -259,6 +259,102 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertFalse(model.exportQuality.includesWatermark)
     }
 
+    func testTitleCardsBecomeRealTimelineItems() {
+        let model = makeModel()
+        model.titleCards = [.opening, .place, .ending]
+        model.titleText = "A Singapore Day"
+
+        let timeline = MontageTimelineBuilder.make(
+            photos: Array(model.photos.prefix(2)),
+            titleCards: model.montageTitleCards
+        )
+
+        XCTAssertEqual(timeline.count, 5)
+        guard case let .title(opening) = timeline[0],
+              case .photo = timeline[1],
+              case let .title(place) = timeline[2],
+              case .photo = timeline[3],
+              case let .title(ending) = timeline[4] else {
+            return XCTFail("Expected opening, photo, place, photo, ending")
+        }
+        XCTAssertEqual(opening.title, "A Singapore Day")
+        XCTAssertEqual(place.title, model.tripShortPlace)
+        XCTAssertEqual(ending.subtitle, "Made with TripReel")
+    }
+
+    func testPerPhotoFramingMotionCropAndTimingCanBeReset() {
+        let model = makeModel()
+        let photo = model.photos[0]
+
+        model.setFrameStyle(.postcard, forPhotoID: photo.id)
+        model.setMotionStyle(.panRight, forPhotoID: photo.id)
+        model.setPhotoCrop(scale: 2.2, offsetX: 0.4, offsetY: -0.3, forPhotoID: photo.id)
+        model.setPhotoDuration(3.1, forPhotoID: photo.id)
+
+        XCTAssertEqual(model.photos[0].frameStyle, .postcard)
+        XCTAssertTrue(model.photos[0].hasCustomFrameStyle)
+        XCTAssertEqual(model.photos[0].motionStyle, .panRight)
+        XCTAssertEqual(model.photos[0].cropScale, 2.2, accuracy: 0.001)
+        XCTAssertEqual(model.photos[0].cropOffsetX, 0.4, accuracy: 0.001)
+        XCTAssertEqual(model.photos[0].cropOffsetY, -0.3, accuracy: 0.001)
+        XCTAssertEqual(model.duration(for: model.photos[0]), 3.1, accuracy: 0.001)
+
+        model.resetPhotoEdit(id: photo.id)
+
+        XCTAssertEqual(model.photos[0].frameStyle, photo.automaticFrameStyle)
+        XCTAssertFalse(model.photos[0].hasCustomFrameStyle)
+        XCTAssertEqual(model.photos[0].motionStyle, photo.automaticMotionStyle)
+        XCTAssertEqual(model.photos[0].cropScale, 1, accuracy: 0.001)
+        XCTAssertNil(model.photos[0].durationSeconds)
+    }
+
+    func testProductionRenderUsesEditedTimelineAndProducesShareableURL() async throws {
+        let exporter = RecordingVideoExporter()
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            videoExporter: exporter
+        )
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let asset = TripAsset(
+            id: "render-photo",
+            source: .bundled("my-khe-beach"),
+            creationDate: date,
+            filename: "IMG_1.JPG",
+            pixelWidth: 1_024,
+            pixelHeight: 1_536
+        )
+        let trip = Trip(
+            id: "render-trip",
+            place: "Marina Bay, Singapore",
+            dates: "Today",
+            startDate: date,
+            endDate: date,
+            assets: [asset],
+            coverID: asset.id
+        )
+        model.startBuild(trip: trip)
+        model.setFrameStyle(.postcard, forPhotoID: asset.id)
+        model.titleCards = [.opening, .ending]
+        model.startRender()
+
+        for _ in 0..<50 where model.screen != .done {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(model.screen, .done)
+        XCTAssertNotNil(model.exportedVideoURL)
+        let recordedRequest = await exporter.lastRequest
+        let request = try XCTUnwrap(recordedRequest)
+        XCTAssertEqual(request.photos.first?.frameStyle, .postcard)
+        XCTAssertEqual(request.titleCards.map(\.kind), [.opening, .ending])
+
+        let saved = await model.saveExportToPhotos()
+        let savedURL = await exporter.savedURL
+        XCTAssertTrue(saved)
+        XCTAssertEqual(savedURL, model.exportedVideoURL)
+    }
+
     func testPhotoFixtureIsDeterministic() {
         let model = makeModel()
 
@@ -518,5 +614,24 @@ private final class DeletionPhotoLibrary: PhotoLibraryServing, @unchecked Sendab
         }
         deletedIdentifiers = identifiers
         return identifiers.count
+    }
+}
+
+private actor RecordingVideoExporter: TripReelVideoExporting {
+    private(set) var lastRequest: TripReelVideoExportRequest?
+    private(set) var savedURL: URL?
+
+    func export(
+        _ request: TripReelVideoExportRequest,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> URL {
+        lastRequest = request
+        progress(1)
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent("TripReel-test.mp4")
+    }
+
+    func saveToPhotoLibrary(_ url: URL) async throws {
+        savedURL = url
     }
 }

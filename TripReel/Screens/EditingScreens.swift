@@ -7,6 +7,7 @@ struct FirstWatchScreen: View {
         ZStack {
             MontageView(
                 photos: model.photos,
+                titleCards: model.montageTitleCards,
                 look: model.montageLook,
                 motionIntensity: model.montageMotionIntensity,
                 secondsPerSlide: 4.0 / 3.0
@@ -515,12 +516,14 @@ struct SecondWatchScreen: View {
     @State private var showTitles = false
     @State private var showMusic = false
     @State private var showStyle = false
+    @State private var showPhotoEditor = false
     @StateObject private var soundtrack = LocalSoundtrackPlayer()
 
     var body: some View {
         ZStack {
             MontageView(
                 photos: model.keptPhotos,
+                titleCards: model.montageTitleCards,
                 look: model.montageLook,
                 motionIntensity: model.montageMotionIntensity,
                 secondsPerSlide: model.secondsPerPhoto
@@ -537,7 +540,7 @@ struct SecondWatchScreen: View {
             VStack(spacing: 0) {
                 VStack(spacing: 7) {
                     MetadataText(text: "Your cut · \(model.tripShortPlace)", color: .white.opacity(0.82))
-                    Text("\(model.keptCount) photos · \(model.durationText)\(trackSuffix)")
+                    Text("\(model.keptCount) photos · \(model.filmDurationText)\(trackSuffix)")
                         .font(TR.ui(12))
                         .foregroundStyle(.white.opacity(0.53))
                 }
@@ -575,6 +578,33 @@ struct SecondWatchScreen: View {
                     Text(model.cutPhotoIDs.isEmpty ? "Nothing cut. This is the film." : "You cut \(model.cutPhotoIDs.count). This is the film.")
                         .font(TR.display(29))
                         .fixedSize(horizontal: false, vertical: true)
+
+                    Button {
+                        showPhotoEditor = true
+                    } label: {
+                        HStack(spacing: 11) {
+                            Image(systemName: "crop.rotate")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(TR.accent)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Edit individual photos")
+                                    .font(TR.ui(13, weight: .semibold))
+                                Text("Reframe, pinch, move, animate and time each shot")
+                                    .font(TR.ui(10))
+                                    .foregroundStyle(.white.opacity(0.48))
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.34))
+                        }
+                        .foregroundStyle(TR.cream)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .glassCard(cornerRadius: 15)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("photo-editor-button")
 
                     HStack(spacing: 7) {
                         EditOptionButton(symbol: "wand.and.stars", label: "Style", badge: model.montageLook.name.uppercased(), badgeColor: TR.accent) {
@@ -634,6 +664,14 @@ struct SecondWatchScreen: View {
                 .presentationCornerRadius(26)
                 .presentationBackground(TR.sheet)
         }
+        .sheet(isPresented: $showPhotoEditor) {
+            PhotoEditorSheet()
+                .environmentObject(model)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(26)
+                .presentationBackground(TR.sheet)
+        }
         .task(id: model.selectedTrackID) {
             soundtrack.play(track: model.selectedTrack)
         }
@@ -650,6 +688,248 @@ struct SecondWatchScreen: View {
 
     private var titleBadge: String {
         model.titleCards.isEmpty ? "NONE" : "\(model.titleCards.count) ON"
+    }
+}
+
+private struct PhotoEditorSheet: View {
+    @EnvironmentObject private var model: TripReelModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedID: String?
+    @State private var pinchStartScale: Double?
+    @State private var dragStartX: Double?
+    @State private var dragStartY: Double?
+
+    private var selectedPhoto: ReelPhoto? {
+        let photos = model.keptPhotos
+        return photos.first(where: { $0.id == selectedID }) ?? photos.first
+    }
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 17) {
+                SheetHeader(title: "Edit photos") { dismiss() }
+
+                Text("TripReel starts with an automatic crop and motion. Pinch to zoom, drag to reframe, then fine-tune only the shots that need it.")
+                    .font(TR.ui(12))
+                    .foregroundStyle(.white.opacity(0.56))
+                    .lineSpacing(4)
+
+                if let photo = selectedPhoto {
+                    editorPreview(photo)
+                    photoStrip
+                    frameControls(photo)
+                    motionControls(photo)
+                    timingControls(photo)
+
+                    Button("Reset this photo to Auto") {
+                        model.resetPhotoEdit(id: photo.id)
+                    }
+                    .font(TR.ui(13, weight: .semibold))
+                    .foregroundStyle(TR.accent)
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                } else {
+                    ContentUnavailableView(
+                        "No photos in this cut",
+                        systemImage: "photo.on.rectangle.angled",
+                        description: Text("Keep a photo to edit its framing and motion.")
+                    )
+                    .foregroundStyle(TR.cream)
+                }
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 20)
+            .padding(.bottom, 42)
+        }
+        .onAppear {
+            if selectedID == nil { selectedID = model.keptPhotos.first?.id }
+        }
+        .accessibilityIdentifier("photo-editor-sheet")
+    }
+
+    private func editorPreview(_ photo: ReelPhoto) -> some View {
+        GeometryReader { proxy in
+            MontageView(
+                photos: [photo],
+                showLabels: false,
+                look: .story,
+                motionIntensity: .still,
+                secondsPerSlide: model.duration(for: photo)
+            )
+            .overlay(alignment: .bottom) {
+                HStack(spacing: 7) {
+                    Image(systemName: "hand.draw")
+                    Text("Pinch to zoom · drag to move")
+                }
+                .font(TR.ui(10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.78))
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(.black.opacity(0.54))
+                .clipShape(Capsule())
+                .padding(.bottom, 12)
+            }
+            .contentShape(Rectangle())
+            .gesture(pinchGesture(for: photo))
+            .simultaneousGesture(dragGesture(for: photo, size: proxy.size))
+        }
+        .frame(height: 330)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(.white.opacity(0.16), lineWidth: 1)
+        )
+    }
+
+    private var photoStrip: some View {
+        ScrollViewReader { reader in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(model.keptPhotos) { photo in
+                        Button {
+                            selectedID = photo.id
+                            reader.scrollTo(photo.id, anchor: .center)
+                        } label: {
+                            PhotoAssetView(source: photo.source)
+                                .frame(width: 54, height: 54)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .stroke(
+                                            selectedPhoto?.id == photo.id ? TR.accent : .white.opacity(0.12),
+                                            lineWidth: selectedPhoto?.id == photo.id ? 2 : 1
+                                        )
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .id(photo.id)
+                        .accessibilityLabel("Edit \(photo.label)")
+                    }
+                }
+            }
+        }
+    }
+
+    private func frameControls(_ photo: ReelPhoto) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            MetadataText(text: "FRAME", color: .white.opacity(0.43))
+            HStack(spacing: 7) {
+                ForEach(MontageFrameStyle.allCases) { style in
+                    editorChip(
+                        title: style.name,
+                        symbol: style.symbol,
+                        selected: photo.frameStyle == style
+                    ) {
+                        model.setFrameStyle(style, forPhotoID: photo.id)
+                    }
+                }
+            }
+        }
+    }
+
+    private func motionControls(_ photo: ReelPhoto) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            MetadataText(text: "MOTION", color: .white.opacity(0.43))
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    ForEach(MontageMotionStyle.allCases) { motion in
+                        Button {
+                            model.setMotionStyle(motion, forPhotoID: photo.id)
+                        } label: {
+                            Text(motion.name)
+                                .font(TR.ui(11, weight: .semibold))
+                                .foregroundStyle(photo.motionStyle == motion ? TR.ink : .white.opacity(0.65))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 9)
+                                .background(photo.motionStyle == motion ? TR.cream : .white.opacity(0.055))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private func timingControls(_ photo: ReelPhoto) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                MetadataText(text: "TIME ON SCREEN", color: .white.opacity(0.43))
+                Spacer()
+                Text(String(format: "%.1fs", model.duration(for: photo)))
+                    .font(TR.mono(12))
+                    .foregroundStyle(TR.accent)
+            }
+            Slider(
+                value: Binding(
+                    get: { model.duration(for: selectedPhoto ?? photo) },
+                    set: { model.setPhotoDuration($0, forPhotoID: photo.id) }
+                ),
+                in: 0.6...4,
+                step: 0.1
+            )
+            .tint(TR.accent)
+        }
+    }
+
+    private func editorChip(
+        title: String,
+        symbol: String,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 5) {
+                Image(systemName: symbol)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(title)
+                    .font(TR.ui(10, weight: .semibold))
+            }
+            .foregroundStyle(selected ? TR.ink : .white.opacity(0.64))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(selected ? TR.cream : .white.opacity(0.055))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func pinchGesture(for photo: ReelPhoto) -> some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                let start = pinchStartScale ?? photo.cropScale
+                if pinchStartScale == nil { pinchStartScale = start }
+                model.setPhotoCrop(
+                    scale: start * value.magnification,
+                    offsetX: selectedPhoto?.cropOffsetX ?? photo.cropOffsetX,
+                    offsetY: selectedPhoto?.cropOffsetY ?? photo.cropOffsetY,
+                    forPhotoID: photo.id
+                )
+            }
+            .onEnded { _ in pinchStartScale = nil }
+    }
+
+    private func dragGesture(for photo: ReelPhoto, size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 2)
+            .onChanged { value in
+                let startX = dragStartX ?? photo.cropOffsetX
+                let startY = dragStartY ?? photo.cropOffsetY
+                if dragStartX == nil {
+                    dragStartX = startX
+                    dragStartY = startY
+                }
+                model.setPhotoCrop(
+                    scale: selectedPhoto?.cropScale ?? photo.cropScale,
+                    offsetX: startX + Double(value.translation.width / max(1, size.width * 0.24)),
+                    offsetY: startY + Double(value.translation.height / max(1, size.height * 0.24)),
+                    forPhotoID: photo.id
+                )
+            }
+            .onEnded { _ in
+                dragStartX = nil
+                dragStartY = nil
+            }
     }
 }
 

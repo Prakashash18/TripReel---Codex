@@ -29,7 +29,7 @@
 - Colors and visual tokens: cream, ink, amber, keep green, cut red, translucent strokes, materials, shadows, and per-state warm gradients match the supplied palette and contrast balance.
 - Image quality and asset fidelity: six coherent 1024 × 1536 generated travel images are bundled as raster assets with stable focal crops. The source provided only placeholder gradients, so the photography is an intentional asset completion rather than a missing-source substitution.
 - Copy and content: all source app-specific labels, trip data, pricing, export descriptions, and cleanup language are represented. Native permission denial adds a necessary system Settings recovery path.
-- Accessibility and behavior: semantic buttons, selection values, descriptive labels, Reduced Motion handling, native photo permission/picker behavior, cut/undo state, export quality, and compact-height layout were checked. The final XCTest run reports 9 passed, 0 failed, 0 skipped.
+- Accessibility and behavior: semantic buttons, selection values, descriptive labels, Reduced Motion handling, native photo permission/picker behavior, cut/undo state, export quality, and compact-height layout were checked. The last full simulator baseline reported 9 passed, 0 failed, and 0 skipped. The current Nearby, title, export, and per-photo editor additions pass strict app/test source checks; a fresh runtime pass still needs Xcode Cloud or a healthy simulator.
 
 **Comparison history**
 
@@ -40,7 +40,7 @@
 
 **Open Questions**
 
-- None for the local native prototype scope. Production trip clustering, actual video rendering, StoreKit purchases, saving/sharing, and destructive photo deletion are intentionally represented as local prototype behavior.
+- StoreKit purchase validation remains a prototype interaction. Trip clustering, video rendering with music, Photos saving, system sharing, and user-confirmed destructive cleanup now use native production APIs.
 
 **Implementation Checklist**
 
@@ -48,10 +48,11 @@
 - [x] Replace absent photo assets with a coherent generated travel set and native app icon.
 - [x] Implement all core navigation, gestures, sheets, selections, progress states, and branches.
 - [x] Verify compact and large iPhone layouts.
-- [x] Pass the final compiler, unit-test, UI-test, asset, privacy-string, font, and app-icon checks.
+- [x] Pass strict app, unit-test, and UI-test source checks plus asset, privacy-string, font, and app-icon validation.
+- [ ] Rerun the full XCTest journey and long video export on Xcode Cloud/TestFlight or a repaired local simulator.
 
 **Follow-up Polish**
 
-- Optional: replace the bundled demo photography with the user's own higher-resolution travel library once the production media pipeline is added.
+- Validate long 1080p exports, Photos saving, soundtrack muxing, and pinch/drag editing on a physical iPhone/TestFlight build; this Mac's obsolete iOS 9 simulator runtime prevents a reliable local CoreSimulator run.
 
-final result: passed
+final result: source validation passed; current device/runtime validation pending

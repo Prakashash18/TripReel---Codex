@@ -10,7 +10,7 @@ struct ExportScreen: View {
 
             VStack(spacing: 0) {
                 ScreenHeading(
-                    eyebrow: "\(model.keptCount) photos · \(model.durationText)",
+                    eyebrow: "\(model.keptCount) photos · \(model.filmDurationText)",
                     title: "Export your film",
                     size: 38
                 )
@@ -107,6 +107,17 @@ struct ExportScreen: View {
                 .presentationCornerRadius(26)
                 .presentationBackground(TR.sheet)
         }
+        .alert(
+            "Export couldn't finish",
+            isPresented: Binding(
+                get: { model.exportErrorMessage != nil },
+                set: { if !$0 { model.dismissExportMessage() } }
+            )
+        ) {
+            Button("OK", role: .cancel) { model.dismissExportMessage() }
+        } message: {
+            Text(model.exportErrorMessage ?? "Please try again.")
+        }
         .accessibilityIdentifier("export-screen")
     }
 }
@@ -170,6 +181,8 @@ private struct ExportOptionCard: View {
 private struct ProjectFormatSheet: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.dismiss) private var dismiss
+    @State private var projectURL: URL?
+    @State private var projectError: String?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -183,7 +196,7 @@ private struct ProjectFormatSheet: View {
                         .foregroundStyle(TR.accent)
                 }
 
-                Text("Your cut, order and timing travel with the file. Full-resolution photos come along — nothing is re-compressed.")
+                Text("Your cut, order, framing, motion and timing travel in a small timeline file you can share with another editor.")
                     .font(TR.ui(13))
                     .foregroundStyle(.white.opacity(0.57))
                     .lineSpacing(4)
@@ -198,7 +211,7 @@ private struct ProjectFormatSheet: View {
                     Text("CapCut")
                         .font(TR.ui(13, weight: .semibold))
                         .foregroundStyle(TR.accent)
-                    Text("CapCut can't read timeline files. Choose the photo sequence — it imports in order, and the timing sheet tells you where the cuts go.")
+                    Text("CapCut can't read timeline files. Choose the CSV timing sheet to see the photo order, cut times, framing and motion settings.")
                         .font(TR.ui(12))
                         .foregroundStyle(.white.opacity(0.73))
                         .lineSpacing(3)
@@ -208,15 +221,32 @@ private struct ProjectFormatSheet: View {
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(TR.accent.opacity(0.26), lineWidth: 1))
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-                Button("Export \(model.selectedFormat.fileExtension)") {
-                    dismiss()
+                if let projectURL {
+                    ShareLink(item: projectURL) {
+                        Text("Share \(model.selectedFormat.fileExtension)")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(CreamButtonStyle())
+                    .accessibilityIdentifier("share-project-file")
+                } else {
+                    Button("Prepare \(model.selectedFormat.fileExtension)") {
+                        prepareProjectFile()
+                    }
+                    .buttonStyle(CreamButtonStyle())
                 }
-                .buttonStyle(CreamButtonStyle())
+
+                if let projectError {
+                    Text(projectError)
+                        .font(TR.ui(11, weight: .medium))
+                        .foregroundStyle(TR.cut)
+                }
             }
             .padding(.horizontal, 22)
             .padding(.top, 20)
             .padding(.bottom, 38)
         }
+        .onAppear { prepareProjectFile() }
+        .onChange(of: model.selectedFormatID) { _, _ in prepareProjectFile() }
     }
 
     private func formatRow(_ format: ProjectFormat) -> some View {
@@ -248,6 +278,101 @@ private struct ProjectFormatSheet: View {
         .buttonStyle(.plain)
         .accessibilityValue(active ? "Selected" : "Not selected")
     }
+
+    private func prepareProjectFile() {
+        do {
+            let format = model.selectedFormat
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("TripReel-Projects", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let safePlace = model.tripShortPlace
+                .replacingOccurrences(of: "[^A-Za-z0-9-]+", with: "-", options: .regularExpression)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+            let url = directory.appendingPathComponent(
+                "\(safePlace.isEmpty ? "TripReel" : safePlace).\(format.fileExtension.lowercased())"
+            )
+            try projectText(formatID: format.id).write(to: url, atomically: true, encoding: .utf8)
+            projectURL = url
+            projectError = nil
+        } catch {
+            projectURL = nil
+            projectError = "TripReel couldn't prepare this timeline file."
+        }
+    }
+
+    private func projectText(formatID: String) -> String {
+        var cursor = 0.0
+        let rows = model.keptPhotos.enumerated().map { index, photo -> ProjectRow in
+            let duration = model.duration(for: photo)
+            defer { cursor += duration }
+            return ProjectRow(index: index + 1, photo: photo, start: cursor, duration: duration)
+        }
+
+        switch formatID {
+        case "fcpxml":
+            let clips = rows.map { row in
+                "        <asset-clip name=\"\(xmlEscaped(row.photo.label))\" offset=\"\(timecode(row.start))s\" duration=\"\(timecode(row.duration))s\" note=\"frame=\(row.photo.frameStyle.rawValue); motion=\(row.photo.motionStyle.rawValue)\"/>"
+            }.joined(separator: "\n")
+            return """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <fcpxml version="1.11">
+              <library><event name="TripReel"><project name="\(xmlEscaped(model.tripShortPlace))"><sequence duration="\(timecode(cursor))s"><spine>
+            \(clips)
+              </spine></sequence></project></event></library>
+            </fcpxml>
+            """
+        case "edl":
+            let body = rows.map { row in
+                String(format: "%03d  AX       V     C        %@ %@ %@ %@\n* FROM CLIP NAME: %@\n* FRAME: %@  MOTION: %@",
+                       row.index,
+                       edlTime(row.start), edlTime(row.start + row.duration), edlTime(row.start), edlTime(row.start + row.duration),
+                       row.photo.label, row.photo.frameStyle.rawValue, row.photo.motionStyle.rawValue)
+            }.joined(separator: "\n")
+            return "TITLE: \(model.tripShortPlace)\nFCM: NON-DROP FRAME\n\n\(body)\n"
+        default:
+            let header = "order,photo,start_seconds,duration_seconds,frame,motion,zoom,offset_x,offset_y"
+            let body = rows.map { row in
+                "\(row.index),\(csvEscaped(row.photo.label)),\(timecode(row.start)),\(timecode(row.duration)),\(row.photo.frameStyle.rawValue),\(row.photo.motionStyle.rawValue),\(timecode(row.photo.cropScale)),\(timecode(row.photo.cropOffsetX)),\(timecode(row.photo.cropOffsetY))"
+            }.joined(separator: "\n")
+            return "\(header)\n\(body)\n"
+        }
+    }
+
+    private func timecode(_ seconds: Double) -> String {
+        String(format: "%.3f", seconds)
+    }
+
+    private func edlTime(_ seconds: Double) -> String {
+        let totalFrames = max(0, Int((seconds * 30).rounded()))
+        let frames = totalFrames % 30
+        let totalSeconds = totalFrames / 30
+        return String(
+            format: "%02d:%02d:%02d:%02d",
+            totalSeconds / 3_600,
+            (totalSeconds / 60) % 60,
+            totalSeconds % 60,
+            frames
+        )
+    }
+
+    private func xmlEscaped(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+    }
+
+    private func csvEscaped(_ value: String) -> String {
+        "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
+    }
+
+    private struct ProjectRow {
+        let index: Int
+        let photo: ReelPhoto
+        let start: Double
+        let duration: Double
+    }
 }
 
 struct PaywallScreen: View {
@@ -257,6 +382,7 @@ struct PaywallScreen: View {
         ZStack {
             MontageView(
                 photos: model.keptPhotos,
+                titleCards: model.montageTitleCards,
                 dim: true,
                 watermark: true,
                 look: model.montageLook,
@@ -341,6 +467,7 @@ struct RenderingScreen: View {
             VStack(spacing: 0) {
                 MontageView(
                     photos: model.keptPhotos,
+                    titleCards: model.montageTitleCards,
                     showLabels: false,
                     look: model.montageLook,
                     motionIntensity: model.montageMotionIntensity,
@@ -356,7 +483,7 @@ struct RenderingScreen: View {
                     .padding(.bottom, 8)
 
                 MetadataText(
-                    text: "\(Int(model.renderProgress * 100))% · \(max(1, Int((1 - model.renderProgress) * 34)))s left",
+                    text: "\(Int(model.renderProgress * 100))% · full-resolution video",
                     color: .white.opacity(0.62)
                 )
                 .contentTransition(.numericText())
@@ -371,7 +498,7 @@ struct RenderingScreen: View {
                 .padding(.top, 22)
 
                 Button("Cancel") {
-                    model.go(.export)
+                    model.cancelRender()
                 }
                 .font(TR.ui(14, weight: .medium))
                 .foregroundStyle(.white.opacity(0.52))
@@ -395,6 +522,17 @@ struct FilmReadyScreen: View {
                 readyContent(previewWidth: 236, compact: true)
             }
         }
+        .alert(
+            "Couldn't save the film",
+            isPresented: Binding(
+                get: { model.exportErrorMessage != nil },
+                set: { if !$0 { model.dismissExportMessage() } }
+            )
+        ) {
+            Button("OK", role: .cancel) { model.dismissExportMessage() }
+        } message: {
+            Text(model.exportErrorMessage ?? "Please try again.")
+        }
         .accessibilityIdentifier("film-ready-screen")
     }
 
@@ -402,11 +540,12 @@ struct FilmReadyScreen: View {
         VStack(spacing: 0) {
             Spacer(minLength: compact ? 4 : 10)
 
-            MetadataText(text: "\(model.tripShortPlace) · \(model.durationText)", color: .white.opacity(0.57))
+            MetadataText(text: "\(model.tripShortPlace) · \(model.filmDurationText)", color: .white.opacity(0.57))
                 .padding(.bottom, compact ? 10 : 20)
 
             MontageView(
                 photos: model.keptPhotos,
+                titleCards: model.montageTitleCards,
                 watermark: model.exportQuality.includesWatermark,
                 showLabels: false,
                 look: model.montageLook,
@@ -426,17 +565,45 @@ struct FilmReadyScreen: View {
 
             VStack(spacing: compact ? 8 : 11) {
                 HStack(spacing: 10) {
-                    Button("Save") {
-                        model.cleanupShowsGrid = false
-                        model.go(.cleanup)
+                    Button {
+                        if model.usesDemoData {
+                            model.cleanupShowsGrid = false
+                            model.go(.cleanup)
+                        } else {
+                            Task {
+                                if await model.saveExportToPhotos() {
+                                    model.cleanupShowsGrid = false
+                                    model.go(.cleanup)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if model.isSavingExport {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .tint(TR.ink)
+                            }
+                            Text(model.isSavingExport ? "Saving…" : "Save")
+                                .frame(maxWidth: .infinity)
+                        }
                     }
                     .buttonStyle(CreamButtonStyle())
+                    .disabled(model.isSavingExport)
+                    .accessibilityIdentifier("save-film")
 
-                    Button("Share") {
-                        model.cleanupShowsGrid = false
-                        model.go(.cleanup)
+                    if let url = model.exportedVideoURL {
+                        ShareLink(item: url) {
+                            Text("Share")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(GlassButtonStyle())
+                        .accessibilityIdentifier("share-film")
+                    } else {
+                        Button("Share") { }
+                            .buttonStyle(GlassButtonStyle())
+                            .disabled(true)
                     }
-                    .buttonStyle(GlassButtonStyle())
                 }
 
                 Button("Make another") {

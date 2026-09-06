@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AA88E57B589C4DE4A6A97102 /* TripReelVideoExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA88E57B589C4DE4A6A97103 /* TripReelVideoExporter.swift */; };
 		AA77E57B589C4DE4A6A97102 /* AppAttestCloudPhotoAnalysisAuthorizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA77E57B589C4DE4A6A97103 /* AppAttestCloudPhotoAnalysisAuthorizer.swift */; };
 		050E6A1D8D90DF1515ABDC18 /* InstrumentSerif-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 518C1F47CD476565000F8137 /* InstrumentSerif-Italic.ttf */; };
 		06F40B34C571F4B6469E2FA5 /* SmartPhotoSelectionFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5D6F0320E51D07035AA4F6F /* SmartPhotoSelectionFlowTests.swift */; };
@@ -65,6 +66,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		AA88E57B589C4DE4A6A97103 /* TripReelVideoExporter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelVideoExporter.swift; path = Models/TripReelVideoExporter.swift; sourceTree = "<group>"; };
 		AA77E57B589C4DE4A6A97103 /* AppAttestCloudPhotoAnalysisAuthorizer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppAttestCloudPhotoAnalysisAuthorizer.swift; path = Models/AppAttestCloudPhotoAnalysisAuthorizer.swift; sourceTree = "<group>"; };
 		06EE510F98A67B1A8E8D95C9 /* NativePhotoIntelligenceService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = NativePhotoIntelligenceService.swift; path = Models/NativePhotoIntelligenceService.swift; sourceTree = "<group>"; };
 		0A4DD0217C602F175EF78D21 /* InstrumentSerif-Regular.ttf */ = {isa = PBXFileReference; includeInIndex = 1; name = "InstrumentSerif-Regular.ttf"; path = "Resources/Fonts/InstrumentSerif-Regular.ttf"; sourceTree = "<group>"; };
@@ -153,6 +155,7 @@
 				40C85D6FCCEAAF47992BC710 /* SmartPhotoSelection.swift */,
 				7194E4A2C8B47C5747EA43C1 /* TripGrouping.swift */,
 				9953289207A8CC41C9A61899 /* TripReelModel.swift */,
+				AA88E57B589C4DE4A6A97103 /* TripReelVideoExporter.swift */,
 				27E1E22E0738530EFCE94C6C /* CloudAnalysisConsentView.swift */,
 				46EF74D71B427C50665FC2FA /* EditingScreens.swift */,
 				6165CA0D4738C8E8C6A326CA /* ExportScreens.swift */,
@@ -373,6 +376,7 @@
 				87E1A116F52854E2874D925E /* SmartPhotoSelection.swift in Sources */,
 				227F5E70D7D246E93845E4BE /* TripGrouping.swift in Sources */,
 				0D9165FC8230402EBA050B06 /* TripReelModel.swift in Sources */,
+				AA88E57B589C4DE4A6A97102 /* TripReelVideoExporter.swift in Sources */,
 				1514F12B69FCFDE789641AA1 /* CloudAnalysisConsentView.swift in Sources */,
 				D9016055F07B5B9F953F9DB3 /* EditingScreens.swift in Sources */,
 				620D9360A3BE52F5BBAA11F6 /* ExportScreens.swift in Sources */,

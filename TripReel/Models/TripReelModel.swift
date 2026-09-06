@@ -138,8 +138,48 @@ struct ReelPhoto: Identifiable, Hashable, Sendable {
     let isSimilar: Bool
     let pixelWidth: Int
     let pixelHeight: Int
-    let frameStyle: MontageFrameStyle
-    let motionStyle: MontageMotionStyle
+    let automaticFrameStyle: MontageFrameStyle
+    let automaticMotionStyle: MontageMotionStyle
+    var frameStyle: MontageFrameStyle
+    var motionStyle: MontageMotionStyle
+    var hasCustomFrameStyle: Bool
+    var cropScale: Double
+    var cropOffsetX: Double
+    var cropOffsetY: Double
+    var durationSeconds: Double?
+
+    init(
+        id: String,
+        source: PhotoSource,
+        label: String,
+        time: String,
+        isSimilar: Bool,
+        pixelWidth: Int,
+        pixelHeight: Int,
+        frameStyle: MontageFrameStyle,
+        motionStyle: MontageMotionStyle,
+        cropScale: Double = 1,
+        cropOffsetX: Double = 0,
+        cropOffsetY: Double = 0,
+        durationSeconds: Double? = nil
+    ) {
+        self.id = id
+        self.source = source
+        self.label = label
+        self.time = time
+        self.isSimilar = isSimilar
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+        automaticFrameStyle = frameStyle
+        automaticMotionStyle = motionStyle
+        self.frameStyle = frameStyle
+        self.motionStyle = motionStyle
+        hasCustomFrameStyle = false
+        self.cropScale = min(max(cropScale, 1), 3)
+        self.cropOffsetX = min(max(cropOffsetX, -1), 1)
+        self.cropOffsetY = min(max(cropOffsetY, -1), 1)
+        self.durationSeconds = durationSeconds.map { min(max($0, 0.6), 4) }
+    }
 
     var aspectRatio: Double {
         guard pixelWidth > 0, pixelHeight > 0 else { return 4.0 / 3.0 }
@@ -147,20 +187,62 @@ struct ReelPhoto: Identifiable, Hashable, Sendable {
     }
 }
 
-enum MontageFrameStyle: String, Hashable, Sendable {
+enum MontageFrameStyle: String, CaseIterable, Identifiable, Hashable, Sendable {
     case fullBleed
     case portraitMatte
     case cinematic
     case postcard
+
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .fullBleed: "Fill"
+        case .portraitMatte: "Portrait"
+        case .cinematic: "Cinema"
+        case .postcard: "Print"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .fullBleed: "rectangle.inset.filled"
+        case .portraitMatte: "rectangle.portrait"
+        case .cinematic: "film"
+        case .postcard: "photo.on.rectangle"
+        }
+    }
 }
 
-enum MontageMotionStyle: String, CaseIterable, Hashable, Sendable {
+enum MontageMotionStyle: String, CaseIterable, Identifiable, Hashable, Sendable {
     case zoomIn
     case zoomOut
     case panLeft
     case panRight
     case rise
     case settle
+
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .zoomIn: "Zoom in"
+        case .zoomOut: "Zoom out"
+        case .panLeft: "Pan left"
+        case .panRight: "Pan right"
+        case .rise: "Rise"
+        case .settle: "Settle"
+        }
+    }
+}
+
+private struct PhotoEditOverride: Hashable, Sendable {
+    var frameStyle: MontageFrameStyle?
+    var motionStyle: MontageMotionStyle?
+    var cropScale: Double?
+    var cropOffsetX: Double?
+    var cropOffsetY: Double?
+    var durationSeconds: Double?
 }
 
 enum MontageLook: String, CaseIterable, Identifiable, Hashable, Sendable {
@@ -436,7 +518,7 @@ enum MontageSequencePlanner {
     }
 }
 
-enum TitleCardKind: String, CaseIterable, Identifiable {
+enum TitleCardKind: String, CaseIterable, Identifiable, Hashable, Sendable {
     case opening
     case place
     case ending
@@ -457,6 +539,69 @@ enum TitleCardKind: String, CaseIterable, Identifiable {
         case .place: "When the location changes"
         case .ending: "After the last photo"
         }
+    }
+}
+
+struct MontageTitleCard: Identifiable, Hashable, Sendable {
+    let kind: TitleCardKind
+    let title: String
+    let subtitle: String
+
+    var id: String { "title-\(kind.rawValue)" }
+
+    var duration: Double {
+        switch kind {
+        case .opening: 2.4
+        case .place: 1.9
+        case .ending: 2.2
+        }
+    }
+}
+
+enum MontageTimelineItem: Identifiable, Hashable, Sendable {
+    case photo(ReelPhoto)
+    case title(MontageTitleCard)
+
+    var id: String {
+        switch self {
+        case let .photo(photo): "photo-\(photo.id)"
+        case let .title(card): card.id
+        }
+    }
+
+    func duration(defaultPhotoDuration: Double) -> Double {
+        switch self {
+        case let .photo(photo): photo.durationSeconds ?? defaultPhotoDuration
+        case let .title(card): card.duration
+        }
+    }
+}
+
+enum MontageTimelineBuilder {
+    static func make(
+        photos: [ReelPhoto],
+        titleCards: [MontageTitleCard]
+    ) -> [MontageTimelineItem] {
+        let titleByKind = Dictionary(uniqueKeysWithValues: titleCards.map { ($0.kind, $0) })
+        var result: [MontageTimelineItem] = []
+        if let opening = titleByKind[.opening] {
+            result.append(.title(opening))
+        }
+
+        for (index, photo) in photos.enumerated() {
+            result.append(.photo(photo))
+            if index == 0, let place = titleByKind[.place] {
+                result.append(.title(place))
+            }
+        }
+
+        if photos.isEmpty, let place = titleByKind[.place] {
+            result.append(.title(place))
+        }
+        if let ending = titleByKind[.ending] {
+            result.append(.title(ending))
+        }
+        return result
     }
 }
 
@@ -490,7 +635,7 @@ private struct LibraryDetectionResult: Sendable {
     let nearbyEvents: [DetectedTrip]
 }
 
-enum ExportQuality: Equatable {
+enum ExportQuality: Equatable, Sendable {
     case standard
     case hd
 
@@ -541,6 +686,10 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var excludedPhotos: [SmartExcludedPhoto] = []
     @Published private(set) var photoAnalysisFollowUp: PhotoAnalysisFollowUp?
     @Published var isSmartSelectionReviewPresented = false
+    @Published private(set) var exportedVideoURL: URL?
+    @Published private(set) var exportErrorMessage: String?
+    @Published private(set) var isSavingExport = false
+    @Published private(set) var exportSaveMessage: String?
 
     let usesDemoData: Bool
 
@@ -553,6 +702,7 @@ final class TripReelModel: ObservableObject {
     private var workTask: Task<Void, Never>?
     private var photoAnalysisTask: Task<Void, Never>?
     private var photoAnalysisGeneration = UUID()
+    private var exportGeneration = UUID()
     private var placeTask: Task<Void, Never>?
     private var detectorTask: Task<LibraryDetectionResult, Never>?
     private var scanGeneration = UUID()
@@ -572,6 +722,8 @@ final class TripReelModel: ObservableObject {
     private var activeAnalysisTrip: Trip?
     private var activePhotoInsights: [String: MontagePhotoInsight] = [:]
     private var manuallyIncludedPhotoIDs: Set<String> = []
+    private var photoEditOverrides: [String: PhotoEditOverride] = [:]
+    private let videoExporter: any TripReelVideoExporting
 
     private static let cloudPreferenceKey = "tripreel.cloud-photo-analysis-preference.v1"
 
@@ -582,6 +734,7 @@ final class TripReelModel: ObservableObject {
         cloudPhotoAnalysis: (any CloudPhotoAnalysisServing)? = nil,
         photoAnalysisThumbnails: (any PhotoAnalysisThumbnailServing)? = nil,
         nativePhotoIntelligence: (any NativePhotoIntelligenceServing)? = nil,
+        videoExporter: (any TripReelVideoExporting)? = nil,
         preferenceStore: UserDefaults = .standard
     ) {
         let demoMode = useDemoData ?? arguments.contains("-qaScreen")
@@ -590,6 +743,7 @@ final class TripReelModel: ObservableObject {
         self.cloudPhotoAnalysis = cloudPhotoAnalysis ?? CloudPhotoAnalysisClient()
         self.photoAnalysisThumbnails = photoAnalysisThumbnails ?? PhotoAnalysisThumbnailService()
         self.nativePhotoIntelligence = nativePhotoIntelligence ?? NativePhotoIntelligenceService()
+        self.videoExporter = videoExporter ?? TripReelVideoExporter()
         self.preferenceStore = preferenceStore
         cloudAnalysisPreference = CloudAnalysisPreference(
             rawValue: preferenceStore.string(forKey: Self.cloudPreferenceKey) ?? ""
@@ -667,7 +821,7 @@ final class TripReelModel: ObservableObject {
     ]
 
     let formats = [
-        ProjectFormat(id: "sequence", name: "Photo sequence + timing sheet", apps: "CapCut, InShot, anything", fileExtension: "ZIP"),
+        ProjectFormat(id: "sequence", name: "Photo timing sheet", apps: "CapCut, InShot, spreadsheets", fileExtension: "CSV"),
         ProjectFormat(id: "fcpxml", name: "Final Cut XML", apps: "Final Cut Pro, DaVinci Resolve", fileExtension: "FCPXML"),
         ProjectFormat(id: "edl", name: "Edit decision list", apps: "Premiere Pro, Avid", fileExtension: "EDL")
     ]
@@ -688,11 +842,46 @@ final class TripReelModel: ObservableObject {
     }
 
     var durationText: String {
-        Self.durationText(photoCount: keptCount, secondsPerPhoto: secondsPerPhoto)
+        Self.durationText(seconds: keptPhotos.reduce(0) { partial, photo in
+            partial + duration(for: photo)
+        })
     }
 
     var rawDurationText: String {
-        Self.durationText(photoCount: photos.count, secondsPerPhoto: 4.0 / 3.0)
+        let titleDuration = montageTitleCards.reduce(0) { $0 + $1.duration }
+        return Self.durationText(
+            seconds: (Double(photos.count) * (4.0 / 3.0)) + titleDuration
+        )
+    }
+
+    var filmDurationText: String {
+        let titleDuration = montageTitleCards.reduce(0) { $0 + $1.duration }
+        let photoDuration = keptPhotos.reduce(0) { $0 + duration(for: $1) }
+        return Self.durationText(seconds: photoDuration + titleDuration)
+    }
+
+    var montageTitleCards: [MontageTitleCard] {
+        TitleCardKind.allCases.compactMap { kind in
+            guard titleCards.contains(kind) else { return nil }
+            switch kind {
+            case .opening:
+                return MontageTitleCard(
+                    kind: kind,
+                    title: titleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? tripShortPlace
+                        : titleText,
+                    subtitle: tripDates
+                )
+            case .place:
+                return MontageTitleCard(kind: kind, title: tripShortPlace, subtitle: tripDates)
+            case .ending:
+                return MontageTitleCard(kind: kind, title: tripMonthYear, subtitle: "Made with TripReel")
+            }
+        }
+    }
+
+    func duration(for photo: ReelPhoto) -> Double {
+        photo.durationSeconds ?? secondsPerPhoto
     }
 
     var selectedTrack: MusicTrack? {
@@ -821,7 +1010,9 @@ final class TripReelModel: ObservableObject {
         }
         manuallyIncludedPhotoIDs.insert(restored.id)
         self.selectedTrip = updatedTrip
-        photos = Self.makeReelPhotos(from: updatedTrip, insights: activePhotoInsights)
+        photos = applyingPhotoEdits(
+            to: Self.makeReelPhotos(from: updatedTrip, insights: activePhotoInsights)
+        )
         cutPhotoIDs.formIntersection(Set(photos.map(\.id)))
         currentPhotoIndex = min(currentPhotoIndex, max(0, photos.count - 1))
     }
@@ -986,11 +1177,14 @@ final class TripReelModel: ObservableObject {
         }
 
         photoAnalysisStatus = "Shaping the strongest story"
+        let selectionAssets = trip.assets
+        let selectionResults = nativeResults
+        let existingDecisions = decisions
         let contextualDecisions = await Task.detached(priority: .userInitiated) {
             SmartHighlightSelector.decisions(
-                for: trip.assets,
-                nativeResults: nativeResults,
-                excluding: decisions
+                for: selectionAssets,
+                nativeResults: selectionResults,
+                excluding: existingDecisions
             )
         }.value
         guard photoAnalysisGeneration == generation, !Task.isCancelled else {
@@ -1444,8 +1638,13 @@ final class TripReelModel: ObservableObject {
     func startBuild(trip: Trip) {
         guard !trip.assets.isEmpty else { return }
         selectedTrip = trip
+        photoEditOverrides = [:]
         photos = Self.makeReelPhotos(from: trip, insights: activePhotoInsights)
         titleText = trip.shortPlace
+        titleCards = [.opening]
+        exportedVideoURL = nil
+        exportErrorMessage = nil
+        exportSaveMessage = nil
         workTask?.cancel()
         buildCount = 0
         currentPhotoIndex = 0
@@ -1524,22 +1723,159 @@ final class TripReelModel: ObservableObject {
         }
     }
 
+    func setFrameStyle(_ frameStyle: MontageFrameStyle, forPhotoID id: String) {
+        guard let index = photos.firstIndex(where: { $0.id == id }) else { return }
+        photos[index].frameStyle = frameStyle
+        photos[index].hasCustomFrameStyle = true
+        var edit = photoEditOverrides[id] ?? PhotoEditOverride()
+        edit.frameStyle = frameStyle
+        photoEditOverrides[id] = edit
+    }
+
+    func setMotionStyle(_ motionStyle: MontageMotionStyle, forPhotoID id: String) {
+        guard let index = photos.firstIndex(where: { $0.id == id }) else { return }
+        photos[index].motionStyle = motionStyle
+        var edit = photoEditOverrides[id] ?? PhotoEditOverride()
+        edit.motionStyle = motionStyle
+        photoEditOverrides[id] = edit
+    }
+
+    func setPhotoCrop(
+        scale: Double,
+        offsetX: Double,
+        offsetY: Double,
+        forPhotoID id: String
+    ) {
+        guard let index = photos.firstIndex(where: { $0.id == id }) else { return }
+        let scale = min(max(scale, 1), 3)
+        let offsetX = min(max(offsetX, -1), 1)
+        let offsetY = min(max(offsetY, -1), 1)
+        photos[index].cropScale = scale
+        photos[index].cropOffsetX = offsetX
+        photos[index].cropOffsetY = offsetY
+        var edit = photoEditOverrides[id] ?? PhotoEditOverride()
+        edit.cropScale = scale
+        edit.cropOffsetX = offsetX
+        edit.cropOffsetY = offsetY
+        photoEditOverrides[id] = edit
+    }
+
+    func setPhotoDuration(_ duration: Double, forPhotoID id: String) {
+        guard let index = photos.firstIndex(where: { $0.id == id }) else { return }
+        let duration = min(max(duration, 0.6), 4)
+        photos[index].durationSeconds = duration
+        var edit = photoEditOverrides[id] ?? PhotoEditOverride()
+        edit.durationSeconds = duration
+        photoEditOverrides[id] = edit
+    }
+
+    func resetPhotoEdit(id: String) {
+        guard let index = photos.firstIndex(where: { $0.id == id }) else { return }
+        photoEditOverrides[id] = nil
+        photos[index].frameStyle = photos[index].automaticFrameStyle
+        photos[index].hasCustomFrameStyle = false
+        photos[index].motionStyle = photos[index].automaticMotionStyle
+        photos[index].cropScale = 1
+        photos[index].cropOffsetX = 0
+        photos[index].cropOffsetY = 0
+        photos[index].durationSeconds = nil
+    }
+
     func startRender(hd: Bool = false) {
         workTask?.cancel()
+        let generation = UUID()
+        exportGeneration = generation
         exportQuality = hd ? .hd : .standard
         renderProgress = 0
+        exportErrorMessage = nil
+        exportSaveMessage = nil
         go(.rendering)
+
+        if usesDemoData {
+            workTask = Task { [weak self] in
+                guard let self else { return }
+                for step in 1...40 {
+                    try? await Task.sleep(nanoseconds: 120_000_000)
+                    guard !Task.isCancelled, self.exportGeneration == generation else { return }
+                    self.renderProgress = Double(step) / 40.0
+                }
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                guard !Task.isCancelled, self.exportGeneration == generation else { return }
+                self.go(.done)
+            }
+            return
+        }
+
+        guard !keptPhotos.isEmpty else {
+            exportErrorMessage = "Keep at least one photo before exporting."
+            go(.export)
+            return
+        }
+
+        let request = TripReelVideoExportRequest(
+            photos: keptPhotos,
+            titleCards: montageTitleCards,
+            secondsPerPhoto: secondsPerPhoto,
+            look: montageLook,
+            motionIntensity: montageMotionIntensity,
+            quality: exportQuality,
+            soundtrackURL: selectedTrack?.resourceName.flatMap {
+                Bundle.main.url(forResource: $0, withExtension: "m4a")
+            }
+        )
+        let exporter = videoExporter
         workTask = Task { [weak self] in
             guard let self else { return }
-            for step in 1...40 {
-                try? await Task.sleep(nanoseconds: 120_000_000)
-                guard !Task.isCancelled else { return }
-                self.renderProgress = Double(step) / 40.0
+            do {
+                let url = try await exporter.export(request) { [weak self] progress in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.exportGeneration == generation else { return }
+                        self.renderProgress = progress
+                    }
+                }
+                guard !Task.isCancelled, self.exportGeneration == generation else { return }
+                self.exportedVideoURL = url
+                self.renderProgress = 1
+                self.go(.done)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard self.exportGeneration == generation else { return }
+                self.exportErrorMessage = (error as? LocalizedError)?.errorDescription
+                    ?? "TripReel couldn't finish this export. Please try again."
+                self.go(.export)
             }
-            try? await Task.sleep(nanoseconds: 450_000_000)
-            guard !Task.isCancelled else { return }
-            self.go(.done)
         }
+    }
+
+    func cancelRender() {
+        exportGeneration = UUID()
+        workTask?.cancel()
+        workTask = nil
+        renderProgress = 0
+        go(.export)
+    }
+
+    @discardableResult
+    func saveExportToPhotos() async -> Bool {
+        guard let exportedVideoURL, !isSavingExport else { return false }
+        isSavingExport = true
+        exportSaveMessage = nil
+        defer { isSavingExport = false }
+        do {
+            try await videoExporter.saveToPhotoLibrary(exportedVideoURL)
+            exportSaveMessage = "Saved to Photos"
+            return true
+        } catch {
+            exportErrorMessage = (error as? LocalizedError)?.errorDescription
+                ?? "TripReel couldn't save this film to Photos."
+            return false
+        }
+    }
+
+    func dismissExportMessage() {
+        exportErrorMessage = nil
+        exportSaveMessage = nil
     }
 
     func restart() {
@@ -1593,6 +1929,7 @@ final class TripReelModel: ObservableObject {
         libraryAssetIDs: Set<String>
     ) {
         photos.removeAll { photoIDs.contains($0.id) }
+        for id in photoIDs { photoEditOverrides[id] = nil }
         cutPhotoIDs.subtract(photoIDs)
         cleanupSelection.subtract(photoIDs)
         history.removeAll { photoIDs.contains($0.id) }
@@ -1678,6 +2015,7 @@ final class TripReelModel: ObservableObject {
         selectedPhotoCount = 0
         resolvedCoordinates = [:]
         activePhotoInsights = [:]
+        photoEditOverrides = [:]
         cutPhotoIDs = []
         history = []
         cleanupSelection = []
@@ -1882,6 +2220,21 @@ final class TripReelModel: ObservableObject {
         }
     }
 
+    private func applyingPhotoEdits(to source: [ReelPhoto]) -> [ReelPhoto] {
+        source.map { photo in
+            guard let edit = photoEditOverrides[photo.id] else { return photo }
+            var edited = photo
+            edited.frameStyle = edit.frameStyle ?? photo.automaticFrameStyle
+            edited.hasCustomFrameStyle = edit.frameStyle != nil
+            edited.motionStyle = edit.motionStyle ?? photo.automaticMotionStyle
+            edited.cropScale = edit.cropScale ?? photo.cropScale
+            edited.cropOffsetX = edit.cropOffsetX ?? photo.cropOffsetX
+            edited.cropOffsetY = edit.cropOffsetY ?? photo.cropOffsetY
+            edited.durationSeconds = edit.durationSeconds
+            return edited
+        }
+    }
+
     private static func makeDemoTrips() -> [Trip] {
         [
             makeDemoTrip(id: "da-nang", place: "Da Nang, Vietnam", dates: "Aug 2 – Aug 9, 2026", count: 84, start: date(2026, 8, 2), end: date(2026, 8, 9), coverName: "my-khe-beach"),
@@ -1928,8 +2281,8 @@ final class TripReelModel: ObservableObject {
         )
     }
 
-    private static func durationText(photoCount: Int, secondsPerPhoto: Double) -> String {
-        let seconds = max(1, Int((Double(photoCount) * secondsPerPhoto).rounded()))
+    private static func durationText(seconds: Double) -> String {
+        let seconds = max(1, Int(seconds.rounded()))
         return "\(seconds / 60):\(String(format: "%02d", seconds % 60))"
     }
 

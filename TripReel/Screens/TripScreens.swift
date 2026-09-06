@@ -282,6 +282,7 @@ struct BuildingScreen: View {
                 ZStack {
                     MontageView(
                         photos: model.photos,
+                        titleCards: model.montageTitleCards,
                         showLabels: false,
                         look: model.montageLook,
                         motionIntensity: model.montageMotionIntensity,

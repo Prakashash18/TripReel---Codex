@@ -114,6 +114,7 @@ struct PhotoAssetView: View {
 struct MontageView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var photos: [ReelPhoto] = []
+    var titleCards: [MontageTitleCard] = []
     var usesBundledFallback = false
     var dim = false
     var watermark = false
@@ -124,46 +125,58 @@ struct MontageView: View {
     @State private var currentIndex = 0
     @State private var motionPhase = false
 
-    private var slideCount: Int {
-        if !photos.isEmpty { return photos.count }
-        return usesBundledFallback ? TripReelModel.assetNames.count : 0
+    private var timeline: [MontageTimelineItem] {
+        if !photos.isEmpty {
+            return MontageTimelineBuilder.make(photos: photos, titleCards: titleCards)
+        }
+        guard usesBundledFallback else {
+            return MontageTimelineBuilder.make(photos: [], titleCards: titleCards)
+        }
+        let fallbackPhotos = TripReelModel.assetNames.enumerated().map { index, imageName in
+            ReelPhoto(
+                id: "bundled-\(imageName)",
+                source: .bundled(imageName),
+                label: TripReelModel.photoLabels[index],
+                time: "—",
+                isSimilar: false,
+                pixelWidth: 1_024,
+                pixelHeight: 1_536,
+                frameStyle: index % 3 == 1 ? .postcard : .portraitMatte,
+                motionStyle: MontageMotionStyle.allCases[index % MontageMotionStyle.allCases.count]
+            )
+        }
+        return MontageTimelineBuilder.make(photos: fallbackPhotos, titleCards: titleCards)
+    }
+
+    private var currentItem: MontageTimelineItem? {
+        guard !timeline.isEmpty else { return nil }
+        return timeline[min(currentIndex, timeline.count - 1)]
     }
 
     private var currentSlide: MontageSlide? {
-        guard slideCount > 0 else { return nil }
-        let index = min(currentIndex, slideCount - 1)
-        if !photos.isEmpty {
-            let photo = photos[index]
-            return MontageSlide(
-                id: photo.id,
-                source: photo.source,
-                label: photo.label,
-                aspectRatio: photo.aspectRatio,
+        guard case let .photo(photo) = currentItem else { return nil }
+        let photoIndex = photos.firstIndex(where: { $0.id == photo.id }) ?? currentIndex
+        return MontageSlide(
+            id: photo.id,
+            source: photo.source,
+            label: photo.label,
+            aspectRatio: photo.aspectRatio,
                 frameStyle: resolvedFrameStyle(
                     planned: photo.frameStyle,
                     aspectRatio: photo.aspectRatio,
-                    index: index
-                ),
-                motionStyle: photo.motionStyle
-            )
-        }
-
-        let imageName = TripReelModel.assetNames[index]
-        return MontageSlide(
-            id: "bundled-\(imageName)",
-            source: .bundled(imageName),
-            label: TripReelModel.photoLabels[index],
-            aspectRatio: 2.0 / 3.0,
-            frameStyle: index % 3 == 1 ? .postcard : .portraitMatte,
-            motionStyle: MontageMotionStyle.allCases[index % MontageMotionStyle.allCases.count]
+                    index: photoIndex,
+                    isCustomized: photo.hasCustomFrameStyle
+            ),
+            motionStyle: photo.motionStyle,
+            cropScale: photo.cropScale,
+            cropOffsetX: photo.cropOffsetX,
+            cropOffsetY: photo.cropOffsetY
         )
     }
 
     private var contentKey: MontageContentKey {
         MontageContentKey(
-            count: slideCount,
-            firstID: photos.first?.id ?? (usesBundledFallback ? TripReelModel.assetNames.first : nil),
-            lastID: photos.last?.id ?? (usesBundledFallback ? TripReelModel.assetNames.last : nil),
+            items: timeline,
             look: look,
             motionIntensity: motionIntensity
         )
@@ -171,7 +184,16 @@ struct MontageView: View {
 
     var body: some View {
         ZStack {
-            if let slide = currentSlide {
+            if case let .title(card) = currentItem {
+                MontageTitleArtwork(
+                    card: card,
+                    backgroundSource: photos.first?.source,
+                    motionPhase: motionPhase,
+                    reduceMotion: reduceMotion
+                )
+                .id(card.id)
+                .transition(.opacity.combined(with: .scale(scale: 1.012)))
+            } else if let slide = currentSlide {
                 MontageSlideArtwork(
                     slide: slide,
                     showLabel: showLabels,
@@ -225,26 +247,30 @@ struct MontageView: View {
             motionPhase = false
             preheatUpcomingPhotos()
             guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: max(0.7, secondsPerSlide * 0.92))) {
+            let duration = currentItem?.duration(defaultPhotoDuration: secondsPerSlide) ?? secondsPerSlide
+            withAnimation(.easeInOut(duration: max(0.7, duration * 0.92))) {
                 motionPhase = true
             }
         }
         .task(id: contentKey) {
             currentIndex = 0
-            guard !reduceMotion, slideCount > 0 else { return }
+            guard !timeline.isEmpty else { return }
             while !Task.isCancelled {
-                let delay = UInt64(max(0.6, secondsPerSlide) * 1_000_000_000)
+                let duration = currentItem?.duration(defaultPhotoDuration: secondsPerSlide) ?? secondsPerSlide
+                let delay = UInt64(max(0.6, duration) * 1_000_000_000)
                 try? await Task.sleep(nanoseconds: delay)
                 guard !Task.isCancelled else { return }
-                currentIndex = (currentIndex + 1) % slideCount
+                currentIndex = (currentIndex + 1) % timeline.count
             }
         }
     }
 
     private func preheatUpcomingPhotos() {
-        guard !photos.isEmpty else { return }
-        let sources = (0..<min(5, photos.count)).map { offset in
-            photos[(currentIndex + offset) % photos.count].source
+        guard !timeline.isEmpty else { return }
+        let sources = (0..<min(7, timeline.count)).compactMap { offset -> PhotoSource? in
+            let item = timeline[(currentIndex + offset) % timeline.count]
+            guard case let .photo(photo) = item else { return nil }
+            return photo.source
         }
         PhotoAssetImageLoader.preheat(sources: sources)
     }
@@ -252,8 +278,10 @@ struct MontageView: View {
     private func resolvedFrameStyle(
         planned: MontageFrameStyle,
         aspectRatio: Double,
-        index: Int
+        index: Int,
+        isCustomized: Bool
     ) -> MontageFrameStyle {
+        if isCustomized { return planned }
         switch look {
         case .story:
             return planned
@@ -274,6 +302,61 @@ private struct MontageSlide {
     let aspectRatio: Double
     let frameStyle: MontageFrameStyle
     let motionStyle: MontageMotionStyle
+    let cropScale: Double
+    let cropOffsetX: Double
+    let cropOffsetY: Double
+}
+
+private struct MontageTitleArtwork: View {
+    let card: MontageTitleCard
+    let backgroundSource: PhotoSource?
+    let motionPhase: Bool
+    let reduceMotion: Bool
+
+    var body: some View {
+        ZStack {
+            if let backgroundSource {
+                PhotoAssetView(source: backgroundSource)
+                    .scaleEffect(motionPhase && !reduceMotion ? 1.06 : 1.015)
+                    .blur(radius: 18)
+                    .saturation(0.55)
+                    .opacity(0.36)
+            }
+
+            LinearGradient(
+                colors: [
+                    Color(red: 0.11, green: 0.055, blue: 0.025).opacity(0.96),
+                    Color(red: 0.035, green: 0.025, blue: 0.02).opacity(0.88),
+                    .black.opacity(0.92)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            Circle()
+                .fill(TR.accent.opacity(0.16))
+                .frame(width: 220, height: 220)
+                .blur(radius: 42)
+                .offset(x: motionPhase && !reduceMotion ? 90 : 62, y: -170)
+
+            VStack(spacing: 13) {
+                MetadataText(text: card.kind.name, color: TR.accent.opacity(0.78))
+                Text(card.title)
+                    .font(TR.display(card.kind == .opening ? 42 : 34))
+                    .tracking(-0.6)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.62)
+                    .foregroundStyle(TR.cream)
+                Text(card.subtitle)
+                    .font(TR.ui(13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 30)
+            .offset(y: motionPhase && !reduceMotion ? -5 : 5)
+        }
+    }
 }
 
 private extension MontageMotionStyle {
@@ -323,8 +406,8 @@ private struct MontageSlideArtwork: View {
 
     private func fullBleed(size: CGSize) -> some View {
         PhotoAssetView(source: slide.source, label: showLabel ? slide.label : nil)
-            .scaleEffect(fullBleedScale)
-            .offset(motionOffset(in: size))
+            .scaleEffect(fullBleedScale * CGFloat(slide.cropScale))
+            .offset(combinedOffset(in: size))
     }
 
     private func portraitMatte(size: CGSize) -> some View {
@@ -354,8 +437,8 @@ private struct MontageSlideArtwork: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
             .shadow(color: .black.opacity(0.62), radius: 26, y: 16)
-            .scaleEffect(framedScale)
-            .offset(framedOffset(in: size))
+            .scaleEffect(framedScale * CGFloat(slide.cropScale))
+            .offset(combinedFramedOffset(in: size))
         }
     }
 
@@ -364,8 +447,8 @@ private struct MontageSlideArtwork: View {
             Color(red: 0.035, green: 0.027, blue: 0.021)
             PhotoAssetView(source: slide.source, contentMode: .fit)
                 .frame(height: size.height * 0.62)
-                .scaleEffect(framedScale)
-                .offset(framedOffset(in: size))
+                .scaleEffect(framedScale * CGFloat(slide.cropScale))
+                .offset(combinedFramedOffset(in: size))
 
             VStack {
                 filmEdge
@@ -409,8 +492,8 @@ private struct MontageSlideArtwork: View {
             .padding(8)
             .background(TR.cream)
             .rotationEffect(.degrees(postcardRotation))
-            .scaleEffect(framedScale)
-            .offset(framedOffset(in: size))
+            .scaleEffect(framedScale * CGFloat(slide.cropScale))
+            .offset(combinedFramedOffset(in: size))
             .shadow(color: .black.opacity(0.62), radius: 24, y: 17)
         }
     }
@@ -470,6 +553,25 @@ private struct MontageSlideArtwork: View {
         return CGSize(width: full.width * 0.30, height: full.height * 0.30)
     }
 
+    private func cropOffset(in size: CGSize) -> CGSize {
+        CGSize(
+            width: size.width * 0.24 * CGFloat(slide.cropOffsetX),
+            height: size.height * 0.24 * CGFloat(slide.cropOffsetY)
+        )
+    }
+
+    private func combinedOffset(in size: CGSize) -> CGSize {
+        let motion = motionOffset(in: size)
+        let crop = cropOffset(in: size)
+        return CGSize(width: motion.width + crop.width, height: motion.height + crop.height)
+    }
+
+    private func combinedFramedOffset(in size: CGSize) -> CGSize {
+        let motion = framedOffset(in: size)
+        let crop = cropOffset(in: size)
+        return CGSize(width: motion.width + crop.width, height: motion.height + crop.height)
+    }
+
     private var postcardRotation: Double {
         let amount = Double(amplitude) * 1.5
         switch slide.motionStyle {
@@ -503,9 +605,7 @@ private struct MontageSlideArtwork: View {
 }
 
 private struct MontageContentKey: Hashable {
-    let count: Int
-    let firstID: String?
-    let lastID: String?
+    let items: [MontageTimelineItem]
     let look: MontageLook
     let motionIntensity: MontageMotionIntensity
 }

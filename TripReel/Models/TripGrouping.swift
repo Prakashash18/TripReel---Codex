@@ -602,7 +602,7 @@ enum TripDetector {
         }?.coordinate
     }
 
-    private static func unitVector(for coordinate: PhotoCoordinate) -> (x: Double, y: Double, z: Double) {
+    static func unitVector(for coordinate: PhotoCoordinate) -> (x: Double, y: Double, z: Double) {
         let latitude = coordinate.latitude * .pi / 180
         let longitude = coordinate.longitude * .pi / 180
         return (
@@ -612,7 +612,7 @@ enum TripDetector {
         )
     }
 
-    private static func coordinate(x: Double, y: Double, z: Double) -> PhotoCoordinate? {
+    static func coordinate(x: Double, y: Double, z: Double) -> PhotoCoordinate? {
         let magnitude = sqrt((x * x) + (y * y) + (z * z))
         guard magnitude > 1e-12 else { return nil }
         return PhotoCoordinate(
@@ -642,8 +642,15 @@ enum NearbyEventDetector {
     private static let maximumSessionGap: TimeInterval = 4 * 60 * 60
     private static let maximumDuration: TimeInterval = 18 * 60 * 60
     private static let maximumDistanceFromHabitualPlace = 150.0
-    private static let compactRadiusKilometers = 25.0
-    private static let minimumCompactFraction = 0.75
+    // Nearby cards represent one walkable place, not a whole city. Yishun and
+    // Marina Bay are roughly twenty kilometres apart, so the former 25 km
+    // radius could blend home photos into a city outing.
+    private static let eventRadiusKilometers = 5.0
+    private static let habitualBoundaryRadiusKilometers = 4.0
+    private static let localHabitualRadiusKilometers = 3.0
+    private static let habitualMinimumWeeks = 8
+    private static let habitualMinimumSpan: TimeInterval = 90 * 24 * 60 * 60
+    private static let unlocatedEdgeAllowance: TimeInterval = 30 * 60
     private static let maximumResults = 20
 
     static func detect(
@@ -657,7 +664,7 @@ enum NearbyEventDetector {
             .sorted(by: TripDetector.chronologicalOrder)
         guard !candidates.isEmpty else { return [] }
 
-        let habitualPlaces = TripDetector.habitualPlaceCentroids(
+        let habitualPlaces = localHabitualPlaceCentroids(
             in: candidates,
             calendar: calendar,
             shouldCancel: shouldCancel
@@ -667,11 +674,12 @@ enum NearbyEventDetector {
         var events: [DetectedTrip] = []
         for session in sessions(from: candidates, calendar: calendar) {
             guard !shouldCancel() else { return [] }
-            guard let event = makeEvent(
+            let localEvents = spatialEvents(
                 from: session,
-                habitualPlaces: habitualPlaces
-            ) else { continue }
-            events.append(event)
+                habitualPlaces: habitualPlaces,
+                shouldCancel: shouldCancel
+            )
+            events.append(contentsOf: localEvents)
         }
 
         return Array(events.sorted {
@@ -704,30 +712,247 @@ enum NearbyEventDetector {
         return sessions
     }
 
+    private struct EventCluster {
+        var anchors: [PhotoMetadata]
+
+        var centroid: PhotoCoordinate {
+            TripDetector.sphericalCentroid(of: anchors) ?? anchors[0].coordinate!
+        }
+
+        mutating func add(_ photo: PhotoMetadata) {
+            anchors.append(photo)
+        }
+    }
+
+    private struct HabitualCluster {
+        private(set) var earliestDate: Date
+        private(set) var latestDate: Date
+        private(set) var weekStarts: Set<Date>
+        private var x: Double
+        private var y: Double
+        private var z: Double
+
+        init(photo: PhotoMetadata, weekStart: Date) {
+            let vector = TripDetector.unitVector(for: photo.coordinate!)
+            earliestDate = photo.creationDate!
+            latestDate = photo.creationDate!
+            weekStarts = [weekStart]
+            x = vector.x
+            y = vector.y
+            z = vector.z
+        }
+
+        mutating func add(_ photo: PhotoMetadata, weekStart: Date) {
+            let vector = TripDetector.unitVector(for: photo.coordinate!)
+            earliestDate = min(earliestDate, photo.creationDate!)
+            latestDate = max(latestDate, photo.creationDate!)
+            weekStarts.insert(weekStart)
+            x += vector.x
+            y += vector.y
+            z += vector.z
+        }
+
+        var centroid: PhotoCoordinate {
+            TripDetector.coordinate(x: x, y: y, z: z)!
+        }
+    }
+
+    private struct HabitualCell: Hashable {
+        let x: Int
+        let y: Int
+        let z: Int
+    }
+
+    /// The multi-day trip detector intentionally learns "home region" at city
+    /// scale. Nearby needs a separate neighbourhood-scale signal; otherwise a
+    /// compact country/city such as Singapore collapses Yishun and Marina Bay
+    /// into the same habitual centroid.
+    private static func localHabitualPlaceCentroids(
+        in photos: [PhotoMetadata],
+        calendar: Calendar,
+        shouldCancel: @Sendable () -> Bool
+    ) -> [PhotoCoordinate] {
+        var clusters: [HabitualCluster] = []
+        var indexesByCell: [HabitualCell: [Int]] = [:]
+
+        for (offset, photo) in photos.enumerated() {
+            if offset.isMultiple(of: 256), shouldCancel() { return [] }
+            guard let coordinate = photo.coordinate, let date = photo.creationDate else { continue }
+            let weekStart = calendar.dateInterval(of: .weekOfYear, for: date)?.start
+                ?? calendar.startOfDay(for: date)
+            let cell = habitualCell(for: coordinate)
+            var candidateIndexes = Set<Int>()
+            for x in -1...1 {
+                for y in -1...1 {
+                    for z in -1...1 {
+                        candidateIndexes.formUnion(indexesByCell[
+                            HabitualCell(x: cell.x + x, y: cell.y + y, z: cell.z + z)
+                        ] ?? [])
+                    }
+                }
+            }
+
+            let nearest = candidateIndexes
+                .map { index in
+                    (index, TripDetector.distanceKilometers(coordinate, clusters[index].centroid))
+                }
+                .filter { $0.1 <= localHabitualRadiusKilometers }
+                .min {
+                    if $0.1 != $1.1 { return $0.1 < $1.1 }
+                    return $0.0 < $1.0
+                }
+            if let nearest {
+                let oldCell = habitualCell(for: clusters[nearest.0].centroid)
+                clusters[nearest.0].add(photo, weekStart: weekStart)
+                let newCell = habitualCell(for: clusters[nearest.0].centroid)
+                if oldCell != newCell {
+                    indexesByCell[oldCell]?.removeAll { $0 == nearest.0 }
+                    indexesByCell[newCell, default: []].append(nearest.0)
+                }
+            } else {
+                clusters.append(HabitualCluster(photo: photo, weekStart: weekStart))
+                indexesByCell[cell, default: []].append(clusters.count - 1)
+            }
+        }
+
+        return clusters.compactMap { cluster in
+            guard cluster.weekStarts.count >= habitualMinimumWeeks,
+                  cluster.latestDate.timeIntervalSince(cluster.earliestDate) >= habitualMinimumSpan else {
+                return nil
+            }
+            return cluster.centroid
+        }
+    }
+
+    private static func habitualCell(for coordinate: PhotoCoordinate) -> HabitualCell {
+        let vector = TripDetector.unitVector(for: coordinate)
+        let angularRadius = localHabitualRadiusKilometers / 6_371.0088
+        let chord = 2 * sin(angularRadius / 2)
+        return HabitualCell(
+            x: Int(floor(vector.x / chord)),
+            y: Int(floor(vector.y / chord)),
+            z: Int(floor(vector.z / chord))
+        )
+    }
+
+    /// Splits a time session by actual place before adding unlocated frames.
+    /// A reliable home anchor is a hard boundary; photos without GPS are only
+    /// attached within the observed outing's time range (plus a small edge), so
+    /// an unlocated frame taken at home does not bridge two distant places.
+    private static func spatialEvents(
+        from photos: [PhotoMetadata],
+        habitualPlaces: [PhotoCoordinate],
+        shouldCancel: @Sendable () -> Bool
+    ) -> [DetectedTrip] {
+        let located = photos.filter { $0.coordinate != nil }
+        guard !located.isEmpty else { return [] }
+
+        var clusters: [EventCluster] = []
+        var anchorCluster: [String: Int] = [:]
+        var homeAnchorDates: [Date] = []
+
+        for (offset, photo) in located.enumerated() {
+            if offset.isMultiple(of: 128), shouldCancel() { return [] }
+            let coordinate = photo.coordinate!
+            if habitualPlaces.contains(where: {
+                TripDetector.distanceKilometers(coordinate, $0) <= habitualBoundaryRadiusKilometers
+            }) {
+                if let date = photo.creationDate { homeAnchorDates.append(date) }
+                continue
+            }
+
+            let nearest = clusters.indices
+                .map { index in
+                    (index, TripDetector.distanceKilometers(coordinate, clusters[index].centroid))
+                }
+                .filter { $0.1 <= eventRadiusKilometers }
+                .min {
+                    if $0.1 != $1.1 { return $0.1 < $1.1 }
+                    return $0.0 < $1.0
+                }
+
+            let clusterIndex: Int
+            if let nearest {
+                clusterIndex = nearest.0
+                clusters[clusterIndex].add(photo)
+            } else {
+                clusterIndex = clusters.count
+                clusters.append(EventCluster(anchors: [photo]))
+            }
+            anchorCluster[photo.id] = clusterIndex
+        }
+
+        guard !clusters.isEmpty else { return [] }
+        var unlocatedCluster: [String: Int] = [:]
+        for photo in photos where photo.coordinate == nil {
+            guard let date = photo.creationDate else { continue }
+            let nearestHomeDistance = homeAnchorDates.map {
+                abs($0.timeIntervalSince(date))
+            }.min()
+            let nearest = clusters.enumerated().compactMap { index, cluster -> (Int, TimeInterval)? in
+                guard let first = cluster.anchors.compactMap(\.creationDate).min(),
+                      let last = cluster.anchors.compactMap(\.creationDate).max() else { return nil }
+                let window = ClosedRange(
+                    uncheckedBounds: (
+                        lower: first.addingTimeInterval(-unlocatedEdgeAllowance),
+                        upper: last.addingTimeInterval(unlocatedEdgeAllowance)
+                    )
+                )
+                guard window.contains(date) else { return nil }
+                let distance = cluster.anchors.compactMap(\.creationDate).map {
+                    abs($0.timeIntervalSince(date))
+                }.min() ?? .greatestFiniteMagnitude
+                return (index, distance)
+            }.min {
+                if $0.1 != $1.1 { return $0.1 < $1.1 }
+                return $0.0 < $1.0
+            }
+            guard let nearest,
+                  nearestHomeDistance.map({ nearest.1 < $0 }) ?? true else { continue }
+            unlocatedCluster[photo.id] = nearest.0
+        }
+
+        return clusters.enumerated().compactMap { index, cluster in
+            guard cluster.anchors.count >= minimumLocatedPhotoCount,
+                  cluster.anchors.contains(where: { $0.creationDate != nil }) else {
+                return nil
+            }
+            let clusterIDs = Set(cluster.anchors.map(\.id))
+            let members = photos.filter { photo in
+                if let assigned = anchorCluster[photo.id] {
+                    return assigned == index
+                }
+                return unlocatedCluster[photo.id] == index
+            }
+
+            return makeEvent(
+                from: members,
+                reliableCoordinates: cluster.anchors,
+                habitualPlaces: habitualPlaces,
+                preferredID: clusterIDs.sorted().first
+            )
+        }
+    }
+
     private static func makeEvent(
         from photos: [PhotoMetadata],
-        habitualPlaces: [PhotoCoordinate]
+        reliableCoordinates: [PhotoMetadata],
+        habitualPlaces: [PhotoCoordinate],
+        preferredID: String?
     ) -> DetectedTrip? {
+        let photos = photos.sorted(by: TripDetector.chronologicalOrder)
         guard photos.count >= minimumPhotoCount,
               let startDate = photos.first?.creationDate,
               let endDate = photos.last?.creationDate,
               endDate.timeIntervalSince(startDate) <= maximumDuration else { return nil }
 
-        let located = photos.filter { $0.coordinate != nil }
-        guard located.count >= minimumLocatedPhotoCount,
-              let centroid = TripDetector.sphericalCentroid(of: located),
+        guard reliableCoordinates.count >= minimumLocatedPhotoCount,
+              let centroid = TripDetector.sphericalCentroid(of: reliableCoordinates),
               habitualPlaces.contains(where: {
                   TripDetector.distanceKilometers(centroid, $0) <= maximumDistanceFromHabitualPlace
               }) else { return nil }
 
-        let compactCount = located.reduce(into: 0) { count, photo in
-            if TripDetector.distanceKilometers(photo.coordinate!, centroid) <= compactRadiusKilometers {
-                count += 1
-            }
-        }
-        guard Double(compactCount) / Double(located.count) >= minimumCompactFraction else { return nil }
-
-        let cover = located.min { lhs, rhs in
+        let cover = reliableCoordinates.min { lhs, rhs in
             let left = TripDetector.distanceKilometers(lhs.coordinate!, centroid)
             let right = TripDetector.distanceKilometers(rhs.coordinate!, centroid)
             if left != right { return left < right }
@@ -735,7 +960,7 @@ enum NearbyEventDetector {
         } ?? photos[(photos.count - 1) / 2]
 
         return DetectedTrip(
-            id: "nearby-\(photos[0].id)",
+            id: "nearby-\(preferredID ?? photos[0].id)",
             photos: photos,
             startDate: startDate,
             endDate: endDate,

@@ -355,6 +355,89 @@ final class TripGroupingTests: XCTestCase {
         )
     }
 
+    func testNearbyDetectorKeepsYishunHomePhotosOutOfMarinaBayOuting() throws {
+        let evidence = [0, 14, 28, 42, 56, 70, 84, 91].map { day in
+            photo(
+                id: String(format: "yishun-evidence-%03d", day),
+                date: origin.addingTimeInterval(Double(day) * 24 * 60 * 60),
+                coordinate: .yishun
+            )
+        }
+        let start = utcCalendar.startOfDay(for: origin)
+            .addingTimeInterval((105 * 24 + 9) * 60 * 60)
+        let homeBefore = photos(
+            prefix: "home-before",
+            count: 4,
+            hours: 0.5,
+            coordinate: .yishun,
+            start: start
+        )
+        let marinaBay = photos(
+            prefix: "marina",
+            count: 9,
+            hours: 2,
+            coordinate: .marinaBay,
+            start: start.addingTimeInterval(75 * 60)
+        )
+        let homeAfter = photos(
+            prefix: "home-after",
+            count: 4,
+            hours: 0.5,
+            coordinate: .yishun,
+            start: start.addingTimeInterval(3.5 * 60 * 60)
+        )
+
+        let events = NearbyEventDetector.detect(
+            in: evidence + homeBefore + marinaBay + homeAfter,
+            calendar: utcCalendar
+        )
+        let event = try XCTUnwrap(events.first)
+
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(Set(event.photos.map(\.id)), Set(marinaBay.map(\.id)))
+        XCTAssertFalse(event.photos.contains { $0.id.hasPrefix("home-") })
+        XCTAssertLessThan(
+            TripDetector.distanceKilometers(try XCTUnwrap(event.centroid), .marinaBay),
+            0.5
+        )
+    }
+
+    func testNearbyDetectorDoesNotAttachUnlocatedHomeFramesOutsideTheOuting() throws {
+        let evidence = [0, 14, 28, 42, 56, 70, 84, 91].map { day in
+            photo(
+                id: String(format: "yishun-evidence-%03d", day),
+                date: origin.addingTimeInterval(Double(day) * 24 * 60 * 60),
+                coordinate: .yishun
+            )
+        }
+        let start = utcCalendar.startOfDay(for: origin)
+            .addingTimeInterval((105 * 24 + 9) * 60 * 60)
+        let unlocatedAtHome = photos(
+            prefix: "unlocated-home",
+            count: 5,
+            hours: 0.5,
+            coordinate: nil,
+            start: start
+        )
+        let marinaBay = photos(
+            prefix: "marina",
+            count: 9,
+            hours: 2,
+            coordinate: .marinaBay,
+            start: start.addingTimeInterval(75 * 60)
+        )
+
+        let event = try XCTUnwrap(
+            NearbyEventDetector.detect(
+                in: evidence + unlocatedAtHome + marinaBay,
+                calendar: utcCalendar
+            ).first
+        )
+
+        XCTAssertEqual(Set(event.photos.map(\.id)), Set(marinaBay.map(\.id)))
+        XCTAssertFalse(event.photos.contains { $0.id.hasPrefix("unlocated-home") })
+    }
+
     private func habitualEvidence() -> [PhotoMetadata] {
         [0, 14, 28, 42, 56, 70, 84, 91].map { day in
             photo(
@@ -405,6 +488,8 @@ final class TripGroupingTests: XCTestCase {
 
 private extension PhotoCoordinate {
     static let singapore = PhotoCoordinate(latitude: 1.3521, longitude: 103.8198)
+    static let yishun = PhotoCoordinate(latitude: 1.4304, longitude: 103.8354)
+    static let marinaBay = PhotoCoordinate(latitude: 1.2834, longitude: 103.8607)
     static let tokyo = PhotoCoordinate(latitude: 35.6762, longitude: 139.6503)
     static let paris = PhotoCoordinate(latitude: 48.8566, longitude: 2.3522)
 }
