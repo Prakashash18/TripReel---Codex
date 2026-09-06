@@ -349,6 +349,7 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(model.photos[0].cropOffsetX, 0.4, accuracy: 0.001)
         XCTAssertEqual(model.photos[0].cropOffsetY, -0.3, accuracy: 0.001)
         XCTAssertEqual(model.duration(for: model.photos[0]), 3.1, accuracy: 0.001)
+        XCTAssertEqual(model.customizedPhotoCount, 1)
 
         model.resetPhotoEdit(id: photo.id)
 
@@ -359,9 +360,10 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(model.photos[0].cropOffsetX, photo.automaticCropOffsetX, accuracy: 0.001)
         XCTAssertEqual(model.photos[0].cropOffsetY, photo.automaticCropOffsetY, accuracy: 0.001)
         XCTAssertNil(model.photos[0].durationSeconds)
+        XCTAssertEqual(model.customizedPhotoCount, 0)
     }
 
-    func testReturningToRefineStartsAtTheBeginningWithoutLosingCuts() {
+    func testEditingPhotoSelectionStartsAtTheBeginningWithoutLosingCuts() {
         let model = makeModel()
         let firstID = model.photos[0].id
         model.currentPhotoIndex = min(5, model.photos.count - 1)
@@ -371,12 +373,25 @@ final class TripReelModelTests: XCTestCase {
         ]
         model.go(.secondWatch)
 
-        model.returnToRefine()
+        model.editPhotoSelection()
 
         XCTAssertEqual(model.screen, .cut)
         XCTAssertEqual(model.currentPhotoIndex, 0)
         XCTAssertTrue(model.history.isEmpty)
         XCTAssertTrue(model.cutPhotoIDs.contains(firstID))
+    }
+
+    func testFinishingPhotoSelectionReturnsDirectlyToFilmStudio() {
+        let model = makeModel()
+        model.go(.cut)
+        model.history = [
+            PhotoDecision(id: model.photos[0].id, previousIndex: 0, previousWasCut: false)
+        ]
+
+        model.finishPhotoSelection()
+
+        XCTAssertEqual(model.screen, .secondWatch)
+        XCTAssertTrue(model.history.isEmpty)
     }
 
     func testProductionRenderUsesEditedTimelineAndProducesShareableURL() async throws {
@@ -589,6 +604,73 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertGreaterThan(item.cropOffsetY, 0)
     }
 
+    func testMontagePlannerPreservesCompleteGroupComposition() throws {
+        let asset = makeAsset(
+            "landscape-group",
+            start: Date(timeIntervalSince1970: 1_800_000_000),
+            minutes: 0,
+            width: 4_032,
+            height: 3_024
+        )
+        let insight = MontagePhotoInsight(
+            memoryScore: 0.94,
+            aestheticScore: 0.86,
+            contentKind: .people,
+            peopleCount: 4,
+            focalPoint: NativePhotoFocalPoint(
+                x: 0.50,
+                y: 0.48,
+                coverage: 0.62,
+                source: .people
+            )
+        )
+
+        let item = try XCTUnwrap(
+            MontageSequencePlanner.plan(
+                assets: [asset],
+                insights: [asset.id: insight]
+            ).first
+        )
+
+        XCTAssertTrue(item.protectsPeople)
+        XCTAssertEqual(item.frameStyle, .cinematic)
+        XCTAssertEqual(item.cropScale, 1)
+        XCTAssertEqual(item.cropOffsetX, 0)
+        XCTAssertEqual(item.cropOffsetY, 0)
+        XCTAssertEqual(
+            MontageFrameResolver.resolve(
+                planned: item.frameStyle,
+                aspectRatio: 4.0 / 3.0,
+                index: 0,
+                isCustomized: false,
+                look: .clean,
+                protectsPeople: item.protectsPeople
+            ),
+            .cinematic
+        )
+    }
+
+    func testPeopleSafeAutomaticFramingYieldsToAnExplicitMotionEdit() {
+        var photo = ReelPhoto(
+            id: "people-frame",
+            source: .bundled("my-khe-beach"),
+            label: "Friends",
+            time: "10:00",
+            isSimilar: false,
+            pixelWidth: 4_032,
+            pixelHeight: 3_024,
+            protectsPeople: true,
+            frameStyle: .cinematic,
+            motionStyle: .zoomIn
+        )
+
+        XCTAssertTrue(photo.usesAutomaticPeopleFraming)
+
+        photo.motionStyle = .panLeft
+
+        XCTAssertFalse(photo.usesAutomaticPeopleFraming)
+    }
+
     func testMontagePlannerKeepsDaysInStoryOrder() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -684,6 +766,54 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertFalse(decisions.contains { $0.id == group.id })
         XCTAssertEqual(decisions.first { $0.id == duplicate.id }?.reason, .similarMoment)
         XCTAssertEqual(assets.count - decisions.count, 24)
+    }
+
+    func testHighlightSelectorClustersNonidenticalBurstAndKeepsStrongestFrame() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let assets = (0..<20).map {
+            makeAsset("burst-candidate-\($0)", start: start, minutes: $0 * 5)
+        }
+        let firstPrint = NativePhotoFeaturePrint(
+            revision: 2,
+            elementTypeRawValue: 1,
+            elementCount: 3,
+            data: [Float(0), 0, 0].withUnsafeBytes { Data($0) }
+        )
+        let changedExpressionPrint = NativePhotoFeaturePrint(
+            revision: 2,
+            elementTypeRawValue: 1,
+            elementCount: 3,
+            data: [Float(11), 0, 0].withUnsafeBytes { Data($0) }
+        )
+        let weaker = assets[0]
+        let stronger = assets[1]
+        let results = [
+            weaker.id: makeNativeResult(
+                id: weaker.id,
+                memory: 0.42,
+                aesthetic: 0.46,
+                tags: [.people],
+                featurePrint: firstPrint
+            ),
+            stronger.id: makeNativeResult(
+                id: stronger.id,
+                memory: 0.94,
+                aesthetic: 0.90,
+                tags: [.people, .groupPhoto, .strongMemory],
+                featurePrint: changedExpressionPrint
+            )
+        ]
+
+        let decisions = SmartHighlightSelector.decisions(
+            for: assets,
+            nativeResults: results,
+            excluding: [:]
+        )
+
+        XCTAssertEqual(decisions.count, 1)
+        XCTAssertEqual(decisions.first?.id, weaker.id)
+        XCTAssertEqual(decisions.first?.reason, .similarMoment)
+        XCTAssertFalse(decisions.contains { $0.id == stronger.id })
     }
 
     private func makeAsset(

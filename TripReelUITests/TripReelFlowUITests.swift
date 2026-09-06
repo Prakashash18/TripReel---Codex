@@ -21,18 +21,24 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("building-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 7))
 
-        app.buttons["Refine it"].tap()
+        screen("edit-film-button").tap()
+        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
+
+        screen("photo-selection-button").tap()
         XCTAssertTrue(screen("cut-screen").waitForExistence(timeout: 3))
 
         app.buttons["Cut photo"].tap()
-        let doneCutting = app.buttons["Done cutting"]
-        expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: doneCutting)
+        let doneSelecting = screen("finish-photo-selection-button")
+        expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: doneSelecting)
         waitForExpectations(timeout: 2)
-        doneCutting.tap()
+        doneSelecting.tap()
+        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
+
+        app.buttons["Pace"].tap()
         XCTAssertTrue(screen("pace-screen").waitForExistence(timeout: 3))
 
         app.sliders.firstMatch.adjust(toNormalizedSliderPosition: 0.72)
-        app.buttons["Watch it"].tap()
+        app.buttons["Apply pace"].tap()
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
 
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Style")).firstMatch.tap()
@@ -72,7 +78,7 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("trips-screen").exists)
     }
 
-    func testSecondWatchOffersFullPreviewAndReturnsToRefine() {
+    func testFilmStudioOffersFullPreviewAndPhotoSelectionLoop() {
         app.terminate()
         app.launchArguments = ["-qaScreen", "secondWatch", "-qaNoHint"]
         app.launch()
@@ -83,8 +89,10 @@ final class TripReelFlowUITests: XCTestCase {
         app.buttons["Close preview"].tap()
 
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
-        screen("refine-photos-button").tap()
+        screen("photo-selection-button").tap()
         XCTAssertTrue(screen("cut-screen").waitForExistence(timeout: 3))
+        screen("finish-photo-selection-button").tap()
+        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
     }
 
     func testCleanupShowsDestructiveWarningBeforePhotosRequest() {

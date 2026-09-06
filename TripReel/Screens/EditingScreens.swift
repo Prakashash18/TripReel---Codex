@@ -45,7 +45,7 @@ struct FirstWatchScreen: View {
                         }
                     }
 
-                    Text(model.excludedPhotos.isEmpty ? "Here's the whole trip, uncut." : "Here's your smart first cut.")
+                    Text(model.excludedPhotos.isEmpty ? "Your film is ready to shape." : "Your smart first cut is ready.")
                         .font(TR.display(29))
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -110,12 +110,13 @@ struct FirstWatchScreen: View {
                     }
 
                     VStack(spacing: 11) {
-                        Button("Refine it") {
-                            model.go(.cut)
+                        Button("Edit your film") {
+                            model.go(.secondWatch)
                         }
                         .buttonStyle(CreamButtonStyle())
+                        .accessibilityIdentifier("edit-film-button")
 
-                        Button("Looks good, export") {
+                        Button("Export this cut") {
                             model.go(.export)
                         }
                         .buttonStyle(GlassButtonStyle())
@@ -159,14 +160,15 @@ struct CutScreen: View {
 
                             Spacer()
 
-                            Button("Done cutting") {
-                                model.go(.pace)
+                            Button("Done") {
+                                model.finishPhotoSelection()
                             }
                             .font(TR.ui(13, weight: .semibold))
                             .foregroundStyle(TR.accent)
                             .buttonStyle(.plain)
                             .frame(width: 96, alignment: .trailing)
                             .disabled(locked)
+                            .accessibilityIdentifier("finish-photo-selection-button")
                         }
 
                         GeometryReader { bar in
@@ -218,7 +220,7 @@ struct CutScreen: View {
                             }
                         }
 
-                        Text("Cutting only removes it from the film.")
+                        Text("Choose what stays in this film. Nothing is deleted.")
                             .font(TR.ui(12))
                             .foregroundStyle(.white.opacity(0.43))
                     }
@@ -447,7 +449,7 @@ struct PaceScreen: View {
                 Spacer()
 
                 VStack(spacing: 14) {
-                    Button("Watch it") {
+                    Button("Apply pace") {
                         model.go(.secondWatch)
                     }
                     .buttonStyle(CreamButtonStyle())
@@ -540,7 +542,7 @@ struct SecondWatchScreen: View {
 
             VStack(spacing: 0) {
                 VStack(spacing: 7) {
-                    MetadataText(text: "Your cut · \(model.tripShortPlace)", color: .white.opacity(0.82))
+                    MetadataText(text: "FILM STUDIO · \(model.tripShortPlace)", color: .white.opacity(0.82))
                     Text("\(model.keptCount) photos · \(model.filmDurationText)\(trackSuffix)")
                         .font(TR.ui(12))
                         .foregroundStyle(.white.opacity(0.53))
@@ -576,7 +578,7 @@ struct SecondWatchScreen: View {
                             .foregroundStyle(TR.accent)
                     }
 
-                    Text(model.cutPhotoIDs.isEmpty ? "Nothing cut. This is the film." : "You cut \(model.cutPhotoIDs.count). This is the film.")
+                    Text("Make it yours.")
                         .font(TR.display(29))
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -611,34 +613,34 @@ struct SecondWatchScreen: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("full-preview-button")
 
-                    Button {
-                        showPhotoEditor = true
-                    } label: {
-                        HStack(spacing: 11) {
-                            Image(systemName: "crop.rotate")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(TR.accent)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Edit individual photos")
-                                    .font(TR.ui(13, weight: .semibold))
-                                Text("Reframe, pinch, move, animate and time each shot")
-                                    .font(TR.ui(10))
-                                    .foregroundStyle(.white.opacity(0.48))
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(.white.opacity(0.34))
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 3),
+                        spacing: 7
+                    ) {
+                        EditOptionButton(
+                            symbol: "photo.stack",
+                            label: "Photos",
+                            badge: "\(model.keptCount) IN",
+                            badgeColor: TR.keep
+                        ) {
+                            model.editPhotoSelection()
                         }
-                        .foregroundStyle(TR.cream)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .glassCard(cornerRadius: 15)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("photo-editor-button")
+                        .accessibilityIdentifier("photo-selection-button")
 
-                    HStack(spacing: 7) {
+                        EditOptionButton(
+                            symbol: "crop.rotate",
+                            label: "Framing",
+                            badge: model.customizedPhotoCount == 0
+                                ? "AUTO"
+                                : "\(model.customizedPhotoCount) EDITED",
+                            badgeColor: model.customizedPhotoCount == 0
+                                ? .white.opacity(0.48)
+                                : TR.keep
+                        ) {
+                            showPhotoEditor = true
+                        }
+                        .accessibilityIdentifier("photo-editor-button")
+
                         EditOptionButton(symbol: "wand.and.stars", label: "Style", badge: model.montageLook.name.uppercased(), badgeColor: TR.accent) {
                             showStyle = true
                         }
@@ -654,23 +656,13 @@ struct SecondWatchScreen: View {
                         }
                     }
 
-                    MetadataText(text: "STYLE · TITLES · MUSIC · PACE", color: .white.opacity(0.38))
+                    MetadataText(text: "EVERY EDIT RETURNS HERE", color: .white.opacity(0.38))
                         .frame(maxWidth: .infinity, alignment: .center)
 
-                    VStack(spacing: 11) {
-                        Button("Export") {
-                            model.go(.export)
-                        }
-                        .buttonStyle(CreamButtonStyle())
-
-                        Button("Refine photo selection") {
-                            model.returnToRefine()
-                        }
-                        .font(TR.ui(14, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.53))
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("refine-photos-button")
+                    Button("Export film") {
+                        model.go(.export)
                     }
+                    .buttonStyle(CreamButtonStyle())
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 8)
@@ -869,7 +861,7 @@ private struct PhotoEditorSheet: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 17) {
-                SheetHeader(title: "Edit photos") { dismiss() }
+                SheetHeader(title: "Framing & motion") { dismiss() }
 
                 Text("TripReel starts with an on-device face and subject-aware crop. Pinch to zoom, drag to reframe, then fine-tune only the shots that need it.")
                     .font(TR.ui(12))
@@ -919,6 +911,20 @@ private struct PhotoEditorSheet: View {
                 motionIntensity: .still,
                 secondsPerSlide: model.duration(for: photo)
             )
+            .overlay(alignment: .topLeading) {
+                if photo.usesAutomaticPeopleFraming {
+                    Label("People-safe Auto", systemImage: "person.2.fill")
+                        .font(TR.ui(10, weight: .semibold))
+                        .foregroundStyle(TR.cream)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(.black.opacity(0.62))
+                        .overlay(Capsule().stroke(TR.keep.opacity(0.55), lineWidth: 1))
+                        .clipShape(Capsule())
+                        .padding(12)
+                        .accessibilityLabel("Automatic framing keeps detected people visible")
+                }
+            }
             .overlay(alignment: .bottom) {
                 HStack(spacing: 7) {
                     Image(systemName: "hand.draw")
@@ -1207,18 +1213,20 @@ private struct FilmStyleSheet: View {
     private var previewPhotos: [ReelPhoto] {
         let photos = model.keptPhotos
         guard !photos.isEmpty else { return [] }
+        let unprotected = photos.filter { !$0.protectsPeople }
+        let candidates = unprotected.isEmpty ? photos : unprotected
         var selected: [ReelPhoto] = []
-        let landscape = photos.first(where: { $0.aspectRatio >= 0.88 })
-        let portrait = photos.first(where: { $0.aspectRatio < 0.88 })
+        let landscape = candidates.first(where: { $0.aspectRatio >= 0.88 })
+        let portrait = candidates.first(where: { $0.aspectRatio < 0.88 })
         if model.montageLook == .story {
             // Story is the mixed editorial treatment; lead with its portrait
             // matte when available so it cannot look identical to Clean.
-            selected.append(portrait ?? photos[0])
+            selected.append(portrait ?? candidates[0])
             if let landscape { selected.append(landscape) }
         } else {
             // Cinema, Journal, and Clean resolve the same landscape into three
             // deliberately different frames on the first preview beat.
-            selected.append(landscape ?? photos[0])
+            selected.append(landscape ?? candidates[0])
             if let portrait { selected.append(portrait) }
         }
         selected.append(contentsOf: photos.filter { candidate in
@@ -1298,6 +1306,9 @@ private struct EditOptionButton: View {
             .glassCard(cornerRadius: 16)
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue(badge)
     }
 }
 

@@ -138,6 +138,7 @@ struct ReelPhoto: Identifiable, Hashable, Sendable {
     let isSimilar: Bool
     let pixelWidth: Int
     let pixelHeight: Int
+    let protectsPeople: Bool
     let automaticFrameStyle: MontageFrameStyle
     let automaticMotionStyle: MontageMotionStyle
     let automaticCropScale: Double
@@ -159,6 +160,7 @@ struct ReelPhoto: Identifiable, Hashable, Sendable {
         isSimilar: Bool,
         pixelWidth: Int,
         pixelHeight: Int,
+        protectsPeople: Bool = false,
         frameStyle: MontageFrameStyle,
         motionStyle: MontageMotionStyle,
         cropScale: Double = 1,
@@ -173,6 +175,7 @@ struct ReelPhoto: Identifiable, Hashable, Sendable {
         self.isSimilar = isSimilar
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
+        self.protectsPeople = protectsPeople
         automaticFrameStyle = frameStyle
         automaticMotionStyle = motionStyle
         automaticCropScale = min(max(cropScale, 1), 3)
@@ -190,6 +193,15 @@ struct ReelPhoto: Identifiable, Hashable, Sendable {
     var aspectRatio: Double {
         guard pixelWidth > 0, pixelHeight > 0 else { return 4.0 / 3.0 }
         return Double(pixelWidth) / Double(pixelHeight)
+    }
+
+    var usesAutomaticPeopleFraming: Bool {
+        protectsPeople
+            && !hasCustomFrameStyle
+            && motionStyle == automaticMotionStyle
+            && cropScale == automaticCropScale
+            && cropOffsetX == automaticCropOffsetX
+            && cropOffsetY == automaticCropOffsetY
     }
 }
 
@@ -319,9 +331,13 @@ enum MontageFrameResolver {
         aspectRatio: Double,
         index: Int,
         isCustomized: Bool,
-        look: MontageLook
+        look: MontageLook,
+        protectsPeople: Bool = false
     ) -> MontageFrameStyle {
         if isCustomized { return planned }
+        if protectsPeople {
+            return aspectRatio >= 1.25 ? .cinematic : .portraitMatte
+        }
         switch look {
         case .story:
             return planned
@@ -346,6 +362,7 @@ struct MontagePhotoInsight: Hashable, Sendable {
     let memoryScore: Double
     let aestheticScore: Double
     let contentKind: MontageContentKind
+    let peopleCount: Int
     let featurePrint: NativePhotoFeaturePrint?
     let focalPoint: NativePhotoFocalPoint?
 
@@ -353,12 +370,14 @@ struct MontagePhotoInsight: Hashable, Sendable {
         memoryScore: Double = 0.5,
         aestheticScore: Double = 0.5,
         contentKind: MontageContentKind = .moment,
+        peopleCount: Int = 0,
         featurePrint: NativePhotoFeaturePrint? = nil,
         focalPoint: NativePhotoFocalPoint? = nil
     ) {
         self.memoryScore = min(max(memoryScore, 0), 1)
         self.aestheticScore = min(max(aestheticScore, 0), 1)
         self.contentKind = contentKind
+        self.peopleCount = max(0, peopleCount)
         self.featurePrint = featurePrint
         self.focalPoint = focalPoint
     }
@@ -378,6 +397,7 @@ struct MontagePhotoInsight: Hashable, Sendable {
             memoryScore: result.scores.memoryScore,
             aestheticScore: result.scores.aestheticScore ?? 0.5,
             contentKind: kind,
+            peopleCount: max(result.signals.faces.count, result.signals.humans.count),
             featurePrint: result.signals.featurePrint,
             focalPoint: result.signals.focalPoint
         )
@@ -389,6 +409,7 @@ struct MontagePlanItem: Hashable, Sendable {
     let frameStyle: MontageFrameStyle
     let motionStyle: MontageMotionStyle
     let isSimilar: Bool
+    let protectsPeople: Bool
     let cropScale: Double
     let cropOffsetX: Double
     let cropOffsetY: Double
@@ -416,8 +437,15 @@ enum MontageSequencePlanner {
 
         return editorial.enumerated().map { index, asset in
             let ratio = aspectRatio(of: asset)
+            let insight = insights[asset.id]
+            let protectsPeople = (insight?.peopleCount ?? 0) > 0
             let style: MontageFrameStyle
-            if ratio < 0.88 {
+            if protectsPeople {
+                // A fit-based frame preserves the complete person/group
+                // composition instead of forcing a landscape photo to fill a
+                // tall movie and cropping people at the sides.
+                style = ratio >= 1.25 ? .cinematic : .portraitMatte
+            } else if ratio < 0.88 {
                 // Portrait photos should start large and legible. Postcards can
                 // still be selected manually, but are too small as an automatic
                 // default on a phone-sized vertical film.
@@ -434,7 +462,7 @@ enum MontageSequencePlanner {
             let crop = cropRecommendation(
                 frameStyle: style,
                 aspectRatio: ratio,
-                insight: insights[asset.id]
+                insight: insight
             )
             return MontagePlanItem(
                 asset: asset,
@@ -442,11 +470,12 @@ enum MontageSequencePlanner {
                 motionStyle: motionStyle(
                     at: index,
                     asset: asset,
-                    insight: insights[asset.id]
+                    insight: insight
                 ),
                 isSimilar: previous.map {
                     areVisuallySimilar($0, asset, insights: insights)
                 } ?? false,
+                protectsPeople: protectsPeople,
                 cropScale: crop.scale,
                 cropOffsetX: crop.offsetX,
                 cropOffsetY: crop.offsetY
@@ -523,10 +552,15 @@ enum MontageSequencePlanner {
     ) -> Bool {
         guard let firstPrint = insights[first.id]?.featurePrint,
               let secondPrint = insights[second.id]?.featurePrint,
-              let distance = try? firstPrint.distance(to: secondPrint) else {
+              NativePhotoSimilarity.areSimilar(
+                first,
+                firstPrint: firstPrint,
+                second,
+                secondPrint: secondPrint
+              ) else {
             return false
         }
-        return distance < 8.0
+        return true
     }
 
     private static func aspectRatio(of asset: TripAsset) -> Double {
@@ -557,6 +591,12 @@ enum MontageSequencePlanner {
         aspectRatio: Double,
         insight: MontagePhotoInsight?
     ) -> (scale: Double, offsetX: Double, offsetY: Double) {
+        if (insight?.peopleCount ?? 0) > 0 {
+            // Keep the whole detected human composition visible by default.
+            // Users can still choose a tighter frame explicitly in the editor.
+            return (1, 0, 0)
+        }
+
         guard let focalPoint = insight?.focalPoint else {
             // A small overscan keeps portrait motion fluid and makes the
             // preserve-composition matte feel intentional rather than tiny.
@@ -922,6 +962,19 @@ final class TripReelModel: ObservableObject {
 
     var keptPhotos: [ReelPhoto] {
         photos.filter { !cutPhotoIDs.contains($0.id) }
+    }
+
+    var customizedPhotoCount: Int {
+        keptPhotos.reduce(into: 0) { count, photo in
+            if photo.hasCustomFrameStyle
+                || photo.motionStyle != photo.automaticMotionStyle
+                || photo.cropScale != photo.automaticCropScale
+                || photo.cropOffsetX != photo.automaticCropOffsetX
+                || photo.cropOffsetY != photo.automaticCropOffsetY
+                || photo.durationSeconds != nil {
+                count += 1
+            }
+        }
     }
 
     var keptCount: Int { keptPhotos.count }
@@ -1787,7 +1840,7 @@ final class TripReelModel: ObservableObject {
         }
 
         if photoIndex >= photos.count - 1 {
-            go(.pace)
+            finishPhotoSelection()
         } else {
             currentPhotoIndex = photoIndex + 1
         }
@@ -1803,10 +1856,16 @@ final class TripReelModel: ObservableObject {
         currentPhotoIndex = last.previousIndex
     }
 
-    func returnToRefine() {
+    func editPhotoSelection() {
         currentPhotoIndex = 0
         history.removeAll()
         go(.cut)
+    }
+
+    func finishPhotoSelection() {
+        history.removeAll()
+        currentPhotoIndex = min(currentPhotoIndex, max(0, photos.count - 1))
+        go(.secondWatch)
     }
 
     func selectTrack(_ track: MusicTrack) {
@@ -2309,6 +2368,7 @@ final class TripReelModel: ObservableObject {
                 }(),
                 pixelWidth: asset.pixelWidth,
                 pixelHeight: asset.pixelHeight,
+                protectsPeople: item.protectsPeople,
                 frameStyle: item.frameStyle,
                 motionStyle: item.motionStyle,
                 cropScale: item.cropScale,

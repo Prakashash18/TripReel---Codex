@@ -500,7 +500,8 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             aspectRatio: photo.aspectRatio,
             index: index,
             isCustomized: photo.hasCustomFrameStyle,
-            look: look
+            look: look,
+            protectsPeople: photo.protectsPeople
         )
         let motion = motionTransform(
             for: photo.motionStyle,
@@ -533,9 +534,15 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 image,
                 in: frame,
                 fill: false,
-                scale: photo.cropScale * motion.scale,
-                offsetX: photo.cropOffsetX + motion.offsetX,
-                offsetY: photo.cropOffsetY + motion.offsetY,
+                scale: photo.usesAutomaticPeopleFraming
+                    ? 1
+                    : photo.cropScale * motion.scale,
+                offsetX: photo.usesAutomaticPeopleFraming
+                    ? 0
+                    : photo.cropOffsetX + motion.offsetX,
+                offsetY: photo.usesAutomaticPeopleFraming
+                    ? 0
+                    : photo.cropOffsetY + motion.offsetY,
                 clips: true
             )
             UIColor.white.withAlphaComponent(0.22).setStroke()
@@ -551,9 +558,15 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 image,
                 in: frame,
                 fill: false,
-                scale: photo.cropScale * motion.scale,
-                offsetX: photo.cropOffsetX + motion.offsetX,
-                offsetY: photo.cropOffsetY + motion.offsetY,
+                scale: photo.usesAutomaticPeopleFraming
+                    ? 1
+                    : photo.cropScale * motion.scale,
+                offsetX: photo.usesAutomaticPeopleFraming
+                    ? 0
+                    : photo.cropOffsetX + motion.offsetX,
+                offsetY: photo.usesAutomaticPeopleFraming
+                    ? 0
+                    : photo.cropOffsetY + motion.offsetY,
                 clips: true
             )
             drawFilmEdges(in: bounds)

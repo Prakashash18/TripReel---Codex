@@ -37,6 +37,38 @@ final class NativePhotoIntelligenceScoringTests: XCTestCase {
         XCTAssertEqual(focalPoint.coverage, 0.096, accuracy: 0.001)
     }
 
+    func testFocalPointUsesWholePeopleBoundsInsteadOfCroppingAroundFaces() throws {
+        let focalPoint = try XCTUnwrap(
+            NativePhotoFocalPointResolver.resolve(
+                faceBoxes: [CGRect(x: 0.18, y: 0.62, width: 0.10, height: 0.12)],
+                salientBoxes: [CGRect(x: 0.70, y: 0.70, width: 0.10, height: 0.10)],
+                humanBoxes: [
+                    CGRect(x: 0.08, y: 0.10, width: 0.30, height: 0.72),
+                    CGRect(x: 0.58, y: 0.08, width: 0.30, height: 0.74)
+                ]
+            )
+        )
+
+        XCTAssertEqual(focalPoint.source, .people)
+        XCTAssertEqual(focalPoint.x, 0.48, accuracy: 0.001)
+        XCTAssertEqual(focalPoint.y, 0.45, accuracy: 0.001)
+        XCTAssertEqual(focalPoint.coverage, 0.80 * 0.74, accuracy: 0.001)
+    }
+
+    func testHumanRectanglesProtectGroupWhenFacesAreTurnedAway() {
+        let signals = NativePhotoIntelligenceSignals(
+            faces: .init(count: 0),
+            humans: .init(count: 3),
+            availability: .init(aesthetics: false)
+        )
+
+        let assessment = NativePhotoIntelligenceScorer.score(signals: signals)
+
+        XCTAssertTrue(assessment.tags.contains(.people))
+        XCTAssertTrue(assessment.tags.contains(.groupPhoto))
+        XCTAssertGreaterThan(assessment.scores.peopleScore, 0.85)
+    }
+
     func testAppealingGroupPhotoRanksAsStrongMemoryWithoutCloudReview() {
         let signals = NativePhotoIntelligenceSignals(
             classifications: [

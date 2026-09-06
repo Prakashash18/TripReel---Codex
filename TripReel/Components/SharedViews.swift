@@ -183,9 +183,11 @@ struct MontageView: View {
                 aspectRatio: photo.aspectRatio,
                 index: photoIndex,
                 isCustomized: photo.hasCustomFrameStyle,
-                look: look
+                look: look,
+                protectsPeople: photo.protectsPeople
             ),
             motionStyle: photo.motionStyle,
+            usesAutomaticPeopleFraming: photo.usesAutomaticPeopleFraming,
             cropScale: photo.cropScale,
             cropOffsetX: photo.cropOffsetX,
             cropOffsetY: photo.cropOffsetY
@@ -314,6 +316,7 @@ private struct MontageSlide {
     let aspectRatio: Double
     let frameStyle: MontageFrameStyle
     let motionStyle: MontageMotionStyle
+    let usesAutomaticPeopleFraming: Bool
     let cropScale: Double
     let cropOffsetX: Double
     let cropOffsetY: Double
@@ -559,6 +562,7 @@ private struct MontageSlideArtwork: View {
     }
 
     private var framedScale: CGFloat {
+        guard !slide.usesAutomaticPeopleFraming else { return 1 }
         let amount = 0.028 * amplitude
         switch slide.motionStyle {
         case .zoomOut, .settle:
@@ -588,6 +592,7 @@ private struct MontageSlideArtwork: View {
     }
 
     private func framedOffset(in size: CGSize) -> CGSize {
+        guard !slide.usesAutomaticPeopleFraming else { return .zero }
         let full = motionOffset(in: size)
         return CGSize(width: full.width * 0.30, height: full.height * 0.30)
     }

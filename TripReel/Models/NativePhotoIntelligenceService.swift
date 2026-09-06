@@ -84,8 +84,17 @@ struct NativePhotoFaceSignal: Codable, Hashable, Sendable {
     }
 }
 
+struct NativePhotoHumanSignal: Codable, Hashable, Sendable {
+    let count: Int
+
+    init(count: Int = 0) {
+        self.count = max(0, count)
+    }
+}
+
 enum NativePhotoFocalSource: String, Codable, Hashable, Sendable {
     case faces
+    case people
     case saliency
 }
 
@@ -120,9 +129,22 @@ struct NativePhotoFocalPoint: Codable, Hashable, Sendable {
 enum NativePhotoFocalPointResolver {
     static func resolve(
         faceBoxes: [CGRect],
-        salientBoxes: [CGRect]
+        salientBoxes: [CGRect],
+        humanBoxes: [CGRect] = []
     ) -> NativePhotoFocalPoint? {
         let faces = faceBoxes.compactMap(sanitizedUnitRect)
+        let humans = humanBoxes.compactMap(sanitizedUnitRect)
+        // Person rectangles protect compositions that face-only framing can
+        // miss. Include face rectangles too, because either detector can find
+        // a partially occluded subject that the other does not.
+        if !humans.isEmpty, let union = union(of: humans + faces) {
+            return NativePhotoFocalPoint(
+                x: union.midX,
+                y: union.midY,
+                coverage: union.width * union.height,
+                source: .people
+            )
+        }
         if let union = union(of: faces) {
             return NativePhotoFocalPoint(
                 x: union.midX,
@@ -262,6 +284,7 @@ struct NativePhotoSignalAvailability: Codable, Hashable, Sendable {
     let classification: Bool
     let textRecognition: Bool
     let faceQuality: Bool
+    let humanDetection: Bool
     let documentDetection: Bool
     let featurePrint: Bool
     let aesthetics: Bool
@@ -270,6 +293,7 @@ struct NativePhotoSignalAvailability: Codable, Hashable, Sendable {
         classification: Bool = true,
         textRecognition: Bool = true,
         faceQuality: Bool = true,
+        humanDetection: Bool = false,
         documentDetection: Bool = true,
         featurePrint: Bool = false,
         aesthetics: Bool = false
@@ -277,6 +301,7 @@ struct NativePhotoSignalAvailability: Codable, Hashable, Sendable {
         self.classification = classification
         self.textRecognition = textRecognition
         self.faceQuality = faceQuality
+        self.humanDetection = humanDetection
         self.documentDetection = documentDetection
         self.featurePrint = featurePrint
         self.aesthetics = aesthetics
@@ -288,6 +313,7 @@ struct NativePhotoIntelligenceSignals: Codable, Hashable, Sendable {
     let classifications: [NativePhotoClassification]
     let text: NativePhotoTextSignal
     let faces: NativePhotoFaceSignal
+    let humans: NativePhotoHumanSignal
     let document: NativePhotoDocumentSignal
     let aesthetics: NativePhotoAestheticsSignal?
     let featurePrint: NativePhotoFeaturePrint?
@@ -299,6 +325,7 @@ struct NativePhotoIntelligenceSignals: Codable, Hashable, Sendable {
         classifications: [NativePhotoClassification] = [],
         text: NativePhotoTextSignal = .init(),
         faces: NativePhotoFaceSignal = .init(),
+        humans: NativePhotoHumanSignal = .init(),
         document: NativePhotoDocumentSignal = .init(),
         aesthetics: NativePhotoAestheticsSignal? = nil,
         featurePrint: NativePhotoFeaturePrint? = nil,
@@ -309,6 +336,7 @@ struct NativePhotoIntelligenceSignals: Codable, Hashable, Sendable {
         self.classifications = classifications
         self.text = text
         self.faces = faces
+        self.humans = humans
         self.document = document
         self.aesthetics = aesthetics
         self.featurePrint = featurePrint
@@ -426,14 +454,18 @@ enum NativePhotoIntelligenceScorer {
             utilityClassification * 0.88,
             signals.aesthetics?.isUtility == true ? 0.90 : 0
         )
+        let detectedPeopleCount = max(signals.faces.count, signals.humans.count)
         if signals.isScreenshot {
             utilityProbability = 1
-        } else if signals.faces.count >= 2, documentProbability < 0.50 {
+        } else if detectedPeopleCount >= 2, documentProbability < 0.50 {
             utilityProbability *= 0.78
         }
         utilityProbability = clamp(utilityProbability)
 
-        let peopleScore = peopleScore(for: signals.faces)
+        let peopleScore = peopleScore(
+            for: signals.faces,
+            detectedPeopleCount: detectedPeopleCount
+        )
         let sceneryConfidence = classificationConfidence(
             in: signals.classifications,
             matching: sceneryTerms
@@ -457,7 +489,7 @@ enum NativePhotoIntelligenceScorer {
             + (0.34 * effectiveAestheticScore)
             + (0.28 * peopleScore)
             + (0.22 * memoryClassification)
-        if signals.faces.count > 0 { memoryScore += 0.06 }
+        if detectedPeopleCount > 0 { memoryScore += 0.06 }
         if memoryClassification >= 0.55 { memoryScore += 0.06 }
         memoryScore *= 1 - (0.78 * utilityProbability)
         memoryScore -= 0.08 * documentProbability
@@ -470,11 +502,12 @@ enum NativePhotoIntelligenceScorer {
             signals.availability.classification,
             signals.availability.textRecognition,
             signals.availability.faceQuality,
+            signals.availability.humanDetection,
             signals.availability.documentDetection,
             signals.availability.featurePrint,
             signals.availability.aesthetics
         ].filter { $0 }.count
-        let availabilityStrength = Double(performedCount) / 6.0
+        let availabilityStrength = Double(performedCount) / 7.0
         let decisiveEvidence = max(
             utilityProbability,
             peopleScore,
@@ -524,8 +557,8 @@ enum NativePhotoIntelligenceScorer {
         if signals.isScreenshot { tags.insert(.screenshot) }
         if documentProbability >= 0.60 { tags.insert(.likelyDocument) }
         if textCoverage >= 0.12 || signals.text.characterCount >= 350 { tags.insert(.textHeavy) }
-        if signals.faces.count > 0 { tags.insert(.people) }
-        if signals.faces.count >= 2 { tags.insert(.groupPhoto) }
+        if detectedPeopleCount > 0 { tags.insert(.people) }
+        if detectedPeopleCount >= 2 { tags.insert(.groupPhoto) }
         if sceneryConfidence >= 0.35 { tags.insert(.scenery) }
         if foodConfidence >= 0.35 { tags.insert(.food) }
         if utilityProbability >= 0.65 { tags.insert(.utility) }
@@ -578,9 +611,12 @@ enum NativePhotoIntelligenceScorer {
         }
     }
 
-    private static func peopleScore(for faces: NativePhotoFaceSignal) -> Double {
+    private static func peopleScore(
+        for faces: NativePhotoFaceSignal,
+        detectedPeopleCount: Int
+    ) -> Double {
         let countScore: Double
-        switch max(faces.count, 0) {
+        switch max(detectedPeopleCount, 0) {
         case 0: countScore = 0
         case 1: countScore = 0.62
         case 2: countScore = 0.82
@@ -745,6 +781,8 @@ actor NativePhotoIntelligenceService {
             faceRequest.revision = VNDetectFaceCaptureQualityRequestRevision3
         }
 
+        let humanRequest = VNDetectHumanRectanglesRequest()
+
         let documentRequest = VNDetectDocumentSegmentationRequest()
 
         let saliencyRequest = VNGenerateAttentionBasedSaliencyImageRequest()
@@ -761,6 +799,7 @@ actor NativePhotoIntelligenceService {
             classificationRequest,
             textRequest,
             faceRequest,
+            humanRequest,
             documentRequest,
             featureRequest
         ]
@@ -783,9 +822,10 @@ actor NativePhotoIntelligenceService {
                 try handler.perform(requests)
                 try Task.checkCancellation()
                 // Saliency is a best-effort enhancement. Run it only when
-                // faces did not already provide a stronger focal point, and
+                // people detection did not already provide a stronger focus,
                 // never discard an otherwise valid analysis if it fails.
-                if (faceRequest.results ?? []).isEmpty {
+                if (faceRequest.results ?? []).isEmpty,
+                   (humanRequest.results ?? []).isEmpty {
                     do {
                         try VNImageRequestHandler(
                             cgImage: image,
@@ -822,10 +862,14 @@ actor NativePhotoIntelligenceService {
             minimumConfidence: configuration.minimumTextConfidence
         )
         let faceSignal = Self.faceSignal(from: faceRequest.results ?? [])
+        let humanSignal = NativePhotoHumanSignal(
+            count: (humanRequest.results ?? []).count
+        )
         let documentSignal = Self.documentSignal(from: documentRequest.results ?? [])
         let focalPoint = NativePhotoFocalPointResolver.resolve(
             faceBoxes: (faceRequest.results ?? []).map(\.boundingBox),
-            salientBoxes: saliencyRequest.results?.first?.salientObjects?.map(\.boundingBox) ?? []
+            salientBoxes: saliencyRequest.results?.first?.salientObjects?.map(\.boundingBox) ?? [],
+            humanBoxes: (humanRequest.results ?? []).map(\.boundingBox)
         )
 
         let featurePrint = featureRequest.results?.first.map {
@@ -858,6 +902,7 @@ actor NativePhotoIntelligenceService {
             classifications: classifications,
             text: textSignal,
             faces: faceSignal,
+            humans: humanSignal,
             document: documentSignal,
             aesthetics: aesthetics,
             featurePrint: featurePrint,
@@ -866,6 +911,7 @@ actor NativePhotoIntelligenceService {
                 classification: true,
                 textRecognition: true,
                 faceQuality: true,
+                humanDetection: true,
                 documentDetection: true,
                 featurePrint: featurePrint != nil,
                 aesthetics: aestheticsWasPerformed

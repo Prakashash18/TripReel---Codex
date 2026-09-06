@@ -1,5 +1,11 @@
 # TripReel design QA
 
+> September 6 update: the new Film Studio hub, full-person safe framing, and
+> similarity clustering pass strict source checks but are not represented by
+> the older screenshots below. Fresh native capture is blocked because this
+> Mac's obsolete iOS 9 runtime crashes CoreSimulator/asset catalog services;
+> validate this updated flow in Xcode Cloud or the next TestFlight build.
+
 **Findings**
 
 - No actionable P0, P1, or P2 differences remain in the checked flow. The native build preserves the source hierarchy, Instrument Serif display typography, spacing rhythm, warm palette, glass surfaces, card geometry, controls, and app copy.
@@ -37,6 +43,7 @@
 2. Pass 2 found remaining heading rhythm, Pace vertical offset, Cleanup spacing, and uneven Welcome multiline leading. Heading spacing and section padding were tightened, Cleanup was rebalanced, and Welcome was rebuilt as three individually controlled display lines. Evidence: `qa/compare-welcome-pass2.png`, `qa/compare-welcome-pass3.png`, and `qa/compare-welcome-final.png`.
 3. Responsive review identified fixed-height pressure on Photo Access and Film Ready. Compact compositions were added and validated across the full compact workflow. Evidence: `qa/access-375x667.png`, `qa/done-375x667.png`, and `qa/responsive-375x667-final.png`.
 4. Final pass found no actionable P0/P1/P2 visual differences. Evidence: `qa/compare-states-final.png`.
+5. The latest flow removes the mandatory Refine → Pace → Edit sequence. First Watch now opens one Film Studio where Photos, Framing, Style, Titles, Music, and Pace are peer tools, and each tool returns to the same preview. This pass is code- and UI-test-backed; fresh screenshot comparison remains pending for the runtime reason above.
 
 **Open Questions**
 

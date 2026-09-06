@@ -261,6 +261,53 @@ enum SmartPhotoSelectionPolicy {
     }
 }
 
+/// Shared, conservative comparison for Vision feature prints. Apple defines
+/// smaller distances as more alike, but not a universal duplicate cutoff, so
+/// TripReel combines distance with capture time and orientation. Very close
+/// bursts may vary more (blink, expression, exposure) and still be one moment.
+enum NativePhotoSimilarity {
+    static let maximumTimeInterval: TimeInterval = 30 * 60
+
+    static func areSimilar(
+        _ first: TripAsset,
+        firstPrint: NativePhotoFeaturePrint,
+        _ second: TripAsset,
+        secondPrint: NativePhotoFeaturePrint
+    ) -> Bool {
+        guard let firstDate = first.creationDate,
+              let secondDate = second.creationDate else { return false }
+        let interval = abs(firstDate.timeIntervalSince(secondDate))
+        guard interval <= maximumTimeInterval,
+              hasComparableComposition(first, second),
+              let distance = try? firstPrint.distance(to: secondPrint) else {
+            return false
+        }
+
+        let threshold: Double
+        if interval <= 2 * 60 {
+            threshold = 14
+        } else if interval <= 10 * 60 {
+            threshold = 12
+        } else {
+            threshold = 10
+        }
+        return distance <= threshold
+    }
+
+    private static func hasComparableComposition(
+        _ first: TripAsset,
+        _ second: TripAsset
+    ) -> Bool {
+        guard first.pixelWidth > 0, first.pixelHeight > 0,
+              second.pixelWidth > 0, second.pixelHeight > 0 else {
+            return true
+        }
+        let firstRatio = Double(first.pixelWidth) / Double(first.pixelHeight)
+        let secondRatio = Double(second.pixelWidth) / Double(second.pixelHeight)
+        return abs(log(firstRatio / secondRatio)) <= 0.24
+    }
+}
+
 /// Turns a large trip into an actual first cut instead of simply replaying the
 /// whole camera roll. The selector is deliberately local and reversible: it
 /// combines Vision memory/aesthetic scores with day, category, orientation,
@@ -274,16 +321,22 @@ enum SmartHighlightSelector {
         calendar: Calendar = .current
     ) -> [SmartExcludedPhoto] {
         let candidates = assets.filter { existing[$0.id] == nil }
-        guard candidates.count > 24 else { return [] }
+        let representativeIDs = similarityRepresentativeIDs(
+            in: candidates,
+            nativeResults: nativeResults
+        )
+        let uniqueCandidates = candidates.filter { representativeIDs.contains($0.id) }
 
-        let grouped = Dictionary(grouping: candidates) { asset -> Date in
+        let grouped = Dictionary(grouping: uniqueCandidates) { asset -> Date in
             asset.creationDate.map(calendar.startOfDay(for:)) ?? .distantPast
         }
-        let target = targetCount(total: candidates.count, dayCount: grouped.count)
-        guard target < candidates.count else { return [] }
+        let target = min(
+            uniqueCandidates.count,
+            targetCount(total: candidates.count, dayCount: grouped.count)
+        )
 
         var selected: [TripAsset] = []
-        var remaining = candidates
+        var remaining = uniqueCandidates
         let orderedDays = grouped.keys.sorted()
         let coverageRounds = target >= orderedDays.count * 2 ? 2 : 1
 
@@ -314,17 +367,21 @@ enum SmartHighlightSelector {
 
         let selectedIDs = Set(selected.map(\.id))
         return candidates.compactMap { asset in
-            guard !selectedIDs.contains(asset.id) else { return nil }
-            let isDuplicate = selected.contains {
-                visuallySimilar(asset, $0, nativeResults: nativeResults)
+            if !representativeIDs.contains(asset.id) {
+                return SmartExcludedPhoto(
+                    asset: asset,
+                    reason: .similarMoment,
+                    detail: "A stronger frame from this moment is already in the film.",
+                    confidence: 0.93,
+                    origin: .onDevice
+                )
             }
+            guard !selectedIDs.contains(asset.id) else { return nil }
             return SmartExcludedPhoto(
                 asset: asset,
-                reason: isDuplicate ? .similarMoment : .notAHighlight,
-                detail: isDuplicate
-                    ? "A stronger photo from the same moment is already in the film."
-                    : "Kept nearby for a shorter, more varied first cut.",
-                confidence: isDuplicate ? 0.94 : 0.72,
+                reason: .notAHighlight,
+                detail: "Kept nearby for a shorter, more varied first cut.",
+                confidence: 0.72,
                 origin: .onDevice
             )
         }
@@ -392,17 +449,111 @@ enum SmartHighlightSelector {
         _ second: TripAsset,
         nativeResults: [String: NativePhotoIntelligenceResult]
     ) -> Bool {
-        guard let firstDate = first.creationDate,
-              let secondDate = second.creationDate,
-              abs(firstDate.timeIntervalSince(secondDate)) <= 10 * 60 else {
-            return false
-        }
         guard let firstPrint = nativeResults[first.id]?.signals.featurePrint,
-              let secondPrint = nativeResults[second.id]?.signals.featurePrint,
-              let distance = try? firstPrint.distance(to: secondPrint) else {
+              let secondPrint = nativeResults[second.id]?.signals.featurePrint else {
             return false
         }
-        return distance < 8
+        return NativePhotoSimilarity.areSimilar(
+            first,
+            firstPrint: firstPrint,
+            second,
+            secondPrint: secondPrint
+        )
+    }
+
+    /// Groups neighboring perceptual matches before highlight selection. This
+    /// prevents a fixed target count from pulling several versions of the same
+    /// burst back into the finished film when there are few unique moments.
+    private static func similarityRepresentativeIDs(
+        in candidates: [TripAsset],
+        nativeResults: [String: NativePhotoIntelligenceResult]
+    ) -> Set<String> {
+        guard candidates.count > 1 else { return Set(candidates.map(\.id)) }
+        let ordered = candidates.sorted(by: chronologicalOrder)
+        var parents = Array(ordered.indices)
+
+        for index in ordered.indices {
+            guard let date = ordered[index].creationDate, index > 0 else { continue }
+            var compared = 0
+            for previousIndex in stride(from: index - 1, through: 0, by: -1) {
+                guard let previousDate = ordered[previousIndex].creationDate else { continue }
+                if date.timeIntervalSince(previousDate) > NativePhotoSimilarity.maximumTimeInterval {
+                    break
+                }
+                compared += 1
+                if compared > 32 { break }
+                guard visuallySimilar(
+                    ordered[index],
+                    ordered[previousIndex],
+                    nativeResults: nativeResults
+                ) else { continue }
+                union(index, previousIndex, parents: &parents)
+            }
+        }
+
+        var groups: [Int: [TripAsset]] = [:]
+        for index in ordered.indices {
+            let group = root(index, parents: &parents)
+            groups[group, default: []].append(ordered[index])
+        }
+
+        return Set(groups.values.compactMap { members in
+            members.sorted { left, right in
+                let leftScore = representativeScore(left, nativeResults: nativeResults)
+                let rightScore = representativeScore(right, nativeResults: nativeResults)
+                if leftScore != rightScore { return leftScore > rightScore }
+                switch (left.creationDate, right.creationDate) {
+                case let (leftDate?, rightDate?) where leftDate != rightDate:
+                    return leftDate < rightDate
+                default:
+                    return left.id < right.id
+                }
+            }.first?.id
+        })
+    }
+
+    private static func representativeScore(
+        _ asset: TripAsset,
+        nativeResults: [String: NativePhotoIntelligenceResult]
+    ) -> Double {
+        guard let result = nativeResults[asset.id] else { return 0.35 }
+        var value = (0.62 * result.scores.memoryScore)
+            + (0.32 * (result.scores.aestheticScore ?? 0.52))
+        if result.tags.contains(.groupPhoto) { value += 0.14 }
+        if result.tags.contains(.people) { value += 0.08 }
+        if result.tags.contains(.scenery) { value += 0.05 }
+        return value
+    }
+
+    private static func root(_ index: Int, parents: inout [Int]) -> Int {
+        if parents[index] != index {
+            parents[index] = root(parents[index], parents: &parents)
+        }
+        return parents[index]
+    }
+
+    private static func union(_ first: Int, _ second: Int, parents: inout [Int]) {
+        let firstRoot = root(first, parents: &parents)
+        let secondRoot = root(second, parents: &parents)
+        guard firstRoot != secondRoot else { return }
+        if firstRoot < secondRoot {
+            parents[secondRoot] = firstRoot
+        } else {
+            parents[firstRoot] = secondRoot
+        }
+    }
+
+    private static func chronologicalOrder(_ left: TripAsset, _ right: TripAsset) -> Bool {
+        switch (left.creationDate, right.creationDate) {
+        case let (leftDate?, rightDate?) where leftDate != rightDate:
+            return leftDate < rightDate
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        default:
+            return left.id < right.id
+        }
     }
 
     private static func contentKind(
