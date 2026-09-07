@@ -11,6 +11,9 @@ enum AppScreen: String {
     case empty
     case building
     case firstWatch
+    case aiDirection
+    case aiProcessing
+    case aiComparison
     case cut
     case pace
     case secondWatch
@@ -28,12 +31,15 @@ enum AppScreen: String {
         case .trips, .empty: 3
         case .building: 4
         case .firstWatch: 5
-        case .secondWatch: 6
-        case .cut, .pace: 7
-        case .export: 8
-        case .paywall, .rendering: 9
-        case .done: 10
-        case .cleanup: 11
+        case .aiDirection: 6
+        case .aiProcessing: 7
+        case .aiComparison: 8
+        case .secondWatch: 9
+        case .cut, .pace: 10
+        case .export: 11
+        case .paywall, .rendering: 12
+        case .done: 13
+        case .cleanup: 14
         }
     }
 }
@@ -818,6 +824,57 @@ enum ExportHandoff: Equatable, Sendable {
     case capCut
 }
 
+enum TripCutSource: String, Equatable, Sendable {
+    case firstCut
+    case aiCut
+    case working
+
+    var title: String {
+        switch self {
+        case .firstCut: "First Cut"
+        case .aiCut: "AI Cut"
+        case .working: "Your Cut"
+        }
+    }
+}
+
+struct TripEditSnapshot: Hashable, Sendable {
+    let photos: [ReelPhoto]
+    let cutPhotoIDs: Set<String>
+    let pace: Double
+    let montageLook: MontageLook
+    let motionIntensity: MontageMotionIntensity
+    let titleCards: Set<TitleCardKind>
+    let titleDrafts: [TitleCardKind: TitleCardDraft]
+    let selectedTrackID: String?
+    let cutToBeat: Bool
+
+    var keptPhotos: [ReelPhoto] {
+        photos.filter { !cutPhotoIDs.contains($0.id) }
+    }
+
+    var montageTitleCards: [MontageTitleCard] {
+        TitleCardKind.allCases.compactMap { kind in
+            guard titleCards.contains(kind), let draft = titleDrafts[kind] else { return nil }
+            return MontageTitleCard(
+                kind: kind,
+                title: draft.title,
+                subtitle: draft.subtitle,
+                style: draft.style,
+                duration: draft.duration
+            )
+        }
+    }
+
+    var durationSeconds: Double {
+        let defaultPhotoDuration = 1.85 - (pace * 1.25)
+        let photoDuration = keptPhotos.reduce(0) { partial, photo in
+            partial + (photo.durationSeconds ?? defaultPhotoDuration)
+        }
+        return photoDuration + montageTitleCards.reduce(0) { $0 + $1.duration }
+    }
+}
+
 @MainActor
 final class TripReelModel: ObservableObject {
     @Published var screen: AppScreen = .welcome
@@ -854,6 +911,14 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var cloudAnalysisPreference: CloudAnalysisPreference
     @Published var isCloudAnalysisConsentPresented = false
     @Published private(set) var cloudConsentIsSettings = false
+    @Published private(set) var selectedAICutDirection: AICutDirection?
+    @Published private(set) var firstCutSnapshot: TripEditSnapshot?
+    @Published private(set) var aiCutSnapshot: TripEditSnapshot?
+    @Published private(set) var selectedCutSource: TripCutSource = .firstCut
+    @Published private(set) var aiCutSummary: String?
+    @Published private(set) var aiCutProgress = 0.0
+    @Published private(set) var aiCutStatus = "Finding the strongest moments…"
+    @Published private(set) var aiCutFailureMessage: String?
     @Published private(set) var isAnalyzingPhotos = false
     @Published private(set) var photoAnalysisProgress = 0.0
     @Published private(set) var photoAnalysisStatus = "Preparing smart selection"
@@ -887,7 +952,9 @@ final class TripReelModel: ObservableObject {
     private let manualPhotoImporter = ManualPhotoImportService()
     private var workTask: Task<Void, Never>?
     private var photoAnalysisTask: Task<Void, Never>?
+    private var aiCutTask: Task<Void, Never>?
     private var photoAnalysisGeneration = UUID()
+    private var aiCutGeneration = UUID()
     private var exportGeneration = UUID()
     private var exportReturnScreen: AppScreen = .secondWatch
     private var placeTask: Task<Void, Never>?
@@ -908,6 +975,7 @@ final class TripReelModel: ObservableObject {
     private var pendingBuildTrip: Trip?
     private var activeAnalysisTrip: Trip?
     private var activePhotoInsights: [String: MontagePhotoInsight] = [:]
+    private var cloudBlockedPhotoIDs: Set<String> = []
     private var manuallyIncludedPhotoIDs: Set<String> = []
     private var photoEditOverrides: [String: PhotoEditOverride] = [:]
     private let videoExporter: any TripReelVideoExporting
@@ -979,6 +1047,13 @@ final class TripReelModel: ObservableObject {
             photoAnalysisCurrentAsset = trip.assets.dropFirst(5).first
         }
 #endif
+        if demoMode {
+            resetTitleDrafts()
+            firstCutSnapshot = makeCurrentEditSnapshot()
+            if screen == .aiComparison {
+                installDemoAICut()
+            }
+        }
     }
 
     static let assetNames = [
@@ -1088,6 +1163,87 @@ final class TripReelModel: ObservableObject {
         let titleDuration = montageTitleCards.reduce(0) { $0 + $1.duration }
         let photoDuration = keptPhotos.reduce(0) { $0 + duration(for: $1) }
         return Self.durationText(seconds: photoDuration + titleDuration)
+    }
+
+    var firstCutDurationText: String {
+        Self.durationText(seconds: firstCutSnapshot?.durationSeconds ?? 0)
+    }
+
+    var aiCutDurationText: String {
+        Self.durationText(seconds: aiCutSnapshot?.durationSeconds ?? 0)
+    }
+
+    var currentCutTitle: String {
+        selectedCutSource.title
+    }
+
+    func editSnapshot(for source: TripCutSource) -> TripEditSnapshot? {
+        switch source {
+        case .firstCut:
+            firstCutSnapshot
+        case .aiCut:
+            aiCutSnapshot
+        case .working:
+            makeCurrentEditSnapshot()
+        }
+    }
+
+    private func makeCurrentEditSnapshot() -> TripEditSnapshot {
+        TripEditSnapshot(
+            photos: photos,
+            cutPhotoIDs: cutPhotoIDs,
+            pace: pace,
+            montageLook: montageLook,
+            motionIntensity: montageMotionIntensity,
+            titleCards: titleCards,
+            titleDrafts: Dictionary(
+                uniqueKeysWithValues: TitleCardKind.allCases.map { ($0, titleDraft(for: $0)) }
+            ),
+            selectedTrackID: selectedTrackID,
+            cutToBeat: cutToBeat
+        )
+    }
+
+    private func applyEditSnapshot(_ snapshot: TripEditSnapshot, source: TripCutSource) {
+        photos = snapshot.photos
+        cutPhotoIDs = snapshot.cutPhotoIDs
+        pace = snapshot.pace
+        montageLook = snapshot.montageLook
+        montageMotionIntensity = snapshot.motionIntensity
+        titleCards = snapshot.titleCards
+        titleDrafts = snapshot.titleDrafts
+        selectedTrackID = snapshot.selectedTrackID
+        cutToBeat = snapshot.cutToBeat
+        selectedCutSource = source
+        currentPhotoIndex = 0
+        history = []
+        cleanupSelection = []
+        rebuildPhotoEditOverrides()
+    }
+
+    private func rebuildPhotoEditOverrides() {
+        photoEditOverrides = Dictionary(
+            uniqueKeysWithValues: photos.compactMap { photo in
+                let customized = photo.hasCustomFrameStyle
+                    || photo.motionStyle != photo.automaticMotionStyle
+                    || photo.cropScale != photo.automaticCropScale
+                    || photo.cropOffsetX != photo.automaticCropOffsetX
+                    || photo.cropOffsetY != photo.automaticCropOffsetY
+                    || photo.durationSeconds != nil
+                guard customized else { return nil }
+                return (
+                    photo.id,
+                    PhotoEditOverride(
+                        frameStyle: photo.hasCustomFrameStyle ? photo.frameStyle : nil,
+                        motionStyle: photo.motionStyle,
+                        cropScale: photo.cropScale,
+                        cropOffsetX: photo.cropOffsetX,
+                        cropOffsetY: photo.cropOffsetY,
+                        durationSeconds: photo.durationSeconds
+                    )
+                )
+            }
+        )
     }
 
     var exportProgressTitle: String {
@@ -1272,9 +1428,10 @@ final class TripReelModel: ObservableObject {
     /// never accidentally revisited.
     var canNavigateBack: Bool {
         switch screen {
-        case .access, .limited, .firstWatch, .secondWatch, .pace, .export, .paywall, .done:
+        case .access, .limited, .firstWatch, .aiDirection, .aiComparison,
+             .secondWatch, .pace, .export, .paywall, .done:
             true
-        case .welcome, .trips, .empty, .building, .cut, .rendering, .cleanup:
+        case .welcome, .trips, .empty, .building, .aiProcessing, .cut, .rendering, .cleanup:
             false
         }
     }
@@ -1287,6 +1444,8 @@ final class TripReelModel: ObservableObject {
             go(.access, direction: .backward)
         case .firstWatch:
             go(.trips, direction: .backward)
+        case .aiDirection, .aiComparison:
+            go(.firstWatch, direction: .backward)
         case .secondWatch:
             go(.firstWatch, direction: .backward)
         case .pace:
@@ -1297,7 +1456,7 @@ final class TripReelModel: ObservableObject {
             go(.export, direction: .backward)
         case .done:
             go(.export, direction: .backward)
-        case .welcome, .trips, .empty, .building, .cut, .rendering, .cleanup:
+        case .welcome, .trips, .empty, .building, .aiProcessing, .cut, .rendering, .cleanup:
             break
         }
     }
@@ -1339,22 +1498,16 @@ final class TripReelModel: ObservableObject {
         return "\(count) photo\(count == 1 ? "" : "s") left in More Photos"
     }
 
-    /// Entry point used by the trip list. It is the only path that can begin an
-    /// optional upload, and first use always pauses for explicit consent.
+    /// Entry point used by the trip list. First Cut is always created locally;
+    /// this path never prepares an upload or presents cloud consent.
     func requestBuild(trip: Trip) {
         guard !trip.assets.isEmpty else { return }
         if usesDemoData {
             startBuild(trip: trip)
             return
         }
-
-        pendingBuildTrip = trip
-        if cloudAnalysisPreference == .undecided {
-            cloudConsentIsSettings = false
-            isCloudAnalysisConsentPresented = true
-        } else {
-            beginSmartPhotoSelection(for: trip)
-        }
+        pendingBuildTrip = nil
+        beginSmartPhotoSelection(for: trip)
     }
 
     func presentCloudAnalysisSettings() {
@@ -1366,19 +1519,293 @@ final class TripReelModel: ObservableObject {
     func useCloudEnhancement() {
         setCloudAnalysisPreference(.enabled)
         isCloudAnalysisConsentPresented = false
-        if let trip = pendingBuildTrip {
-            pendingBuildTrip = nil
-            beginSmartPhotoSelection(for: trip)
-        }
+        guard !cloudConsentIsSettings else { return }
+        beginAICut()
     }
 
     func keepAnalysisOnDevice() {
         setCloudAnalysisPreference(.onDeviceOnly)
         isCloudAnalysisConsentPresented = false
-        if let trip = pendingBuildTrip {
-            pendingBuildTrip = nil
-            beginSmartPhotoSelection(for: trip)
+        guard !cloudConsentIsSettings else { return }
+        go(.firstWatch, direction: .backward)
+    }
+
+    func openAICutDirections() {
+        aiCutFailureMessage = nil
+        go(.aiDirection, direction: .forward)
+    }
+
+    func selectAICutDirection(_ direction: AICutDirection) {
+        selectedAICutDirection = direction
+    }
+
+    func continueWithAICutDirection() {
+        guard selectedAICutDirection != nil else { return }
+        cloudConsentIsSettings = false
+        isCloudAnalysisConsentPresented = true
+    }
+
+    func beginAICut() {
+        aiCutTask?.cancel()
+        let generation = UUID()
+        aiCutGeneration = generation
+        aiCutFailureMessage = nil
+        aiCutProgress = 0
+        aiCutStatus = "Finding the strongest moments…"
+        go(.aiProcessing, direction: .forward)
+
+        guard cloudPhotoAnalysis.isConfigured else {
+            aiCutFailureMessage = "AI couldn't create another cut right now. Your First Cut is still ready."
+            return
         }
+        guard let firstCutSnapshot else {
+            aiCutFailureMessage = "Your First Cut needs to be ready before creating another version."
+            return
+        }
+
+        if usesDemoData {
+            installDemoAICut()
+            aiCutProgress = 1
+            go(.aiComparison, direction: .forward)
+            return
+        }
+
+        guard let direction = selectedAICutDirection else {
+            aiCutFailureMessage = "Choose a direction before creating another cut. Your First Cut is unchanged."
+            return
+        }
+        let candidatePhotos = Self.evenlySampledAIPhotos(
+            firstCutSnapshot.keptPhotos.filter { photo in
+                !cloudBlockedPhotoIDs.contains(photo.id)
+            },
+            limit: CloudPhotoAnalysisClient.maximumBatchSize
+        )
+        let sourceAssets = activeAnalysisTrip?.assets ?? selectedTrip?.assets ?? []
+        let assetsByID = Dictionary(uniqueKeysWithValues: sourceAssets.map { ($0.id, $0) })
+        let candidates = candidatePhotos.compactMap { photo -> (ReelPhoto, TripAsset)? in
+            guard let asset = assetsByID[photo.id], !asset.isScreenshot else { return nil }
+            return (photo, asset)
+        }
+
+        guard !candidates.isEmpty else {
+            aiCutFailureMessage = "There aren't enough privacy-safe previews for another cut. Your First Cut is unchanged."
+            return
+        }
+
+        aiCutTask = Task { [weak self] in
+            guard let self else { return }
+            var wireInputs: [CloudPhotoAnalysisInput] = []
+            var localIDsByWireID: [String: String] = [:]
+
+            for (index, candidate) in candidates.enumerated() {
+                guard self.aiCutGeneration == generation, !Task.isCancelled else { return }
+                do {
+                    let prepared = try await self.photoAnalysisThumbnails.prepare(asset: candidate.1)
+                    let wireID = "p\(wireInputs.count)"
+                    wireInputs.append(CloudPhotoAnalysisInput(id: wireID, jpegData: prepared.jpegData))
+                    localIDsByWireID[wireID] = candidate.0.id
+                } catch is CancellationError {
+                    return
+                } catch {
+                    // A temporarily unavailable preview is omitted from this
+                    // optional remix; the original First Cut remains intact.
+                }
+
+                guard self.aiCutGeneration == generation else { return }
+                self.aiCutProgress = 0.08 + (Double(index + 1) / Double(candidates.count) * 0.42)
+                switch index % 3 {
+                case 0: self.aiCutStatus = "Finding the strongest moments…"
+                case 1: self.aiCutStatus = "Looking for a new story shape…"
+                default: self.aiCutStatus = "Balancing people and places…"
+                }
+            }
+
+            guard self.aiCutGeneration == generation,
+                  !Task.isCancelled,
+                  !wireInputs.isEmpty else {
+                if self.aiCutGeneration == generation {
+                    self.aiCutFailureMessage = "The selected previews aren't available right now. Your First Cut is still ready."
+                }
+                return
+            }
+
+            self.aiCutProgress = 0.58
+            self.aiCutStatus = "Directing a different cut…"
+            do {
+                let plan = try await self.cloudPhotoAnalysis.createEditPlan(
+                    direction: direction,
+                    photos: wireInputs
+                )
+                guard self.aiCutGeneration == generation, !Task.isCancelled else { return }
+                self.aiCutProgress = 0.88
+                self.aiCutStatus = "Creating your AI cut…"
+                let snapshot = try self.materializeAICut(
+                    plan: plan,
+                    firstCut: firstCutSnapshot,
+                    direction: direction,
+                    localIDsByWireID: localIDsByWireID
+                )
+                guard self.aiCutGeneration == generation, !Task.isCancelled else { return }
+                self.aiCutSnapshot = snapshot
+                self.aiCutSummary = plan.summary
+                self.aiCutProgress = 1
+                self.aiCutTask = nil
+                self.go(.aiComparison, direction: .forward)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard self.aiCutGeneration == generation else { return }
+                self.aiCutTask = nil
+                self.aiCutFailureMessage = "AI couldn't create another cut right now. Your First Cut is still ready."
+            }
+        }
+    }
+
+    func cancelAICut() {
+        aiCutGeneration = UUID()
+        aiCutTask?.cancel()
+        aiCutTask = nil
+        aiCutFailureMessage = nil
+        aiCutProgress = 0
+        go(.firstWatch, direction: .backward)
+    }
+
+    func retryAICut() {
+        beginAICut()
+    }
+
+    func useAICut() {
+        guard let aiCutSnapshot else { return }
+        applyEditSnapshot(aiCutSnapshot, source: .aiCut)
+        go(.secondWatch, direction: .forward)
+    }
+
+    func keepFirstCut() {
+        guard let firstCutSnapshot else { return }
+        applyEditSnapshot(firstCutSnapshot, source: .firstCut)
+        go(.firstWatch, direction: .backward)
+    }
+
+    func keepFirstCutForExport() {
+        guard let firstCutSnapshot else { return }
+        applyEditSnapshot(firstCutSnapshot, source: .firstCut)
+        exportReturnScreen = .firstWatch
+        go(.export, direction: .forward)
+    }
+
+    func editCut(_ source: TripCutSource) {
+        guard let snapshot = editSnapshot(for: source) else { return }
+        applyEditSnapshot(snapshot, source: .working)
+        go(.secondWatch, direction: .forward)
+    }
+
+    func tryAnotherAICut() {
+        aiCutFailureMessage = nil
+        selectedAICutDirection = nil
+        go(.aiDirection, direction: .backward)
+    }
+
+    private func materializeAICut(
+        plan: AICutEditPlan,
+        firstCut: TripEditSnapshot,
+        direction: AICutDirection,
+        localIDsByWireID: [String: String]
+    ) throws -> TripEditSnapshot {
+        let validated = try AICutPlanValidator.validate(
+            plan,
+            requestedIDs: Set(localIDsByWireID.keys),
+            direction: direction
+        )
+        let firstPhotosByID = Dictionary(uniqueKeysWithValues: firstCut.photos.map { ($0.id, $0) })
+        var plannedPhotos: [ReelPhoto] = []
+        for item in validated.sequence {
+            guard let localID = localIDsByWireID[item.photoID],
+                  var photo = firstPhotosByID[localID] else {
+                throw AICutPlanValidationError.unknownPhotoID
+            }
+            photo.durationSeconds = item.emphasis == .highlight
+                ? max(2.2, item.durationSeconds)
+                : item.durationSeconds
+            photo.motionStyle = Self.motionStyle(for: item.motion, fallback: photo.automaticMotionStyle)
+            plannedPhotos.append(photo)
+        }
+
+        let includedIDs = Set(plannedPhotos.map(\.id))
+        let remaining = firstCut.photos.filter { !includedIDs.contains($0.id) }
+        let settings = Self.aiSettings(for: direction, fallback: firstCut)
+        return TripEditSnapshot(
+            photos: plannedPhotos + remaining,
+            cutPhotoIDs: Set(remaining.map(\.id)),
+            pace: settings.pace,
+            montageLook: settings.look,
+            motionIntensity: settings.motion,
+            titleCards: firstCut.titleCards,
+            titleDrafts: firstCut.titleDrafts,
+            selectedTrackID: firstCut.selectedTrackID,
+            cutToBeat: firstCut.cutToBeat
+        )
+    }
+
+    private static func evenlySampledAIPhotos(_ photos: [ReelPhoto], limit: Int) -> [ReelPhoto] {
+        guard limit > 0, photos.count > limit else { return photos }
+        guard limit > 1 else { return [photos[photos.count / 2]] }
+        return (0..<limit).map { index in
+            let position = Double(index) * Double(photos.count - 1) / Double(limit - 1)
+            return photos[Int(position.rounded())]
+        }
+    }
+
+    private static func motionStyle(
+        for requested: AICutMotion,
+        fallback: MontageMotionStyle
+    ) -> MontageMotionStyle {
+        switch requested {
+        case .automatic: fallback
+        case .zoomIn: .zoomIn
+        case .zoomOut: .zoomOut
+        case .panLeft: .panLeft
+        case .panRight: .panRight
+        case .rise: .rise
+        case .settle: .settle
+        }
+    }
+
+    private static func aiSettings(
+        for direction: AICutDirection,
+        fallback: TripEditSnapshot
+    ) -> (pace: Double, look: MontageLook, motion: MontageMotionIntensity) {
+        switch direction {
+        case .betterStory: (0.50, .story, .gentle)
+        case .dynamic: (0.72, .clean, .expressive)
+        case .calm: (0.24, .cinema, .gentle)
+        case .people: (0.48, .journal, .gentle)
+        case .surpriseMe: (0.57, fallback.montageLook, .expressive)
+        }
+    }
+
+    private func installDemoAICut() {
+        guard let firstCutSnapshot else { return }
+        let included = firstCutSnapshot.keptPhotos.enumerated().compactMap { index, photo -> ReelPhoto? in
+            guard index % 3 != 1 else { return nil }
+            var edited = photo
+            edited.durationSeconds = index % 4 == 0 ? 2.4 : 1.1
+            edited.motionStyle = index.isMultiple(of: 2) ? .zoomIn : .panLeft
+            return edited
+        }
+        let includedIDs = Set(included.map(\.id))
+        let remaining = firstCutSnapshot.photos.filter { !includedIDs.contains($0.id) }
+        aiCutSnapshot = TripEditSnapshot(
+            photos: included + remaining,
+            cutPhotoIDs: Set(remaining.map(\.id)),
+            pace: 0.68,
+            montageLook: .story,
+            motionIntensity: .expressive,
+            titleCards: firstCutSnapshot.titleCards,
+            titleDrafts: firstCutSnapshot.titleDrafts,
+            selectedTrackID: firstCutSnapshot.selectedTrackID,
+            cutToBeat: firstCutSnapshot.cutToBeat
+        )
+        aiCutSummary = "A tighter alternative with a stronger opening, fewer repeated moments and a quicker finish."
     }
 
     func cancelPhotoAnalysis() {
@@ -1402,6 +1829,7 @@ final class TripReelModel: ObservableObject {
             return
         }
         manuallyIncludedPhotoIDs.insert(restored.id)
+        selectedCutSource = .working
         self.selectedTrip = updatedTrip
         photos = applyingPhotoEdits(
             to: Self.makeReelPhotos(from: updatedTrip, insights: activePhotoInsights)
@@ -1445,6 +1873,7 @@ final class TripReelModel: ObservableObject {
         photoAnalysisProcessedCount = 0
         photoAnalysisTotalCount = trip.assets.count
         activePhotoInsights = [:]
+        cloudBlockedPhotoIDs = []
 
         // The analysis coordinator is installed below; keeping this launch in a
         // cancellable task prevents a second trip tap from racing the first.
@@ -1458,13 +1887,9 @@ final class TripReelModel: ObservableObject {
         guard photoAnalysisGeneration == generation else { return }
         isAnalyzingPhotos = true
         var decisions: [String: SmartExcludedPhoto] = [:]
-        var pendingCloudBatch: [(asset: TripAsset, jpegData: Data)] = []
         var analyzedCount = 0
         var unavailableCount = 0
         var followUp = PhotoAnalysisFollowUp()
-        var cloudReviewedCount = 0
-        var cloudFailureMessage: String?
-        var cloudFailed = false
         var montageInsights: [String: MontagePhotoInsight] = [:]
         var nativeResults: [String: NativePhotoIntelligenceResult] = [:]
 
@@ -1478,6 +1903,7 @@ final class TripReelModel: ObservableObject {
 
             if let metadataDecision = SmartPhotoSelectionPolicy.metadataDecision(for: asset) {
                 decisions[asset.id] = metadataDecision
+                cloudBlockedPhotoIDs.insert(asset.id)
                 recordProcessedPhoto(asset, index: index, total: trip.assets.count)
                 continue
             }
@@ -1495,32 +1921,23 @@ final class TripReelModel: ObservableObject {
                 analyzedCount += 1
                 nativeResults[asset.id] = nativeResult
                 montageInsights[asset.id] = MontagePhotoInsight(result: nativeResult)
+                if nativeResult.cloudReviewGate.disposition == .blockedSensitiveContent {
+                    // The optional director sees only locally approved previews.
+                    // A meaningful photo may remain in First Cut while its
+                    // document/text content is still withheld from the cloud.
+                    cloudBlockedPhotoIDs.insert(asset.id)
+                }
 
                 if let localDecision = SmartPhotoSelectionPolicy.nativeDecision(
                     for: asset,
                     result: nativeResult
                 ) {
                     decisions[asset.id] = localDecision
-                } else if cloudAnalysisPreference == .enabled,
-                          cloudPhotoAnalysis.isConfigured,
-                          !cloudFailed,
-                          nativeResult.cloudReviewGate.disposition == .eligibleAfterExplicitConsent {
-                    pendingCloudBatch.append((asset, thumbnail.jpegData))
-
-                    if pendingCloudBatch.count == CloudPhotoAnalysisClient.maximumBatchSize {
-                        do {
-                            let reviewed = try await reviewCloudBatch(pendingCloudBatch)
-                            cloudReviewedCount += pendingCloudBatch.count
-                            for decision in reviewed { decisions[decision.id] = decision }
-                            pendingCloudBatch.removeAll(keepingCapacity: false)
-                        } catch is CancellationError {
-                            finishPhotoAnalysisCancellation(generation: generation)
-                            return
-                        } catch {
-                            cloudFailed = true
-                            cloudFailureMessage = "Cloud enhancement can be checked again later."
-                            pendingCloudBatch.removeAll(keepingCapacity: false)
-                        }
+                    switch localDecision.reason {
+                    case .screenshot, .document, .utilityImage:
+                        cloudBlockedPhotoIDs.insert(asset.id)
+                    case .waitingForPhotos, .lowQuality, .similarMoment, .notAHighlight:
+                        break
                     }
                 }
             } catch is CancellationError {
@@ -1556,28 +1973,6 @@ final class TripReelModel: ObservableObject {
             finishPhotoAnalysisCancellation(generation: generation)
             return
         }
-        if !pendingCloudBatch.isEmpty, !cloudFailed {
-            photoAnalysisStatus = "Reviewing uncertain photos with GPT-5.6 Luna"
-            do {
-                let reviewed = try await reviewCloudBatch(pendingCloudBatch)
-                cloudReviewedCount += pendingCloudBatch.count
-                for decision in reviewed { decisions[decision.id] = decision }
-            } catch is CancellationError {
-                finishPhotoAnalysisCancellation(generation: generation)
-                return
-            } catch {
-                cloudFailureMessage = "Cloud enhancement can be checked again later."
-            }
-            pendingCloudBatch.removeAll(keepingCapacity: false)
-        } else if cloudAnalysisPreference == .enabled, !cloudPhotoAnalysis.isConfigured {
-            cloudFailureMessage = "Cloud enhancement needs a secure service endpoint. TripReel kept this analysis on your iPhone."
-        }
-
-        guard photoAnalysisGeneration == generation, !Task.isCancelled else {
-            finishPhotoAnalysisCancellation(generation: generation)
-            return
-        }
-
         photoAnalysisStatus = "Shaping the strongest story"
         let selectionAssets = trip.assets
         let selectionResults = nativeResults
@@ -1632,24 +2027,13 @@ final class TripReelModel: ObservableObject {
 
         excludedPhotos = trip.assets.compactMap { decisions[$0.id] }
         photoAnalysisProgress = 1
-        photoAnalysisStatus = cloudReviewedCount > 0
-            ? "Smart selection complete · \(cloudReviewedCount) cloud reviewed"
-            : "Smart selection complete on this iPhone"
+        photoAnalysisStatus = "First Cut complete on this iPhone"
         isAnalyzingPhotos = false
         photoAnalysisCurrentAsset = nil
         photoAnalysisTask = nil
         activePhotoInsights = montageInsights
-        followUp.cloudPassCanBeRetried = cloudFailureMessage != nil
-            && cloudPhotoAnalysis.isConfigured
         photoAnalysisFollowUp = followUp.hasAnythingToCheck ? followUp : nil
 
-        _ = SmartPhotoSelectionOutcome(
-            includedAssets: includedAssets,
-            excludedPhotos: excludedPhotos,
-            analyzedCount: analyzedCount,
-            cloudReviewedCount: cloudReviewedCount,
-            unavailableCount: unavailableCount
-        )
         startBuild(trip: selected)
     }
 
@@ -1699,25 +2083,6 @@ final class TripReelModel: ObservableObject {
             "TripReel couldn't read this copy yet. Check it again later."
         case .accessNeeded:
             "Photos access changed. Review access, then check this moment again."
-        }
-    }
-
-    private func reviewCloudBatch(
-        _ batch: [(asset: TripAsset, jpegData: Data)]
-    ) async throws -> [SmartExcludedPhoto] {
-        guard !batch.isEmpty else { return [] }
-        // Local PhotoKit identifiers and filenames are never sent. Ephemeral
-        // per-request IDs are enough to correlate this one in-memory response.
-        let wireItems = batch.enumerated().map { index, item in
-            (id: "p\(index)", asset: item.asset, jpegData: item.jpegData)
-        }
-        let results = try await cloudPhotoAnalysis.analyze(
-            wireItems.map { CloudPhotoAnalysisInput(id: $0.id, jpegData: $0.jpegData) }
-        )
-        let assetsByID = Dictionary(uniqueKeysWithValues: wireItems.map { ($0.id, $0.asset) })
-        return results.compactMap { result in
-            guard let asset = assetsByID[result.id] else { return nil }
-            return SmartPhotoSelectionPolicy.cloudDecision(for: asset, result: result)
         }
     }
 
@@ -2084,6 +2449,12 @@ final class TripReelModel: ObservableObject {
         cutPhotoIDs = []
         history = []
         cleanupSelection = []
+        selectedCutSource = .firstCut
+        aiCutSnapshot = nil
+        aiCutSummary = nil
+        aiCutFailureMessage = nil
+        aiCutProgress = 0
+        firstCutSnapshot = makeCurrentEditSnapshot()
         go(.building)
 
         let total = photos.count
@@ -2488,6 +2859,14 @@ final class TripReelModel: ObservableObject {
 
     func clearLibraryState(afterAuthorizationChangedTo status: PHAuthorizationStatus) {
         cancelPhotoAnalysis()
+        aiCutGeneration = UUID()
+        aiCutTask?.cancel()
+        aiCutTask = nil
+        aiCutSnapshot = nil
+        firstCutSnapshot = nil
+        aiCutSummary = nil
+        aiCutFailureMessage = nil
+        aiCutProgress = 0
         pendingBuildTrip = nil
         activeAnalysisTrip = nil
         photoAnalysisFollowUp = nil
@@ -2516,6 +2895,7 @@ final class TripReelModel: ObservableObject {
         selectedPhotoCount = 0
         resolvedCoordinates = [:]
         activePhotoInsights = [:]
+        cloudBlockedPhotoIDs = []
         photoEditOverrides = [:]
         cutPhotoIDs = []
         history = []

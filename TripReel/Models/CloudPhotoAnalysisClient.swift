@@ -5,28 +5,162 @@ struct CloudPhotoAnalysisInput: Sendable {
     let jpegData: Data
 }
 
-enum CloudPhotoAnalysisAction: String, Codable, Sendable {
-    case keep
-    case review
-    case discard
+enum AICutDirection: String, CaseIterable, Codable, Identifiable, Hashable, Sendable {
+    case betterStory = "better_story"
+    case dynamic
+    case calm
+    case people
+    case surpriseMe = "surprise_me"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .betterStory: "Tell a Better Story"
+        case .dynamic: "Make It More Dynamic"
+        case .calm: "Keep It Calm"
+        case .people: "Focus on People"
+        case .surpriseMe: "Surprise Me"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .betterStory: "Build a stronger beginning, middle and ending."
+        case .dynamic: "Quicker pacing, bolder movement and less repetition."
+        case .calm: "Scenic moments, longer holds and a gentler rhythm."
+        case .people: "Prioritize faces, shared moments and human connection."
+        case .surpriseMe: "Let the director choose the strongest overall shape."
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .betterStory: "point.3.connected.trianglepath.dotted"
+        case .dynamic: "bolt.fill"
+        case .calm: "water.waves"
+        case .people: "person.2.fill"
+        case .surpriseMe: "sparkles"
+        }
+    }
 }
 
-struct CloudPhotoAnalysisResult: Identifiable, Codable, Hashable, Sendable {
-    let id: String
-    let scenic: Double
-    let people: Double
-    let group: Double
-    let food: Double
-    let document: Double
-    let screenshot: Double
-    let lowQuality: Double
-    let confidence: Double
-    let action: CloudPhotoAnalysisAction
-    let reason: String
+enum AICutEditorialRole: String, Codable, CaseIterable, Hashable, Sendable {
+    case opening
+    case establishing
+    case people
+    case scenery
+    case detail
+    case food
+    case bridge
+    case closing
+}
 
-    var scoresAreValid: Bool {
-        [scenic, people, group, food, document, screenshot, lowQuality, confidence]
-            .allSatisfy { $0.isFinite && (0...1).contains($0) }
+enum AICutEmphasis: String, Codable, CaseIterable, Hashable, Sendable {
+    case normal
+    case highlight
+}
+
+enum AICutMotion: String, Codable, CaseIterable, Hashable, Sendable {
+    case automatic
+    case zoomIn = "zoom_in"
+    case zoomOut = "zoom_out"
+    case panLeft = "pan_left"
+    case panRight = "pan_right"
+    case rise
+    case settle
+}
+
+struct AICutPlanItem: Codable, Hashable, Sendable {
+    let photoID: String
+    let order: Int
+    let durationSeconds: Double
+    let role: AICutEditorialRole
+    let emphasis: AICutEmphasis
+    let motion: AICutMotion
+
+    enum CodingKeys: String, CodingKey {
+        case photoID = "photoId"
+        case order
+        case durationSeconds
+        case role
+        case emphasis
+        case motion
+    }
+}
+
+struct AICutEditPlan: Codable, Hashable, Sendable {
+    let version: Int
+    let direction: AICutDirection
+    let summary: String
+    let sequence: [AICutPlanItem]
+}
+
+enum AICutPlanValidationError: Error, Equatable {
+    case invalidVersion
+    case mismatchedDirection
+    case emptySequence
+    case excessiveSequence
+    case unknownPhotoID
+    case duplicatePhotoID
+    case invalidOrder
+    case invalidDuration
+    case invalidSummary
+}
+
+enum AICutPlanValidator {
+    static let minimumDuration = 0.6
+    static let maximumDuration = 4.0
+
+    static func validate(
+        _ plan: AICutEditPlan,
+        requestedIDs: Set<String>,
+        direction: AICutDirection
+    ) throws -> AICutEditPlan {
+        guard plan.version == 1 else { throw AICutPlanValidationError.invalidVersion }
+        guard plan.direction == direction else { throw AICutPlanValidationError.mismatchedDirection }
+        guard !plan.sequence.isEmpty else { throw AICutPlanValidationError.emptySequence }
+        guard plan.sequence.count <= requestedIDs.count,
+              plan.sequence.count <= CloudPhotoAnalysisClient.maximumBatchSize else {
+            throw AICutPlanValidationError.excessiveSequence
+        }
+        guard !plan.summary.isEmpty, plan.summary.count <= 240 else {
+            throw AICutPlanValidationError.invalidSummary
+        }
+        guard !plan.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AICutPlanValidationError.invalidSummary
+        }
+
+        let ordered = plan.sequence.sorted { $0.order < $1.order }
+        guard ordered.map(\.order) == Array(0..<ordered.count) else {
+            throw AICutPlanValidationError.invalidOrder
+        }
+        let ids = ordered.map(\.photoID)
+        guard ids.allSatisfy(requestedIDs.contains) else {
+            throw AICutPlanValidationError.unknownPhotoID
+        }
+        guard Set(ids).count == ids.count else {
+            throw AICutPlanValidationError.duplicatePhotoID
+        }
+        guard ordered.allSatisfy({ $0.durationSeconds.isFinite }) else {
+            throw AICutPlanValidationError.invalidDuration
+        }
+
+        return AICutEditPlan(
+            version: 1,
+            direction: direction,
+            summary: plan.summary,
+            sequence: ordered.enumerated().map { index, item in
+                AICutPlanItem(
+                    photoID: item.photoID,
+                    order: index,
+                    durationSeconds: min(max(item.durationSeconds, minimumDuration), maximumDuration),
+                    role: item.role,
+                    emphasis: item.emphasis,
+                    motion: item.motion
+                )
+            }
+        )
     }
 }
 
@@ -38,7 +172,10 @@ struct CloudPhotoAnalysisRetention: Codable, Equatable, Sendable {
 
 protocol CloudPhotoAnalysisServing: Sendable {
     var isConfigured: Bool { get }
-    func analyze(_ photos: [CloudPhotoAnalysisInput]) async throws -> [CloudPhotoAnalysisResult]
+    func createEditPlan(
+        direction: AICutDirection,
+        photos: [CloudPhotoAnalysisInput]
+    ) async throws -> AICutEditPlan
 }
 
 protocol CloudPhotoAnalysisAuthorizing: Sendable {
@@ -93,21 +230,24 @@ enum CloudPhotoAnalysisError: LocalizedError, Equatable {
     case emptyRequest
     case tooManyPhotos
     case thumbnailTooLarge
+    case invalidEphemeralIdentifier
     case invalidResponse
     case server(statusCode: Int)
 
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            "Cloud enhancement is not configured yet. TripReel kept the analysis on this iPhone."
+            "AI couldn't create another cut right now. Your First Cut is still ready."
         case .invalidEndpoint:
             "TripReel's cloud analysis endpoint must use HTTPS."
         case .emptyRequest:
-            "There were no photos to analyze."
+            "There were no eligible previews for an AI cut."
         case .tooManyPhotos:
             "Too many photos were included in one analysis request."
         case .thumbnailTooLarge:
             "A reduced thumbnail was larger than the privacy limit."
+        case .invalidEphemeralIdentifier:
+            "AI preview identifiers must be temporary per-request values."
         case .invalidResponse:
             "TripReel received an invalid cloud analysis response."
         case let .server(statusCode):
@@ -117,12 +257,11 @@ enum CloudPhotoAnalysisError: LocalizedError, Equatable {
 }
 
 /// Talks only to the TripReel-owned proxy. An OpenAI API key must never be
-/// embedded in the app binary. The proxy is responsible for calling the
-/// Responses API with `model: "gpt-5.6-luna"` and `store: false`.
+/// embedded in the app binary. The proxy chooses the configured model and is
+/// responsible for using the Responses API with `store: false`.
 final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Sendable {
-    static let modelName = "gpt-5.6-luna"
-    static let maximumBatchSize = 12
-    static let maximumThumbnailBytes = 256 * 1_024
+    static let maximumBatchSize = 24
+    static let maximumThumbnailBytes = 128 * 1_024
     static let endpointInfoPlistKey = "TRIPREEL_PHOTO_ANALYSIS_ENDPOINT"
 
     let isConfigured: Bool
@@ -185,16 +324,24 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
         isConfigured = (endpoint.map { Self.isValidHTTPSURL($0) } ?? false) && authorizer.isReady
     }
 
-    func analyze(_ photos: [CloudPhotoAnalysisInput]) async throws -> [CloudPhotoAnalysisResult] {
+    func createEditPlan(
+        direction: AICutDirection,
+        photos: [CloudPhotoAnalysisInput]
+    ) async throws -> AICutEditPlan {
         guard let endpoint, authorizer.isReady else { throw CloudPhotoAnalysisError.notConfigured }
         guard Self.isValidHTTPSURL(endpoint) else { throw CloudPhotoAnalysisError.invalidEndpoint }
         guard !photos.isEmpty else { throw CloudPhotoAnalysisError.emptyRequest }
         guard photos.count <= Self.maximumBatchSize else { throw CloudPhotoAnalysisError.tooManyPhotos }
+        guard photos.enumerated().allSatisfy({ index, photo in photo.id == "p\(index)" }) else {
+            throw CloudPhotoAnalysisError.invalidEphemeralIdentifier
+        }
         guard photos.allSatisfy({ !$0.jpegData.isEmpty && $0.jpegData.count <= Self.maximumThumbnailBytes }) else {
             throw CloudPhotoAnalysisError.thumbnailTooLarge
         }
 
         let requestBody = CloudRequest(
+            version: 1,
+            direction: direction,
             photos: photos.map {
                 CloudRequest.Photo(id: $0.id, imageBase64: $0.jpegData.base64EncodedString())
             }
@@ -243,21 +390,26 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
 
         guard let data = responseData else { throw CloudPhotoAnalysisError.invalidResponse }
 
-        let decoded = try JSONDecoder().decode(CloudResponse.self, from: data)
-        guard decoded.model == Self.modelName,
+        guard Self.hasExactResponseShape(data) else {
+            throw CloudPhotoAnalysisError.invalidResponse
+        }
+        guard let decoded = try? JSONDecoder().decode(CloudResponse.self, from: data),
+              decoded.model.range(of: #"^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$"#, options: .regularExpression) != nil,
               decoded.retention.proxyStored == false,
               decoded.retention.openAIStore == false else {
             throw CloudPhotoAnalysisError.invalidResponse
         }
 
         let requestedIDs = Set(photos.map(\.id))
-        let responseIDs = decoded.photos.map(\.id)
-        guard responseIDs.count == Set(responseIDs).count,
-              Set(responseIDs) == requestedIDs,
-              decoded.photos.allSatisfy(\.scoresAreValid) else {
+        do {
+            return try AICutPlanValidator.validate(
+                decoded.plan,
+                requestedIDs: requestedIDs,
+                direction: direction
+            )
+        } catch {
             throw CloudPhotoAnalysisError.invalidResponse
         }
-        return decoded.photos
     }
 
     private static func validEndpoint(from rawValue: String?) -> URL? {
@@ -275,6 +427,22 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
         url.scheme?.lowercased() == "https" && url.host?.isEmpty == false
     }
 
+    private static func hasExactResponseShape(_ data: Data) -> Bool {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              Set(root.keys) == ["model", "plan", "retention"],
+              let plan = root["plan"] as? [String: Any],
+              Set(plan.keys) == ["version", "direction", "summary", "sequence"],
+              let sequence = plan["sequence"] as? [[String: Any]],
+              sequence.allSatisfy({ item in
+                  Set(item.keys) == ["photoId", "order", "durationSeconds", "role", "emphasis", "motion"]
+              }),
+              let retention = root["retention"] as? [String: Any],
+              Set(retention.keys) == ["proxyStored", "openAIStore", "abuseMonitoring"] else {
+            return false
+        }
+        return true
+    }
+
     private static let allowedAuthorizationHeaderNames: Set<String> = [
         "authorization",
         "x-tripreel-app-attest",
@@ -288,11 +456,13 @@ private struct CloudRequest: Encodable {
         let imageBase64: String
     }
 
+    let version: Int
+    let direction: AICutDirection
     let photos: [Photo]
 }
 
 private struct CloudResponse: Decodable {
     let model: String
-    let photos: [CloudPhotoAnalysisResult]
+    let plan: AICutEditPlan
     let retention: CloudPhotoAnalysisRetention
 }

@@ -112,6 +112,40 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 3))
     }
 
+    func testFirstCutOffersLocalEditAIRemixAndFinish() {
+        launchApp(at: "firstWatch")
+        XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 3))
+        XCTAssertTrue(screen("improve-with-ai-button").exists)
+        XCTAssertTrue(screen("edit-film-button").exists)
+        XCTAssertTrue(screen("finish-first-cut-button").exists)
+        XCTAssertTrue(app.staticTexts["Created privately on your iPhone"].exists)
+    }
+
+    func testAIDirectionDoesNotRequireConsentUntilContinueAndDeclineReturnsSafely() {
+        launchApp(at: "firstWatch")
+        screen("improve-with-ai-button").tap()
+        XCTAssertTrue(screen("ai-direction-screen").waitForExistence(timeout: 3))
+        XCTAssertFalse(screen("cloud-analysis-consent").exists)
+
+        screen("ai-direction-calm").tap()
+        screen("ai-direction-continue").tap()
+        XCTAssertTrue(screen("cloud-analysis-consent").waitForExistence(timeout: 3))
+        screen("cloud-analysis-decline").tap()
+
+        XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 3))
+    }
+
+    func testAICutComparisonKeepsBothVersionsEditable() {
+        launchApp(at: "aiComparison")
+        XCTAssertTrue(screen("ai-comparison-screen").waitForExistence(timeout: 3))
+        XCTAssertTrue(screen("compare-firstCut").exists)
+        XCTAssertTrue(screen("compare-aiCut").exists)
+
+        screen("compare-firstCut").tap()
+        XCTAssertTrue(screen("edit-compared-cut-button").exists)
+        XCTAssertTrue(screen("use-ai-cut-button").exists)
+    }
+
     func testEveryTitleIsAvailableInTheVisualTimelineEditor() {
         launchApp(at: "secondWatch")
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))

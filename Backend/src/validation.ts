@@ -1,4 +1,10 @@
-import { LIMITS, type PhotoInput } from "./contract.ts";
+import {
+  AI_DIRECTIONS,
+  LIMITS,
+  type AICutDirection,
+  type PhotoInput,
+  type ValidatedPayload,
+} from "./contract.ts";
 
 export class RequestProblem extends Error {
   readonly status: number;
@@ -12,11 +18,7 @@ export class RequestProblem extends Error {
   }
 }
 
-export interface ValidatedPayload {
-  photos: PhotoInput[];
-}
-
-const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+const ID_PATTERN = /^p(?:0|[1-9][0-9]?)$/u;
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const SOF_MARKERS = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
 
@@ -250,8 +252,19 @@ export function validateJpegBase64(value: unknown, photoIndex: number): number {
 }
 
 export function validatePayload(value: unknown): ValidatedPayload {
-  if (!isRecord(value) || !hasExactKeys(value, ["photos"]) || !Array.isArray(value.photos)) {
-    throw new RequestProblem(400, "invalid_request", "Body must be an object containing only photos.");
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["version", "direction", "photos"]) ||
+    value.version !== 1 ||
+    typeof value.direction !== "string" ||
+    !AI_DIRECTIONS.includes(value.direction as AICutDirection) ||
+    !Array.isArray(value.photos)
+  ) {
+    throw new RequestProblem(
+      400,
+      "invalid_request",
+      "Body must contain only version, direction, and photos using supported values.",
+    );
   }
   if (value.photos.length < 1 || value.photos.length > LIMITS.maxPhotos) {
     throw new RequestProblem(
@@ -288,6 +301,13 @@ export function validatePayload(value: unknown): ValidatedPayload {
     if (ids.has(photo.id)) {
       throw new RequestProblem(400, "duplicate_photo_id", "Photo IDs must be unique within a request.");
     }
+    if (photo.id !== `p${index}`) {
+      throw new RequestProblem(
+        400,
+        "invalid_photo_id",
+        "Photo IDs must be contiguous temporary values starting at p0.",
+      );
+    }
 
     totalImageBytes += validateJpegBase64(photo.imageBase64, index);
     if (totalImageBytes > LIMITS.maxBatchImageBytes) {
@@ -302,7 +322,11 @@ export function validatePayload(value: unknown): ValidatedPayload {
     photos.push({ id: photo.id, imageBase64: photo.imageBase64 as string });
   }
 
-  return { photos };
+  return {
+    version: 1,
+    direction: value.direction as AICutDirection,
+    photos,
+  };
 }
 
 async function readStreamBounded(

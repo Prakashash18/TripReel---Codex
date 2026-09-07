@@ -20,12 +20,12 @@ struct TripReelPrivacyPolicyView: View {
                             "Apple Vision analyzes small thumbnails on your iPhone for screenshots, document-like images, people, scenery, food, and visual quality. Recognized text itself is not retained. Photos left out of an automatic cut remain available under More Photos and can be restored."
                         )
                         section(
-                            "Optional OpenAI analysis",
-                            "Cloud enhancement is off until you explicitly enable it. When enabled, only uncertain reduced-resolution JPEG thumbnail copies may pass through TripReel's secure backend to OpenAI's GPT-5.6 Luna. TripReel re-encodes them without EXIF, GPS, filenames, or stable Apple Photos identifiers. Known screenshots and sensitive or document-like images are blocked from cloud review. The purpose is only to improve the automatic film selection."
+                            "Optional AI Remix",
+                            "Your complete First Cut is created on-device without cloud AI. Only after you choose Improve with AI, select a creative direction, and explicitly continue may selected reduced-resolution JPEG previews pass through TripReel's secure backend to an OpenAI image-capable model. TripReel re-encodes them without EXIF, GPS, filenames, capture dates, or stable Apple Photos identifiers. Known screenshots and sensitive or document-like images are blocked. OpenAI returns a structured editing plan; TripReel validates and applies it locally without changing your originals."
                         )
                         section(
                             "Storage and deletion",
-                            "TripReel's backend does not persist cloud thumbnails or classification results and discards its in-memory copies after the request. OpenAI is called with store set to false. Under default API controls, OpenAI may retain API content for abuse monitoring for up to 30 days, or longer when legally or safety-required. Zero Data Retention removes default storage for eligible accounts, but images flagged by OpenAI's child-safety classifier may still be retained for manual review."
+                            "TripReel's backend does not intentionally persist cloud previews or edit plans and discards its in-memory copies after the request. OpenAI is called with store set to false. Under default API controls, OpenAI may retain API content for abuse monitoring for up to 30 days, or longer when legally or safety-required. Zero Data Retention removes default storage for eligible accounts, but images flagged by OpenAI's child-safety classifier may still be retained for manual review."
                         )
                         section(
                             "Training, identity, and tracking",
@@ -33,7 +33,7 @@ struct TripReelPrivacyPolicyView: View {
                         )
                         section(
                             "Your choices",
-                            "You can keep all analysis on-device or change the cloud choice from the OpenAI review card on the Trips screen. Turning it off prevents future uploads. Revoking Photos access in iOS Settings stops further library access."
+                            "You can finish, export, and manually edit using only the on-device First Cut. Every AI Remix starts with a creative direction and an explicit sharing decision. Declining or closing that decision sends nothing and returns to First Cut. Revoking Photos access in iOS Settings stops further library access."
                         )
 
                         VStack(alignment: .leading, spacing: 10) {
@@ -49,7 +49,7 @@ struct TripReelPrivacyPolicyView: View {
                         .font(TR.ui(13, weight: .semibold))
                         .foregroundStyle(TR.accent)
 
-                        Text("Effective September 5, 2026")
+                        Text("Effective September 7, 2026")
                             .font(TR.mono(10))
                             .tracking(0.8)
                             .foregroundStyle(.white.opacity(0.38))
@@ -79,7 +79,7 @@ struct TripReelPrivacyPolicyView: View {
             MetadataText(text: "TripReel")
             Text("Your memories stay yours.")
                 .font(TR.display(34))
-            Text("This policy explains what TripReel processes on your iPhone and what happens only if you opt in to cloud enhancement.")
+            Text("This policy explains the private on-device First Cut and what happens only if you explicitly request an AI Remix.")
                 .font(TR.ui(14))
                 .foregroundStyle(.white.opacity(0.66))
                 .lineSpacing(4)

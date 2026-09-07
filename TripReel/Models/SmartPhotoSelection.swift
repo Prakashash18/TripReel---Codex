@@ -55,13 +55,11 @@ enum SmartPhotoExclusionReason: String, CaseIterable, Sendable {
 enum SmartPhotoAnalysisOrigin: String, Sendable {
     case metadata
     case onDevice
-    case cloud
 
     var title: String {
         switch self {
         case .metadata: "Photo metadata"
         case .onDevice: "On-device analysis"
-        case .cloud: "GPT-5.6 Luna"
         }
     }
 }
@@ -76,35 +74,26 @@ struct SmartExcludedPhoto: Identifiable, Hashable, Sendable {
     var id: String { asset.id }
 }
 
-struct SmartPhotoSelectionOutcome: Sendable {
-    let includedAssets: [TripAsset]
-    let excludedPhotos: [SmartExcludedPhoto]
-    let analyzedCount: Int
-    let cloudReviewedCount: Int
-    let unavailableCount: Int
-}
-
 /// A gentle, non-blocking summary of photos that can be checked again after a
 /// complete first cut is ready. Counts contain no identifiers or image data.
 struct PhotoAnalysisFollowUp: Equatable, Sendable {
     var syncingFromPhotosCount = 0
     var anotherLookCount = 0
     var accessNeededCount = 0
-    var cloudPassCanBeRetried = false
 
     var photoCount: Int {
         syncingFromPhotosCount + anotherLookCount + accessNeededCount
     }
 
     var hasAnythingToCheck: Bool {
-        photoCount > 0 || cloudPassCanBeRetried
+        photoCount > 0
     }
 
     var previewMessage: String {
         if photoCount > 0 {
             return "\(photoCount) more moment\(photoCount == 1 ? "" : "s") can be checked later"
         }
-        return "A cloud finishing pass can be checked later"
+        return "More moments can be checked later"
     }
 }
 
@@ -200,68 +189,6 @@ enum SmartPhotoSelectionPolicy {
         return nil
     }
 
-    /// Cloud output is intentionally used as a conservative utility filter, not
-    /// as an authority on which memories are beautiful. People, group, food,
-    /// scenic, and uncertain photos stay eligible for the user's film.
-    static func cloudDecision(
-        for asset: TripAsset,
-        result: CloudPhotoAnalysisResult
-    ) -> SmartExcludedPhoto? {
-        guard result.scoresAreValid else { return nil }
-
-        let memoryScore = max(result.scenic, result.people, result.group, result.food)
-        let protectsMemory = result.group >= 0.72
-            || result.people >= 0.82
-            || result.scenic >= 0.82
-            || result.food >= 0.86
-
-        // Multi-label results can call a valuable group photo "document-like"
-        // because of a menu, sign, or ticket in frame. Strong people/scenic/
-        // food evidence always wins; uncertain memories stay in the film.
-        if protectsMemory { return nil }
-
-        if result.screenshot >= 0.94, result.confidence >= 0.82 {
-            return SmartExcludedPhoto(
-                asset: asset,
-                reason: .screenshot,
-                detail: safeDetail(result.reason, fallback: "Looks like a screenshot rather than a camera photo."),
-                confidence: result.confidence,
-                origin: .cloud
-            )
-        }
-
-        if result.document >= 0.94, result.confidence >= 0.84 {
-            return SmartExcludedPhoto(
-                asset: asset,
-                reason: .document,
-                detail: safeDetail(result.reason, fallback: "Looks like an order, receipt, ticket, or document."),
-                confidence: result.confidence,
-                origin: .cloud
-            )
-        }
-
-        if result.lowQuality >= 0.98,
-           result.confidence >= 0.92,
-           memoryScore < 0.30 {
-            return SmartExcludedPhoto(
-                asset: asset,
-                reason: .lowQuality,
-                detail: safeDetail(result.reason, fallback: "Too unclear to add automatically."),
-                confidence: result.confidence,
-                origin: .cloud
-            )
-        }
-
-        return nil
-    }
-
-    private static func safeDetail(_ detail: String, fallback: String) -> String {
-        let singleLine = detail
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !singleLine.isEmpty else { return fallback }
-        return String(singleLine.prefix(120))
-    }
 }
 
 /// Shared, conservative comparison for Vision feature prints. Apple defines

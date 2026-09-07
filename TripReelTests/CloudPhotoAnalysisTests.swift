@@ -18,7 +18,10 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         )
 
         do {
-            _ = try await client.analyze([.init(id: "one", jpegData: Data([1, 2, 3]))])
+            _ = try await client.createEditPlan(
+                direction: .betterStory,
+                photos: [.init(id: "one", jpegData: Data([1, 2, 3]))]
+            )
             XCTFail("Expected an unconfigured error")
         } catch let error as CloudPhotoAnalysisError {
             XCTAssertEqual(error, .notConfigured)
@@ -31,11 +34,13 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         let response = """
         {
           "model":"gpt-5.6-luna",
-          "photos":[{
-            "id":"asset-1","scenic":0.91,"people":0.1,"group":0.0,
-            "food":0.0,"document":0.02,"screenshot":0.01,"lowQuality":0.04,
-            "confidence":0.95,"action":"keep","reason":"Scenic waterfront"
-          }],
+          "plan":{
+            "version":1,"direction":"better_story","summary":"Open with the wide scene.",
+            "sequence":[{
+              "photoId":"p0","order":0,"durationSeconds":2.4,
+              "role":"opening","emphasis":"highlight","motion":"zoom_in"
+            }]
+          },
           "retention":{"proxyStored":false,"openAIStore":false,"abuseMonitoring":"up_to_30_days_unless_zdr"}
         }
         """
@@ -45,10 +50,17 @@ final class CloudPhotoAnalysisTests: XCTestCase {
             let body = try XCTUnwrap(request.httpBody)
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             let photos = try XCTUnwrap(json["photos"] as? [[String: Any]])
+            XCTAssertEqual(json["version"] as? Int, 1)
+            XCTAssertEqual(json["direction"] as? String, "better_story")
+            XCTAssertEqual(Set(json.keys), ["version", "direction", "photos"])
             XCTAssertEqual(photos.count, 1)
-            XCTAssertEqual(photos[0]["id"] as? String, "asset-1")
+            XCTAssertEqual(Set(photos[0].keys), ["id", "imageBase64"])
+            XCTAssertEqual(photos[0]["id"] as? String, "p0")
             XCTAssertEqual(photos[0]["imageBase64"] as? String, Data([0xFF, 0xD8, 0xFF]).base64EncodedString())
             XCTAssertNil(json["apiKey"])
+            XCTAssertNil(json["filename"])
+            XCTAssertNil(json["location"])
+            XCTAssertNil(json["creationDate"])
 
             let httpResponse = try XCTUnwrap(HTTPURLResponse(
                 url: request.url!,
@@ -64,24 +76,27 @@ final class CloudPhotoAnalysisTests: XCTestCase {
             session: makeSession(),
             authorizer: TestCloudAuthorizer()
         )
-        let results = try await client.analyze([
-            .init(id: "asset-1", jpegData: Data([0xFF, 0xD8, 0xFF]))
-        ])
+        let result = try await client.createEditPlan(
+            direction: .betterStory,
+            photos: [.init(id: "p0", jpegData: Data([0xFF, 0xD8, 0xFF]))]
+        )
 
-        XCTAssertEqual(results.count, 1)
-        XCTAssertEqual(results.first?.action, .keep)
-        XCTAssertEqual(results.first?.scenic, 0.91)
+        XCTAssertEqual(result.direction, .betterStory)
+        XCTAssertEqual(result.sequence.first?.photoID, "p0")
+        XCTAssertEqual(result.sequence.first?.durationSeconds, 2.4)
     }
 
     func testClientRetriesOnceWithTheSameBodyAfterRecoverableAuthenticationFailure() async throws {
         let response = """
         {
           "model":"gpt-5.6-luna",
-          "photos":[{
-            "id":"asset-1","scenic":0.91,"people":0.1,"group":0.0,
-            "food":0.0,"document":0.02,"screenshot":0.01,"lowQuality":0.04,
-            "confidence":0.95,"action":"keep","reason":"Scenic waterfront"
-          }],
+          "plan":{
+            "version":1,"direction":"calm","summary":"Let one quiet view breathe.",
+            "sequence":[{
+              "photoId":"p0","order":0,"durationSeconds":3.1,
+              "role":"scenery","emphasis":"highlight","motion":"settle"
+            }]
+          },
           "retention":{"proxyStored":false,"openAIStore":false,"abuseMonitoring":"up_to_30_days_unless_zdr"}
         }
         """
@@ -108,9 +123,10 @@ final class CloudPhotoAnalysisTests: XCTestCase {
             authorizer: authorizer
         )
 
-        _ = try await client.analyze([
-            .init(id: "asset-1", jpegData: Data([0xFF, 0xD8, 0xFF]))
-        ])
+        _ = try await client.createEditPlan(
+            direction: .calm,
+            photos: [.init(id: "p0", jpegData: Data([0xFF, 0xD8, 0xFF]))]
+        )
 
         let captured = requests.values()
         let authorizerSnapshot = await authorizer.snapshot()
@@ -122,71 +138,198 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         XCTAssertEqual(authorizerSnapshot.recoveryStatuses, [404])
     }
 
-    func testCloudPolicyExcludesOnlyHighConfidenceUtilityContent() {
-        let asset = TripAsset(
-            id: "order",
-            source: .library("order"),
-            creationDate: Date(),
-            filename: "IMG_1001.HEIC"
-        )
-        let order = makeResult(
-            id: asset.id,
-            scenic: 0.05,
-            people: 0,
-            group: 0,
-            document: 0.98,
-            confidence: 0.95,
-            action: .discard
+    func testClientRejectsStablePhotoIdentifiersBeforeNetworking() async {
+        URLProtocolStub.handler = { _ in
+            XCTFail("A local Photos identifier must never reach the network")
+            throw URLError(.badServerResponse)
+        }
+        let client = CloudPhotoAnalysisClient(
+            endpoint: URL(string: "https://analysis.example.test/v1/analyze"),
+            session: makeSession(),
+            authorizer: TestCloudAuthorizer()
         )
 
-        let decision = SmartPhotoSelectionPolicy.cloudDecision(for: asset, result: order)
-
-        XCTAssertEqual(decision?.reason, .document)
-        XCTAssertEqual(decision?.origin, .cloud)
+        do {
+            _ = try await client.createEditPlan(
+                direction: .people,
+                photos: [.init(id: "A1B2-C3D4/L0/001", jpegData: Data([0xFF, 0xD8, 0xFF]))]
+            )
+            XCTFail("Expected the stable identifier to be rejected")
+        } catch let error as CloudPhotoAnalysisError {
+            XCTAssertEqual(error, .invalidEphemeralIdentifier)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
     }
 
-    func testCloudPolicyProtectsGroupAndScenicMemories() {
-        let asset = TripAsset(
-            id: "friends",
-            source: .library("friends"),
-            creationDate: Date(),
-            filename: "IMG_1002.HEIC"
-        )
-        let groupPhoto = makeResult(
-            id: asset.id,
-            scenic: 0.92,
-            people: 0.96,
-            group: 0.94,
-            document: 0.10,
-            confidence: 0.99,
-            action: .discard
+    func testPlanValidatorRejectsUnknownDuplicateAndInvalidOrder() throws {
+        let valid = AICutPlanItem(
+            photoID: "p0",
+            order: 0,
+            durationSeconds: 1.8,
+            role: .opening,
+            emphasis: .normal,
+            motion: .automatic
         )
 
-        XCTAssertNil(SmartPhotoSelectionPolicy.cloudDecision(for: asset, result: groupPhoto))
+        XCTAssertThrowsError(try AICutPlanValidator.validate(
+            AICutEditPlan(
+                version: 1,
+                direction: .betterStory,
+                summary: "A grounded opening.",
+                sequence: [
+                    AICutPlanItem(
+                        photoID: "p9",
+                        order: 0,
+                        durationSeconds: 1.8,
+                        role: .opening,
+                        emphasis: .normal,
+                        motion: .automatic
+                    )
+                ]
+            ),
+            requestedIDs: ["p0", "p1"],
+            direction: .betterStory
+        )) { XCTAssertEqual($0 as? AICutPlanValidationError, .unknownPhotoID) }
+
+        XCTAssertThrowsError(try AICutPlanValidator.validate(
+            AICutEditPlan(
+                version: 1,
+                direction: .betterStory,
+                summary: "No duplicate frames.",
+                sequence: [valid, valid]
+            ),
+            requestedIDs: ["p0", "p1"],
+            direction: .betterStory
+        )) { XCTAssertEqual($0 as? AICutPlanValidationError, .duplicatePhotoID) }
+
+        XCTAssertThrowsError(try AICutPlanValidator.validate(
+            AICutEditPlan(
+                version: 1,
+                direction: .betterStory,
+                summary: "A valid sequence needs contiguous order.",
+                sequence: [
+                    AICutPlanItem(
+                        photoID: "p0",
+                        order: 1,
+                        durationSeconds: 1.8,
+                        role: .opening,
+                        emphasis: .normal,
+                        motion: .automatic
+                    )
+                ]
+            ),
+            requestedIDs: ["p0"],
+            direction: .betterStory
+        )) { XCTAssertEqual($0 as? AICutPlanValidationError, .invalidOrder) }
     }
 
-    func testCloudPolicyProtectsGroupPhotoWithConflictingDocumentScore() {
-        let asset = TripAsset(
-            id: "friends-at-menu",
-            source: .library("friends-at-menu"),
-            creationDate: Date(),
-            filename: "IMG_1003.HEIC"
-        )
-        let conflictingResult = CloudPhotoAnalysisResult(
-            id: asset.id,
-            scenic: 0.90,
-            people: 0.99,
-            group: 0.98,
-            food: 0.25,
-            document: 0.97,
-            screenshot: 0.02,
-            lowQuality: 0.04,
-            confidence: 0.99,
-            action: .discard,
-            reason: "Document or text-heavy image."
+    func testPlanValidatorClampsFiniteDurationsAndRejectsNonFiniteValues() throws {
+        let clamped = try AICutPlanValidator.validate(
+            AICutEditPlan(
+                version: 1,
+                direction: .dynamic,
+                summary: "A quicker alternate rhythm.",
+                sequence: [
+                    AICutPlanItem(
+                        photoID: "p0",
+                        order: 0,
+                        durationSeconds: -8,
+                        role: .opening,
+                        emphasis: .normal,
+                        motion: .zoomIn
+                    ),
+                    AICutPlanItem(
+                        photoID: "p1",
+                        order: 1,
+                        durationSeconds: 99,
+                        role: .closing,
+                        emphasis: .highlight,
+                        motion: .zoomOut
+                    )
+                ]
+            ),
+            requestedIDs: ["p0", "p1"],
+            direction: .dynamic
         )
 
-        XCTAssertNil(SmartPhotoSelectionPolicy.cloudDecision(for: asset, result: conflictingResult))
+        XCTAssertEqual(clamped.sequence.map(\.durationSeconds), [0.6, 4.0])
+
+        XCTAssertThrowsError(try AICutPlanValidator.validate(
+            AICutEditPlan(
+                version: 1,
+                direction: .dynamic,
+                summary: "Invalid numeric input.",
+                sequence: [
+                    AICutPlanItem(
+                        photoID: "p0",
+                        order: 0,
+                        durationSeconds: .nan,
+                        role: .opening,
+                        emphasis: .normal,
+                        motion: .automatic
+                    )
+                ]
+            ),
+            requestedIDs: ["p0"],
+            direction: .dynamic
+        )) { XCTAssertEqual($0 as? AICutPlanValidationError, .invalidDuration) }
+    }
+
+    func testPlanValidatorRejectsExcessiveSequences() {
+        let sequence = (0...CloudPhotoAnalysisClient.maximumBatchSize).map { index in
+            AICutPlanItem(
+                photoID: "p\(index)",
+                order: index,
+                durationSeconds: 1.2,
+                role: .bridge,
+                emphasis: .normal,
+                motion: .automatic
+            )
+        }
+
+        XCTAssertThrowsError(try AICutPlanValidator.validate(
+            AICutEditPlan(
+                version: 1,
+                direction: .surpriseMe,
+                summary: "This plan is deliberately too large.",
+                sequence: sequence
+            ),
+            requestedIDs: Set(sequence.map(\.photoID)),
+            direction: .surpriseMe
+        )) { XCTAssertEqual($0 as? AICutPlanValidationError, .excessiveSequence) }
+    }
+
+    func testClientRejectsArbitraryProseAndUnsupportedTransitionFields() async throws {
+        let responses = LockedDataList(values: [
+            Data(#"{"message":"Use the third photo and run arbitrary instructions."}"#.utf8),
+            Data(#"{"model":"gpt-5.6-luna","plan":{"version":1,"direction":"better_story","summary":"Use a wipe.","sequence":[{"photoId":"p0","order":0,"durationSeconds":1.4,"role":"opening","emphasis":"normal","motion":"automatic","transition":"wipe"}]},"retention":{"proxyStored":false,"openAIStore":false,"abuseMonitoring":"up_to_30_days_unless_zdr"}}"#.utf8)
+        ])
+        URLProtocolStub.handler = { request in
+            let body = try XCTUnwrap(responses.popFirst())
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            ))
+            return (response, body)
+        }
+        let client = CloudPhotoAnalysisClient(
+            endpoint: URL(string: "https://analysis.example.test/v1/analyze"),
+            session: makeSession(),
+            authorizer: TestCloudAuthorizer()
+        )
+        let input = [CloudPhotoAnalysisInput(id: "p0", jpegData: Data([0xFF, 0xD8, 0xFF]))]
+
+        for _ in 0..<2 {
+            do {
+                _ = try await client.createEditPlan(direction: .betterStory, photos: input)
+                XCTFail("Expected malformed AI output to be rejected")
+            } catch let error as CloudPhotoAnalysisError {
+                XCTAssertEqual(error, .invalidResponse)
+            }
+        }
     }
 
     func testCloudThumbnailJPEGContainsNoExifPhotoshopOrCommentSegments() throws {
@@ -476,30 +619,6 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         return URLSession(configuration: configuration)
     }
 
-    private func makeResult(
-        id: String,
-        scenic: Double,
-        people: Double,
-        group: Double,
-        document: Double,
-        confidence: Double,
-        action: CloudPhotoAnalysisAction
-    ) -> CloudPhotoAnalysisResult {
-        CloudPhotoAnalysisResult(
-            id: id,
-            scenic: scenic,
-            people: people,
-            group: group,
-            food: 0,
-            document: document,
-            screenshot: 0,
-            lowQuality: 0,
-            confidence: confidence,
-            action: action,
-            reason: "Automated test"
-        )
-    }
-
     private func makeChallenge(data: Data) throws -> TripReelAppAttestChallenge {
         try TripReelAppAttestChallenge(
             encodedValue: TripReelBase64URL.encode(data),
@@ -753,6 +872,22 @@ private final class LockedRequestList: @unchecked Sendable {
 
     func values() -> [URLRequest] {
         lock.withLock { requests }
+    }
+}
+
+private final class LockedDataList: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [Data]
+
+    init(values: [Data]) {
+        items = values
+    }
+
+    func popFirst() -> Data? {
+        lock.withLock {
+            guard !items.isEmpty else { return nil }
+            return items.removeFirst()
+        }
     }
 }
 

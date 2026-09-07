@@ -11,7 +11,13 @@ import type {
   IssueChallengeInput,
   RegisterKeyInput,
 } from "./app-attest-state.ts";
-import { LIMITS, MODEL, RETENTION, type PublicAnalysisResponse } from "./contract.ts";
+import {
+  LIMITS,
+  RETENTION,
+  configuredModel,
+  type PublicAnalysisResponse,
+  type ValidatedPayload,
+} from "./contract.ts";
 import { analyzeWithOpenAI, ServiceProblem } from "./openai.ts";
 import { RequestProblem, validatePayload } from "./validation.ts";
 
@@ -34,6 +40,7 @@ export interface Env {
   TRIPREEL_AUTH_TOKEN?: string;
   ALLOWED_ORIGIN?: string;
   OPENAI_TIMEOUT_MS?: string;
+  OPENAI_MODEL?: string;
   APP_ATTEST_APP_ID?: string;
   APP_ATTEST_ENVIRONMENT?: string;
   APP_ATTEST_ROUTING_SECRET?: string;
@@ -66,6 +73,7 @@ interface BaseConfiguration {
   authToken?: string;
   corsOrigin?: string;
   openAITimeoutMs?: string;
+  model: string;
 }
 
 interface AppAttestConfiguration {
@@ -155,12 +163,14 @@ function errorResponse(
 }
 
 function requireBaseConfiguration(env: Env): BaseConfiguration {
+  const model = configuredModel(env.OPENAI_MODEL);
   if (
     typeof env.OPENAI_API_KEY !== "string" ||
     env.OPENAI_API_KEY.length < 20 ||
     env.OPENAI_API_KEY.length > 512 ||
     (env.TRIPREEL_AUTH_TOKEN !== undefined &&
-      (env.TRIPREEL_AUTH_TOKEN.length < 32 || env.TRIPREEL_AUTH_TOKEN.length > 512))
+      (env.TRIPREEL_AUTH_TOKEN.length < 32 || env.TRIPREEL_AUTH_TOKEN.length > 512)) ||
+    model === null
   ) {
     throw new ServiceProblem(500, "server_misconfigured", "The service is not configured correctly.");
   }
@@ -169,6 +179,7 @@ function requireBaseConfiguration(env: Env): BaseConfiguration {
     authToken: env.TRIPREEL_AUTH_TOKEN,
     corsOrigin: configuredCorsOrigin(env.ALLOWED_ORIGIN),
     openAITimeoutMs: env.OPENAI_TIMEOUT_MS,
+    model,
   };
 }
 
@@ -539,22 +550,23 @@ async function handleRegistration(
 }
 
 async function performAnalysis(
-  photos: ReturnType<typeof validatePayload>["photos"],
+  payload: ValidatedPayload,
   request: Request,
   configuration: BaseConfiguration,
   fetcher: Fetcher,
   origin?: string,
 ): Promise<Response> {
   const analysis = await analyzeWithOpenAI(
-    photos,
+    payload,
     configuration.apiKey,
+    configuration.model,
     configuration.openAITimeoutMs,
     fetcher,
     request.signal,
   );
   const body: PublicAnalysisResponse = {
-    model: MODEL,
-    photos: analysis.photos,
+    model: configuration.model,
+    plan: analysis,
     retention: RETENTION,
   };
   return jsonResponse(body, 200, origin);
@@ -574,7 +586,7 @@ async function handleAnalyze(
     (await constantTimeTokenMatch(authorization, configuration.authToken))
   ) {
     const { value } = await readJSONWithBytes(request, LIMITS.maxBodyBytes);
-    return performAnalysis(validatePayload(value).photos, request, configuration, fetcher, origin);
+    return performAnalysis(validatePayload(value), request, configuration, fetcher, origin);
   }
 
   if (authorization?.startsWith(APP_ATTEST_AUTH_PREFIX) !== true) {
@@ -610,7 +622,7 @@ async function handleAnalyze(
   }
 
   const { value, bytes } = await readJSONWithBytes(request, LIMITS.maxBodyBytes);
-  const { photos } = validatePayload(value);
+  const payload = validatePayload(value);
   const result = await routedKey.stub.authorizeAnalysis({
     keyID: routedKey.keyID,
     challenge,
@@ -618,14 +630,14 @@ async function handleAnalyze(
     method: "POST",
     path: ANALYZE_PATH,
     bodyHash: await sha256(bytes),
-    photoCount: photos.length,
+    photoCount: payload.photos.length,
     nowMs: Date.now(),
   });
   const failure = responseForStateResult(result, origin);
   if (failure !== null) {
     return failure;
   }
-  return performAnalysis(photos, request, configuration, fetcher, origin);
+  return performAnalysis(payload, request, configuration, fetcher, origin);
 }
 
 export async function handleRequest(request: Request, env: Env, fetcher: Fetcher = fetch): Promise<Response> {

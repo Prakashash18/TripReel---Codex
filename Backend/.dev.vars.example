@@ -9,3 +9,6 @@ APP_ATTEST_ROUTING_SECRET=replace-with-at-least-32-random-bytes-and-keep-it-stab
 
 # Optional; valid range is 5000..45000. Default is 30000.
 # OPENAI_TIMEOUT_MS=30000
+
+# Optional. Must support image input and strict Structured Outputs.
+# OPENAI_MODEL=gpt-5.6-luna

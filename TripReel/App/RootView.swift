@@ -21,6 +21,12 @@ struct RootView: View {
                 BuildingScreen()
             case .firstWatch:
                 FirstWatchScreen()
+            case .aiDirection:
+                AICutDirectionScreen()
+            case .aiProcessing:
+                AICutProcessingScreen()
+            case .aiComparison:
+                AICutComparisonScreen()
             case .cut:
                 CutScreen()
             case .pace:
@@ -105,7 +111,9 @@ struct RootView: View {
         }
         .sheet(isPresented: $model.isCloudAnalysisConsentPresented) {
             CloudAnalysisConsentView(
-                context: model.cloudConsentIsSettings ? .settings : .firstUse,
+                context: model.cloudConsentIsSettings
+                    ? .settings
+                    : .aiRemix(model.selectedAICutDirection ?? .betterStory),
                 cloudServiceAvailable: model.cloudAnalysisIsConfigured,
                 onUseCloudEnhancement: {
                     model.useCloudEnhancement()
@@ -133,7 +141,7 @@ struct RootView: View {
                 PhotoAnalysisProgressOverlay(
                     progress: model.photoAnalysisProgress,
                     status: model.photoAnalysisStatus,
-                    usesCloud: model.cloudAnalysisIsEnabled && model.cloudAnalysisIsConfigured,
+                    usesCloud: false,
                     currentAsset: model.photoAnalysisCurrentAsset,
                     recentAssets: model.photoAnalysisRecentAssets,
                     processedCount: model.photoAnalysisProcessedCount,

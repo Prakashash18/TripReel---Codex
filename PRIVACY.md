@@ -16,11 +16,11 @@ Apple Vision analyzes reduced images on the iPhone for screenshots, document-lik
 
 ## Optional OpenAI analysis
 
-Cloud enhancement is off until the user explicitly enables it. When enabled, only uncertain reduced-resolution JPEG thumbnail copies may pass through TripReel's secure backend to OpenAI's GPT-5.6 Luna. TripReel re-encodes the copies without EXIF, GPS, filenames, or stable Apple Photos identifiers. Known screenshots and sensitive or document-like images are blocked from cloud review. The purpose is solely to improve automatic film selection.
+TripReel creates a complete First Cut on-device without cloud AI. Only after the user chooses Improve with AI, selects a creative direction, and explicitly continues may selected reduced-resolution JPEG previews pass through TripReel's secure backend to a configurable OpenAI image-capable model. TripReel re-encodes the copies without EXIF, GPS, filenames, capture dates, or stable Apple Photos identifiers. Known screenshots and sensitive or document-like images are blocked. OpenAI returns only a structured editorial plan, which TripReel validates and applies locally without modifying original photos.
 
 ## Storage and deletion
 
-TripReel's backend does not persist cloud thumbnails or classification results and discards its in-memory copies after each request. OpenAI is called with `store: false`.
+TripReel's backend does not intentionally persist cloud previews or edit plans and discards its in-memory copies after each request. OpenAI is called with `store: false`.
 
 Leaving a photo out of a film never deletes the original. Cleanup can request deletion only for cut Apple Photos assets the user individually selects. The request is batched atomically, requires a clear in-app warning and Apple's system confirmation, and is not made if any selected photo is unavailable. Imported picker copies and bundled demo images cannot be deleted from Apple Photos by TripReel.
 

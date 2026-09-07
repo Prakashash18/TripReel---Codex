@@ -3,14 +3,18 @@ import SwiftUI
 struct FirstWatchScreen: View {
     @EnvironmentObject private var model: TripReelModel
 
+    private var firstCut: TripEditSnapshot? {
+        model.firstCutSnapshot
+    }
+
     var body: some View {
         ZStack {
             MontageView(
-                photos: model.photos,
-                titleCards: model.montageTitleCards,
-                look: model.montageLook,
-                motionIntensity: model.montageMotionIntensity,
-                secondsPerSlide: 4.0 / 3.0
+                photos: firstCut?.keptPhotos ?? model.keptPhotos,
+                titleCards: firstCut?.montageTitleCards ?? model.montageTitleCards,
+                look: firstCut?.montageLook ?? model.montageLook,
+                motionIntensity: firstCut?.motionIntensity ?? model.montageMotionIntensity,
+                secondsPerSlide: firstCut.map { 1.85 - ($0.pace * 1.25) } ?? model.secondsPerPhoto
             )
                 .ignoresSafeArea()
 
@@ -23,8 +27,8 @@ struct FirstWatchScreen: View {
 
             VStack(spacing: 0) {
                 VStack(spacing: 7) {
-                    MetadataText(text: model.tripPlace, color: .white.opacity(0.82))
-                    Text("\(model.tripDates) · \(model.excludedPhotos.isEmpty ? "the raw cut" : "smart first cut")")
+                    MetadataText(text: "First Cut · On-device", color: .white.opacity(0.82))
+                    Text("\(model.tripPlace) · \(model.tripDates)")
                         .font(TR.ui(12))
                         .foregroundStyle(.white.opacity(0.52))
                 }
@@ -38,18 +42,26 @@ struct FirstWatchScreen: View {
                     VStack(spacing: 12) {
                         PlaybackProgressBar()
                         HStack {
-                            MetadataText(text: "\(model.photos.count) photos", color: .white.opacity(0.65))
+                            MetadataText(
+                                text: "\(firstCut?.keptPhotos.count ?? model.keptCount) photos",
+                                color: .white.opacity(0.65)
+                            )
                             Spacer()
-                            Text(model.rawDurationText)
+                            Text(model.firstCutDurationText)
                                 .font(TR.mono(12))
                                 .tracking(0.8)
                                 .foregroundStyle(.white.opacity(0.65))
                         }
                     }
 
-                    Text(model.excludedPhotos.isEmpty ? "Your film is ready to shape." : "Your smart first cut is ready.")
-                        .font(TR.display(29))
-                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("How's your TripReel?")
+                            .font(TR.display(31))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Label("Created privately on your iPhone", systemImage: "checkmark.shield")
+                            .font(TR.ui(11, weight: .medium))
+                            .foregroundStyle(TR.keep.opacity(0.86))
+                    }
 
                     if let followUp = model.photoAnalysisFollowUp {
                         Button {
@@ -112,16 +124,44 @@ struct FirstWatchScreen: View {
                     }
 
                     VStack(spacing: 11) {
-                        Button("Edit your film") {
-                            model.go(.secondWatch)
+                        Button {
+                            model.openAICutDirections()
+                        } label: {
+                            VStack(spacing: 2) {
+                                Label("Improve with AI", systemImage: "sparkles")
+                                Text("Let AI direct another cut")
+                                    .font(TR.ui(10))
+                                    .foregroundStyle(TR.ink.opacity(0.58))
+                            }
                         }
                         .buttonStyle(CreamButtonStyle())
-                        .accessibilityIdentifier("edit-film-button")
+                        .accessibilityHint("Choose a direction for an optional alternative cut")
+                        .accessibilityIdentifier("improve-with-ai-button")
 
-                        Button("Export this cut") {
-                            model.openExport()
+                        Button {
+                            model.editCut(
+                                model.selectedCutSource == .working ? .working : .firstCut
+                            )
+                        } label: {
+                            VStack(spacing: 2) {
+                                Text("Edit Myself")
+                                Text("Change photos, order, framing and pace")
+                                    .font(TR.ui(10))
+                                    .foregroundStyle(.white.opacity(0.52))
+                            }
                         }
                         .buttonStyle(GlassButtonStyle())
+                        .accessibilityIdentifier("edit-film-button")
+
+                        Button("Looks Good · Continue to export") {
+                            model.keepFirstCutForExport()
+                        }
+                        .font(TR.ui(14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.76))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("finish-first-cut-button")
                     }
                 }
                 .padding(.horizontal, 24)
@@ -130,6 +170,379 @@ struct FirstWatchScreen: View {
             }
         }
         .accessibilityIdentifier("first-watch-screen")
+    }
+}
+
+struct AICutDirectionScreen: View {
+    @EnvironmentObject private var model: TripReelModel
+
+    var body: some View {
+        ZStack {
+            WarmBackground(variant: .export)
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 22) {
+                    ScreenHeading(
+                        eyebrow: "AI Remix · no upload yet",
+                        title: "Choose a direction"
+                    )
+                    .padding(.leading, 48)
+                    .trEntrance(0, distance: 8)
+
+                    Text("Pick the feeling for a different cut. Your First Cut stays exactly as it is.")
+                        .font(TR.ui(14))
+                        .foregroundStyle(.white.opacity(0.64))
+                        .lineSpacing(4)
+                        .padding(.horizontal, 2)
+                        .trEntrance(1, distance: 8)
+
+                    LazyVStack(spacing: 11) {
+                        ForEach(AICutDirection.allCases) { direction in
+                            AICutDirectionCard(
+                                direction: direction,
+                                selected: model.selectedAICutDirection == direction
+                            ) {
+                                model.selectAICutDirection(direction)
+                            }
+                        }
+                    }
+
+                    Button("Continue") {
+                        model.continueWithAICutDirection()
+                    }
+                    .buttonStyle(CreamButtonStyle())
+                    .disabled(model.selectedAICutDirection == nil)
+                    .opacity(model.selectedAICutDirection == nil ? 0.48 : 1)
+                    .accessibilityHint("Reviews what will be shared before anything leaves this iPhone")
+                    .accessibilityIdentifier("ai-direction-continue")
+
+                    Text("Selected previews are prepared only after you review and accept the next step.")
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.42))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 6)
+                .padding(.bottom, 34)
+            }
+        }
+        .accessibilityIdentifier("ai-direction-screen")
+    }
+}
+
+private struct AICutDirectionCard: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let direction: AICutDirection
+    let selected: Bool
+    let action: () -> Void
+    @State private var animates = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 15) {
+                DirectionMiniTimeline(direction: direction, animates: animates && !reduceMotion)
+                    .frame(width: 78, height: 54)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(direction.title)
+                        .font(TR.ui(15, weight: .semibold))
+                    Text(direction.detail)
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.56))
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 4)
+
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(selected ? TR.accent : .white.opacity(0.30))
+            }
+            .foregroundStyle(TR.cream)
+            .padding(14)
+            .glassCard(cornerRadius: 18, highlighted: selected)
+        }
+        .buttonStyle(TactileButtonStyle())
+        .accessibilityLabel("\(direction.title). \(direction.detail)")
+        .accessibilityValue(selected ? "Selected" : "Not selected")
+        .accessibilityIdentifier("ai-direction-\(direction.rawValue)")
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: direction == .dynamic ? 0.9 : 1.8).repeatForever(autoreverses: true)) {
+                animates = true
+            }
+        }
+    }
+}
+
+private struct DirectionMiniTimeline: View {
+    let direction: AICutDirection
+    let animates: Bool
+
+    private var widths: [CGFloat] {
+        switch direction {
+        case .betterStory: [17, 26, 14]
+        case .dynamic: [12, 12, 12, 12]
+        case .calm: [29, 24]
+        case .people: [16, 25, 16]
+        case .surpriseMe: [14, 21, 17]
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.black.opacity(0.22))
+
+            VStack(spacing: 8) {
+                Image(systemName: direction.symbol)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(TR.accent)
+                    .scaleEffect(animates && direction == .people ? 1.12 : 1)
+
+                HStack(spacing: 3) {
+                    ForEach(Array(widths.enumerated()), id: \.offset) { index, width in
+                        Capsule()
+                            .fill(index == emphasisIndex ? TR.accent : .white.opacity(0.28))
+                            .frame(width: animates && direction == .betterStory ? widths.reversed()[index] : width, height: 5)
+                            .offset(y: animates && direction == .dynamic && index.isMultiple(of: 2) ? -2 : 0)
+                    }
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.45), value: animates)
+        .accessibilityHidden(true)
+    }
+
+    private var emphasisIndex: Int {
+        switch direction {
+        case .people: 1
+        case .surpriseMe: animates ? 2 : 0
+        default: widths.indices.last ?? 0
+        }
+    }
+}
+
+struct AICutProcessingScreen: View {
+    @EnvironmentObject private var model: TripReelModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var fansOut = false
+
+    var body: some View {
+        ZStack {
+            WarmBackground(variant: .rendering)
+
+            VStack(spacing: 28) {
+                Spacer(minLength: 18)
+
+                processingArtwork
+
+                if let failure = model.aiCutFailureMessage {
+                    VStack(spacing: 12) {
+                        MetadataText(text: "First Cut is safe", color: TR.keep)
+                        Text("AI couldn't create another cut")
+                            .font(TR.display(34))
+                            .multilineTextAlignment(.center)
+                        Text(failure)
+                            .font(TR.ui(14))
+                            .foregroundStyle(.white.opacity(0.62))
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(4)
+
+                        Button("Try Again") { model.retryAICut() }
+                            .buttonStyle(CreamButtonStyle())
+                            .accessibilityIdentifier("ai-cut-retry")
+                        Button("Keep First Cut") { model.cancelAICut() }
+                            .buttonStyle(GlassButtonStyle())
+                            .accessibilityIdentifier("ai-cut-keep-after-failure")
+                    }
+                } else {
+                    VStack(spacing: 10) {
+                        MetadataText(
+                            text: model.selectedAICutDirection?.title ?? "AI Remix",
+                            color: TR.accent
+                        )
+                        Text(model.aiCutStatus)
+                            .font(TR.display(34))
+                            .multilineTextAlignment(.center)
+                            .contentTransition(.opacity)
+
+                        GeometryReader { proxy in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(.white.opacity(0.11))
+                                Capsule().fill(TR.accent)
+                                    .frame(width: proxy.size.width * max(0.03, model.aiCutProgress))
+                            }
+                        }
+                        .frame(height: 3)
+                        .animation(reduceMotion ? nil : TRMotion.progress, value: model.aiCutProgress)
+
+                        Text("Selected reduced previews are used only to direct this alternative edit. Rendering stays on your iPhone.")
+                            .font(TR.ui(12))
+                            .foregroundStyle(.white.opacity(0.50))
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(3)
+
+                        Button("Cancel · Keep First Cut") { model.cancelAICut() }
+                            .font(TR.ui(14, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .padding(.top, 8)
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("ai-cut-cancel")
+                    }
+                }
+
+                Spacer(minLength: 22)
+            }
+            .padding(.horizontal, 28)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.7).repeatForever(autoreverses: true)) {
+                fansOut = true
+            }
+        }
+        .accessibilityIdentifier("ai-processing-screen")
+    }
+
+    private var processingArtwork: some View {
+        ZStack {
+            ForEach(Array((model.firstCutSnapshot?.keptPhotos.prefix(3) ?? []).enumerated()), id: \.element.id) { index, photo in
+                PhotoAssetView(source: photo.source)
+                    .frame(width: 126, height: 166)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.16), lineWidth: 1))
+                    .rotationEffect(.degrees(fansOut ? Double(index - 1) * 8 : Double(index - 1) * 3))
+                    .offset(x: fansOut ? CGFloat(index - 1) * 43 : CGFloat(index - 1) * 20)
+                    .zIndex(Double(index))
+            }
+
+            Image(systemName: "sparkles")
+                .font(.system(size: 25, weight: .semibold))
+                .foregroundStyle(TR.accent)
+                .padding(16)
+                .background(.black.opacity(0.68))
+                .clipShape(Circle())
+                .offset(y: 78)
+        }
+        .frame(height: 205)
+        .accessibilityHidden(true)
+    }
+}
+
+struct AICutComparisonScreen: View {
+    @EnvironmentObject private var model: TripReelModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var previewSource: TripCutSource = .aiCut
+
+    private var snapshot: TripEditSnapshot? {
+        model.editSnapshot(for: previewSource) ?? model.firstCutSnapshot
+    }
+
+    var body: some View {
+        ZStack {
+            WarmBackground(variant: .export)
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 20) {
+                    VStack(spacing: 6) {
+                        MetadataText(text: "Your AI Cut is ready", color: TR.accent)
+                        Text("A different way to tell it.")
+                            .font(TR.display(35))
+                        Text("Both cuts use only your photos. Your First Cut is still here.")
+                            .font(TR.ui(12))
+                            .foregroundStyle(.white.opacity(0.55))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 28)
+                    .trEntrance(0, distance: 8)
+
+                    if let snapshot {
+                        MontageView(
+                            photos: snapshot.keptPhotos,
+                            titleCards: snapshot.montageTitleCards,
+                            dim: false,
+                            watermark: false,
+                            showLabels: false,
+                            look: snapshot.montageLook,
+                            motionIntensity: snapshot.motionIntensity,
+                            secondsPerSlide: 1.85 - (snapshot.pace * 1.25)
+                        )
+                        .id(previewSource)
+                        .frame(height: 290)
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 22).stroke(.white.opacity(0.14), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.45), radius: 24, y: 16)
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.985)))
+                    }
+
+                    HStack(spacing: 8) {
+                        comparisonTab(.firstCut, duration: model.firstCutDurationText)
+                        comparisonTab(.aiCut, duration: model.aiCutDurationText)
+                    }
+                    .padding(4)
+                    .background(.black.opacity(0.22))
+                    .clipShape(Capsule())
+
+                    if previewSource == .aiCut, let summary = model.aiCutSummary {
+                        Text(summary)
+                            .font(TR.ui(13))
+                            .foregroundStyle(.white.opacity(0.64))
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(3)
+                            .padding(.horizontal, 8)
+                            .transition(.opacity)
+                    }
+
+                    VStack(spacing: 11) {
+                        Button("Use AI Cut") { model.useAICut() }
+                            .buttonStyle(CreamButtonStyle())
+                            .accessibilityIdentifier("use-ai-cut-button")
+
+                        Button("Edit This Cut Myself") { model.editCut(previewSource) }
+                            .buttonStyle(GlassButtonStyle())
+                            .accessibilityIdentifier("edit-compared-cut-button")
+
+                        HStack {
+                            Button("Keep First Cut") { model.keepFirstCut() }
+                            Spacer()
+                            Button("Try Another AI Cut") { model.tryAnotherAICut() }
+                        }
+                        .font(TR.ui(13, weight: .semibold))
+                        .foregroundStyle(TR.accent)
+                        .padding(.horizontal, 8)
+                        .padding(.top, 4)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 12)
+                .padding(.bottom, 36)
+            }
+        }
+        .animation(reduceMotion ? nil : TRMotion.selection, value: previewSource)
+        .accessibilityIdentifier("ai-comparison-screen")
+    }
+
+    private func comparisonTab(_ source: TripCutSource, duration: String) -> some View {
+        Button {
+            previewSource = source
+        } label: {
+            VStack(spacing: 2) {
+                Text(source == .aiCut ? "AI Cut ✦" : "First Cut")
+                    .font(TR.ui(13, weight: .semibold))
+                Text(duration)
+                    .font(TR.mono(10))
+                    .foregroundStyle(previewSource == source ? TR.ink.opacity(0.62) : .white.opacity(0.42))
+            }
+            .foregroundStyle(previewSource == source ? TR.ink : TR.cream.opacity(0.62))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(previewSource == source ? TR.cream : .clear)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("compare-\(source.rawValue)")
     }
 }
 

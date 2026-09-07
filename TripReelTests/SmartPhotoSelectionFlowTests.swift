@@ -5,16 +5,17 @@ import XCTest
 
 @MainActor
 final class SmartPhotoSelectionFlowTests: XCTestCase {
-    func testBuildPausesForConsentAndOnDeviceChoiceNeverCallsCloud() async throws {
+    func testFirstCutBuildsOnDeviceWithoutConsentOrCloud() async throws {
         let preferences = makePreferences()
         defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
-        let cloud = CloudAnalysisSpy(results: [])
+        let cloud = CloudAnalysisSpy()
+        let thumbnails = ThumbnailStub()
         let model = TripReelModel(
             arguments: [],
             useDemoData: false,
             photoLibrary: StubPhotoLibraryForSelection(),
             cloudPhotoAnalysis: cloud,
-            photoAnalysisThumbnails: ThumbnailStub(),
+            photoAnalysisThumbnails: thumbnails,
             nativePhotoIntelligence: NativeIntelligenceStub(),
             preferenceStore: preferences
         )
@@ -22,37 +23,89 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
 
         model.requestBuild(trip: trip)
 
-        XCTAssertTrue(model.isCloudAnalysisConsentPresented)
-        let callsBeforeChoice = await cloud.observedCallCount()
-        XCTAssertEqual(callsBeforeChoice, 0)
-
-        model.keepAnalysisOnDevice()
         try await waitUntil { model.screen == .building }
 
-        XCTAssertEqual(model.cloudAnalysisPreference, .onDeviceOnly)
-        let callsAfterChoice = await cloud.observedCallCount()
-        XCTAssertEqual(callsAfterChoice, 0)
+        XCTAssertFalse(model.isCloudAnalysisConsentPresented)
+        let firstCutCloudCalls = await cloud.observedCallCount()
+        XCTAssertEqual(firstCutCloudCalls, 0)
         XCTAssertEqual(model.photos.count, 2)
+        XCTAssertNotNil(model.firstCutSnapshot)
+        XCTAssertNil(model.aiCutSnapshot)
         model.go(.trips)
     }
 
-    func testExplicitCloudChoiceReviewsOnlyAfterConsentAndLeavesExcludedPhotoRecoverable() async throws {
+    func testDirectionDoesNotUploadAndAffirmativeConsentCreatesSeparateAICut() async throws {
         let preferences = makePreferences()
         defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
-        let result = CloudPhotoAnalysisResult(
-            id: "p0",
-            scenic: 0.02,
-            people: 0,
-            group: 0,
-            food: 0,
-            document: 0.99,
-            screenshot: 0,
-            lowQuality: 0.1,
-            confidence: 0.98,
-            action: .discard,
-            reason: "Order confirmation screen"
+        let cloud = CloudAnalysisSpy()
+        let thumbnails = ThumbnailStub()
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: StubPhotoLibraryForSelection(),
+            cloudPhotoAnalysis: cloud,
+            photoAnalysisThumbnails: thumbnails,
+            nativePhotoIntelligence: NativeIntelligenceStub(),
+            preferenceStore: preferences
         )
-        let cloud = CloudAnalysisSpy(results: [result])
+        let trip = makeTrip(count: 2)
+
+        model.requestBuild(trip: trip)
+        try await waitUntil { model.screen == .building }
+        let firstIDs = try XCTUnwrap(model.firstCutSnapshot).keptPhotos.map(\.id)
+
+        model.openAICutDirections()
+        XCTAssertNil(model.selectedAICutDirection)
+        model.continueWithAICutDirection()
+        XCTAssertFalse(model.isCloudAnalysisConsentPresented)
+        model.selectAICutDirection(.dynamic)
+        XCTAssertEqual(model.screen, .aiDirection)
+        let callsBeforeConsent = await cloud.observedCallCount()
+        let thumbnailsBeforeConsent = await thumbnails.observedRequestedIDs()
+        XCTAssertEqual(callsBeforeConsent, 0)
+        XCTAssertEqual(thumbnailsBeforeConsent, ["asset-0", "asset-1"])
+
+        model.continueWithAICutDirection()
+        XCTAssertTrue(model.isCloudAnalysisConsentPresented)
+        let callsOnConsent = await cloud.observedCallCount()
+        let thumbnailsOnConsent = await thumbnails.observedRequestedIDs()
+        XCTAssertEqual(callsOnConsent, 0)
+        XCTAssertEqual(thumbnailsOnConsent, thumbnailsBeforeConsent)
+
+        model.useCloudEnhancement()
+        try await waitUntil { model.screen == .aiComparison }
+
+        let callsAfterConsent = await cloud.observedCallCount()
+        let thumbnailsAfterConsent = await thumbnails.observedRequestedIDs()
+        XCTAssertEqual(callsAfterConsent, 1)
+        XCTAssertEqual(thumbnailsAfterConsent, ["asset-0", "asset-1", "asset-0", "asset-1"])
+        XCTAssertEqual(model.firstCutSnapshot?.keptPhotos.map(\.id), firstIDs)
+        XCTAssertEqual(model.aiCutSnapshot?.keptPhotos.map(\.id), Array(firstIDs.reversed()))
+
+        model.useAICut()
+        XCTAssertEqual(model.selectedCutSource, .aiCut)
+        XCTAssertEqual(model.photos.map(\.id), Array(firstIDs.reversed()))
+        XCTAssertEqual(model.screen, .secondWatch)
+
+        model.editCut(.aiCut)
+        XCTAssertEqual(model.selectedCutSource, .working)
+        XCTAssertEqual(model.photos.map(\.id), Array(firstIDs.reversed()))
+        XCTAssertEqual(model.screen, .secondWatch)
+
+        model.keepFirstCut()
+        XCTAssertEqual(model.selectedCutSource, .firstCut)
+        XCTAssertEqual(model.photos.map(\.id), firstIDs)
+        XCTAssertEqual(model.firstCutSnapshot?.keptPhotos.map(\.id), firstIDs)
+
+        model.tryAnotherAICut()
+        XCTAssertEqual(model.screen, .aiDirection)
+        XCTAssertEqual(model.firstCutSnapshot?.keptPhotos.map(\.id), firstIDs)
+    }
+
+    func testDecliningConsentReturnsToFirstCutWithoutCloud() async throws {
+        let preferences = makePreferences()
+        defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
+        let cloud = CloudAnalysisSpy()
         let model = TripReelModel(
             arguments: [],
             useDemoData: false,
@@ -62,32 +115,88 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
             nativePhotoIntelligence: NativeIntelligenceStub(),
             preferenceStore: preferences
         )
-        let trip = makeTrip(count: 2)
 
-        model.requestBuild(trip: trip)
-        let callsBeforeChoice = await cloud.observedCallCount()
-        XCTAssertEqual(callsBeforeChoice, 0)
-        model.useCloudEnhancement()
+        model.requestBuild(trip: makeTrip(count: 2))
         try await waitUntil { model.screen == .building }
+        model.openAICutDirections()
+        model.selectAICutDirection(.calm)
+        model.continueWithAICutDirection()
+        model.keepAnalysisOnDevice()
 
-        let callsAfterChoice = await cloud.observedCallCount()
-        XCTAssertEqual(callsAfterChoice, 1)
-        XCTAssertEqual(model.cloudAnalysisPreference, .enabled)
-        XCTAssertEqual(model.excludedPhotos.map(\.id), ["asset-0"])
-        XCTAssertEqual(model.photos.map(\.id), ["asset-1"])
+        XCTAssertEqual(model.screen, .firstWatch)
+        let declinedCalls = await cloud.observedCallCount()
+        XCTAssertEqual(declinedCalls, 0)
+        XCTAssertNotNil(model.firstCutSnapshot)
+        XCTAssertNil(model.aiCutSnapshot)
+    }
 
-        model.includeExcludedPhoto(id: "asset-0")
+    func testUnavailableCloudFailsClosedAndLeavesFirstCutIntact() async throws {
+        let preferences = makePreferences()
+        defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
+        let cloud = CloudAnalysisSpy(isConfigured: false)
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: StubPhotoLibraryForSelection(),
+            cloudPhotoAnalysis: cloud,
+            photoAnalysisThumbnails: ThumbnailStub(),
+            nativePhotoIntelligence: NativeIntelligenceStub(),
+            preferenceStore: preferences
+        )
 
-        XCTAssertTrue(model.excludedPhotos.isEmpty)
-        XCTAssertEqual(model.photos.map(\.id), ["asset-0", "asset-1"])
-        model.go(.trips)
+        model.requestBuild(trip: makeTrip(count: 3))
+        try await waitUntil { model.screen == .building }
+        let first = try XCTUnwrap(model.firstCutSnapshot)
+        model.openAICutDirections()
+        model.selectAICutDirection(.betterStory)
+        model.continueWithAICutDirection()
+        model.useCloudEnhancement()
+
+        XCTAssertEqual(model.screen, .aiProcessing)
+        XCTAssertNotNil(model.aiCutFailureMessage)
+        XCTAssertEqual(model.firstCutSnapshot, first)
+        XCTAssertNil(model.aiCutSnapshot)
+        let unavailableCalls = await cloud.observedCallCount()
+        XCTAssertEqual(unavailableCalls, 0)
+    }
+
+    func testCloudFailureAfterConsentLeavesFirstCutReadyAndUnchanged() async throws {
+        let preferences = makePreferences()
+        defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
+        let cloud = CloudAnalysisSpy(fails: true)
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: StubPhotoLibraryForSelection(),
+            cloudPhotoAnalysis: cloud,
+            photoAnalysisThumbnails: ThumbnailStub(),
+            nativePhotoIntelligence: NativeIntelligenceStub(),
+            preferenceStore: preferences
+        )
+
+        model.requestBuild(trip: makeTrip(count: 3))
+        try await waitUntil { model.screen == .building }
+        let first = try XCTUnwrap(model.firstCutSnapshot)
+        model.openAICutDirections()
+        model.selectAICutDirection(.surpriseMe)
+        model.continueWithAICutDirection()
+        model.useCloudEnhancement()
+
+        try await waitUntil { model.aiCutFailureMessage != nil }
+
+        let callCount = await cloud.observedCallCount()
+        XCTAssertEqual(callCount, 1)
+        XCTAssertEqual(model.screen, .aiProcessing)
+        XCTAssertEqual(model.firstCutSnapshot, first)
+        XCTAssertNil(model.aiCutSnapshot)
+        XCTAssertEqual(model.photos, first.photos)
     }
 
     func testMetadataScreenshotIsExcludedWithoutPreparingOrUploadingIt() async throws {
         let preferences = makePreferences()
         preferences.set("enabled", forKey: "tripreel.cloud-photo-analysis-preference.v1")
         defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
-        let cloud = CloudAnalysisSpy(results: [])
+        let cloud = CloudAnalysisSpy()
         let thumbnails = ThumbnailStub()
         let model = TripReelModel(
             arguments: [],
@@ -129,8 +238,60 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         let requestedIDs = await thumbnails.observedRequestedIDs()
         let cloudCalls = await cloud.observedCallCount()
         XCTAssertEqual(requestedIDs, ["camera"])
-        XCTAssertEqual(cloudCalls, 1)
-        model.go(.trips)
+        XCTAssertEqual(cloudCalls, 0)
+
+        model.includeExcludedPhoto(id: screenshot.id)
+        XCTAssertEqual(model.selectedCutSource, .working)
+        XCTAssertEqual(Set(model.photos.map(\.id)), ["screen", "camera"])
+        model.editCut(.working)
+        XCTAssertEqual(model.screen, .secondWatch)
+        XCTAssertEqual(Set(model.photos.map(\.id)), ["screen", "camera"])
+
+        model.openAICutDirections()
+        model.selectAICutDirection(.people)
+        model.continueWithAICutDirection()
+        model.useCloudEnhancement()
+        try await waitUntil { model.screen == .aiComparison }
+
+        let remixCalls = await cloud.observedCallCount()
+        let wireIDs = await cloud.observedWireIDs()
+        let allRequestedIDs = await thumbnails.observedRequestedIDs()
+        XCTAssertEqual(remixCalls, 1)
+        XCTAssertEqual(wireIDs, ["p0"])
+        XCTAssertEqual(allRequestedIDs, ["camera", "camera"])
+    }
+
+    func testTextHeavyMemoryCanStayInFirstCutButIsBlockedFromAIPayload() async throws {
+        let preferences = makePreferences()
+        defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
+        let cloud = CloudAnalysisSpy()
+        let thumbnails = ThumbnailStub()
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: StubPhotoLibraryForSelection(),
+            cloudPhotoAnalysis: cloud,
+            photoAnalysisThumbnails: thumbnails,
+            nativePhotoIntelligence: NativeIntelligenceStub(protectedDocumentID: "asset-0"),
+            preferenceStore: preferences
+        )
+
+        model.requestBuild(trip: makeTrip(count: 2))
+        try await waitUntil { model.screen == .building }
+
+        XCTAssertEqual(Set(try XCTUnwrap(model.firstCutSnapshot).keptPhotos.map(\.id)), ["asset-0", "asset-1"])
+
+        model.openAICutDirections()
+        model.selectAICutDirection(.betterStory)
+        model.continueWithAICutDirection()
+        model.useCloudEnhancement()
+        try await waitUntil { model.screen == .aiComparison }
+
+        let wireIDs = await cloud.observedWireIDs()
+        let requestedIDs = await thumbnails.observedRequestedIDs()
+        XCTAssertEqual(wireIDs, ["p0"])
+        XCTAssertEqual(requestedIDs, ["asset-0", "asset-1", "asset-1"])
+        XCTAssertEqual(model.firstCutSnapshot?.keptPhotos.count, 2)
     }
 
     func testLargeOnDeviceTripBecomesAConciseRecoverableFirstCut() async throws {
@@ -141,7 +302,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
             arguments: [],
             useDemoData: false,
             photoLibrary: StubPhotoLibraryForSelection(),
-            cloudPhotoAnalysis: CloudAnalysisSpy(results: []),
+            cloudPhotoAnalysis: CloudAnalysisSpy(),
             photoAnalysisThumbnails: ThumbnailStub(),
             nativePhotoIntelligence: NativeIntelligenceStub(),
             preferenceStore: preferences
@@ -167,7 +328,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
             arguments: [],
             useDemoData: false,
             photoLibrary: StubPhotoLibraryForSelection(),
-            cloudPhotoAnalysis: CloudAnalysisSpy(results: []),
+            cloudPhotoAnalysis: CloudAnalysisSpy(),
             photoAnalysisThumbnails: thumbnails,
             nativePhotoIntelligence: NativeIntelligenceStub(),
             preferenceStore: preferences
@@ -209,7 +370,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
             arguments: [],
             useDemoData: false,
             photoLibrary: StubPhotoLibraryForSelection(),
-            cloudPhotoAnalysis: CloudAnalysisSpy(results: []),
+            cloudPhotoAnalysis: CloudAnalysisSpy(),
             photoAnalysisThumbnails: UnavailableThumbnailStub(),
             nativePhotoIntelligence: NativeIntelligenceStub(),
             preferenceStore: preferences
@@ -233,7 +394,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
             arguments: [],
             useDemoData: false,
             photoLibrary: StubPhotoLibraryForSelection(),
-            cloudPhotoAnalysis: CloudAnalysisSpy(results: []),
+            cloudPhotoAnalysis: CloudAnalysisSpy(),
             photoAnalysisThumbnails: SlowThumbnailStub(),
             nativePhotoIntelligence: NativeIntelligenceStub(),
             preferenceStore: preferences
@@ -299,21 +460,42 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
 }
 
 private actor CloudAnalysisSpy: CloudPhotoAnalysisServing {
-    nonisolated let isConfigured = true
+    nonisolated let isConfigured: Bool
     private(set) var callCount = 0
-    let results: [CloudPhotoAnalysisResult]
+    private(set) var wireIDs: [String] = []
+    private let fails: Bool
 
-    init(results: [CloudPhotoAnalysisResult]) {
-        self.results = results
+    init(isConfigured: Bool = true, fails: Bool = false) {
+        self.isConfigured = isConfigured
+        self.fails = fails
     }
 
-    func analyze(_ photos: [CloudPhotoAnalysisInput]) async throws -> [CloudPhotoAnalysisResult] {
+    func createEditPlan(
+        direction: AICutDirection,
+        photos: [CloudPhotoAnalysisInput]
+    ) async throws -> AICutEditPlan {
         callCount += 1
-        let requested = Set(photos.map(\.id))
-        return results.filter { requested.contains($0.id) }
+        wireIDs = photos.map(\.id)
+        if fails { throw CloudPhotoAnalysisError.invalidResponse }
+        return AICutEditPlan(
+            version: 1,
+            direction: direction,
+            summary: "A distinct alternative using only the selected previews.",
+            sequence: photos.reversed().enumerated().map { index, photo in
+                AICutPlanItem(
+                    photoID: photo.id,
+                    order: index,
+                    durationSeconds: 1.4 + (Double(index) * 0.2),
+                    role: index == 0 ? .opening : .closing,
+                    emphasis: index == 0 ? .highlight : .normal,
+                    motion: index.isMultiple(of: 2) ? .zoomIn : .panLeft
+                )
+            }
+        )
     }
 
     func observedCallCount() -> Int { callCount }
+    func observedWireIDs() -> [String] { wireIDs }
 }
 
 private actor ThumbnailStub: PhotoAnalysisThumbnailServing {
@@ -392,21 +574,56 @@ private actor RetryableThumbnailStub: PhotoAnalysisThumbnailServing {
 }
 
 private actor NativeIntelligenceStub: NativePhotoIntelligenceServing {
+    private let protectedDocumentID: String?
+
+    init(protectedDocumentID: String? = nil) {
+        self.protectedDocumentID = protectedDocumentID
+    }
+
     func analyze(
         cgImage: CGImage,
         orientation: CGImagePropertyOrientation,
         metadata: NativePhotoIntelligenceMetadata
     ) async throws -> NativePhotoIntelligenceResult {
-        let signals = NativePhotoIntelligenceSignals(
-            availability: NativePhotoSignalAvailability(
-                classification: false,
-                textRecognition: false,
-                faceQuality: false,
-                documentDetection: false,
-                featurePrint: false,
-                aesthetics: false
+        let signals: NativePhotoIntelligenceSignals
+        if metadata.sourceIdentifier == protectedDocumentID {
+            signals = NativePhotoIntelligenceSignals(
+                classifications: [
+                    NativePhotoClassification(identifier: "landscape", confidence: 0.96)
+                ],
+                text: NativePhotoTextSignal(
+                    lineCount: 20,
+                    characterCount: 800,
+                    coverage: 0.40,
+                    averageConfidence: 0.96
+                ),
+                document: NativePhotoDocumentSignal(
+                    detected: true,
+                    confidence: 0.98,
+                    coverage: 0.72
+                ),
+                aesthetics: NativePhotoAestheticsSignal(overallScore: 0.82, isUtility: false),
+                availability: NativePhotoSignalAvailability(
+                    classification: true,
+                    textRecognition: true,
+                    faceQuality: false,
+                    documentDetection: true,
+                    featurePrint: false,
+                    aesthetics: true
+                )
             )
-        )
+        } else {
+            signals = NativePhotoIntelligenceSignals(
+                availability: NativePhotoSignalAvailability(
+                    classification: false,
+                    textRecognition: false,
+                    faceQuality: false,
+                    documentDetection: false,
+                    featurePrint: false,
+                    aesthetics: false
+                )
+            )
+        }
         let assessment = NativePhotoIntelligenceScorer.score(signals: signals)
         return NativePhotoIntelligenceResult(
             sourceIdentifier: metadata.sourceIdentifier,

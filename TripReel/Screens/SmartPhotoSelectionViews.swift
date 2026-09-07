@@ -437,9 +437,6 @@ struct SmartSelectionReviewView: View {
                         symbol: "photo.on.rectangle"
                     )
                 }
-                if followUp.cloudPassCanBeRetried {
-                    followUpRow("Cloud finishing pass", detail: "Available later", symbol: "cloud")
-                }
             }
 
             Button {

@@ -1,6 +1,6 @@
 # TripReel visual-analysis proxy
 
-This directory is a dependency-light TypeScript Cloudflare Worker for TripReel's **explicitly opt-in** cloud visual enhancement. It accepts reduced JPEG thumbnails, calls the OpenAI Responses API with exactly `gpt-5.6-luna`, and returns bounded visual-triage scores. It does not contain or expose an OpenAI key to the app.
+This directory is a dependency-light TypeScript Cloudflare Worker for TripReel's **explicitly opt-in AI Remix**. It accepts selected reduced JPEG previews, asks a configurable OpenAI image-capable model for a bounded editorial plan, and returns only structured editing decisions. It never renders a video and does not contain or expose an OpenAI key to the app.
 
 The implementation deliberately has no database, object storage, cache writes, analytics SDK, or `console` calls. It never logs or persists request bodies or images.
 
@@ -21,6 +21,8 @@ The Worker also retains `Authorization: Bearer <development-token>` for local/pr
 
 ```json
 {
+  "version": 1,
+  "direction": "better_story",
   "photos": [
     {
       "id": "p0",
@@ -35,21 +37,19 @@ Success:
 ```json
 {
   "model": "gpt-5.6-luna",
-  "photos": [
-    {
-      "id": "p0",
-      "scenic": 0.94,
-      "people": 0.12,
-      "group": 0,
-      "food": 0,
-      "document": 0,
-      "screenshot": 0,
-      "lowQuality": 0.04,
-      "confidence": 0.96,
-      "action": "keep",
-      "reason": "Strong travel-reel candidate."
-    }
-  ],
+  "plan": {
+    "version": 1,
+    "direction": "better_story",
+    "summary": "A concise arc opening wide and ending on a shared moment.",
+    "sequence": [{
+      "photoId": "p0",
+      "order": 0,
+      "durationSeconds": 2.4,
+      "role": "opening",
+      "emphasis": "highlight",
+      "motion": "zoom_in"
+    }]
+  },
   "retention": {
     "proxyStored": false,
     "openAIStore": false,
@@ -58,7 +58,7 @@ Success:
 }
 ```
 
-All scores are numbers from 0 through 1. `action` is `keep`, `review`, or `discard`. `reason` is constrained to a fixed allowlist of safe phrases; the model cannot use it to echo names, receipt text, or another string visible in a photo. The response has exactly one result for every input ID, in input order. Treat scores as suggestions; do not delete originals automatically from a model result.
+Supported directions are `better_story`, `dynamic`, `calm`, `people`, and `surprise_me`. A sequence may use each supplied temporary ID at most once. Order must be contiguous, durations must be 0.6–4.0 seconds, and role, emphasis, and motion are fixed enums understood by the local renderer. Omitted previews are simply not included in the AI candidate. The iOS app validates the complete plan again and maps the temporary IDs locally; no model decision deletes or modifies an original.
 
 Errors use a stable, sanitized shape and never include an upstream response body:
 
@@ -68,16 +68,16 @@ Errors use a stable, sanitized shape and never include an upstream response body
 
 ## Enforced limits
 
-- 1–12 photos per request.
+- Version `1`, one supported direction, and 1–24 photos per request.
 - 4,500,000-byte maximum JSON body, enforced while streaming as well as by `Content-Length`.
-- 256 KiB decoded JPEG maximum per photo and 3 MiB decoded maximum per batch.
+- 128 KiB decoded JPEG maximum per photo and 3 MiB decoded maximum per batch.
 - 1024 × 1024 maximum dimensions and 1,048,576 maximum pixels per photo.
 - JPEG only: canonical base64, legal frame/scan marker progression, consistent component tables, entropy data, a terminal end marker, and dimensions are checked. EXIF/XMP, IPTC/Photoshop, and JPEG comment segments are rejected so metadata cannot ride along with a thumbnail. This is marker-level validation, not a full pixel decoder; OpenAI still performs the actual image decode.
-- Unique IDs of 1–64 characters matching `[A-Za-z0-9][A-Za-z0-9._:-]{0,63}`.
+- IDs must be contiguous per-request placeholders `p0`, `p1`, …; stable library identifiers are rejected.
 - Fifteen seconds to upload the request body, 30 seconds for OpenAI by default, and 128 KiB maximum for the upstream response.
 - Exact object keys are required; unknown fields are rejected.
 
-The OpenAI call uses image detail `low`, `reasoning: { "effort": "none" }`, `store: false`, no tools, a fixed prompt, and strict JSON Schema Structured Outputs. It sets prompt caching to explicit mode without defining a breakpoint, disabling the automatic implicit cache breakpoint. Successful model output is validated again before it reaches the app. Text visible in an image is explicitly treated as untrusted content rather than an instruction.
+The OpenAI call uses image detail `low`, `reasoning: { "effort": "none" }`, `store: false`, no tools, a fixed travel-film editorial prompt, and strict JSON Schema Structured Outputs. The model sees only temporary IDs plus images. It is told not to identify people, infer private information, invent events, or obey text inside an image. Successful output is checked for exact keys, known unique IDs, contiguous order, bounds, and supported enum values before it reaches the app.
 
 ## Data handling and retention
 
@@ -87,7 +87,7 @@ This Worker holds the JSON and thumbnails in memory only long enough to validate
 
 `store: false` prevents this response from being stored as retrievable Responses API application state. It does **not** turn on Zero Data Retention. Under OpenAI's default API data controls, abuse-monitoring logs may contain API content and are retained for up to 30 days unless longer retention is legally or safety-required. Eligible organizations can apply for Zero Data Retention (ZDR); image inputs that are flagged by OpenAI's CSAM classifier can still be retained for manual review even with ZDR. OpenAI states that API data is not used to train or improve its models by default unless the organization explicitly opts in. See OpenAI's current [data controls documentation](https://developers.openai.com/api/docs/guides/your-data) before launch.
 
-The model ID, image-input support, reasoning levels, and Structured Outputs support are documented in the current [GPT-5.6 Luna model page](https://developers.openai.com/api/docs/models/gpt-5.6-luna) and [Responses API reference](https://developers.openai.com/api/reference/cli/resources/responses/methods/create).
+The model defaults to `gpt-5.6-luna`; operators may select another compatible model only with the validated `OPENAI_MODEL` Worker setting. Image-input support and Structured Outputs requirements must be checked before changing it. See the [Responses API reference](https://developers.openai.com/api/reference/cli/resources/responses/methods/create).
 
 ## Local validation
 
@@ -97,7 +97,7 @@ Node 22 or newer can run the unit tests without installing dependencies:
 npm test
 ```
 
-The tests exercise authentication, exact CORS behavior, request and JPEG validation, the fixed `gpt-5.6-luna`/`reasoning: none`/`store: false` upstream payload, strict output validation, and sanitized upstream failures. They use a fake `fetch`; they never call OpenAI.
+The tests exercise authentication, exact CORS behavior, request and JPEG validation, model configurability, `reasoning: none`, `store: false`, strict edit-plan validation, and sanitized upstream failures. They use a fake `fetch`; they never call OpenAI.
 
 For TypeScript checking and local Worker execution:
 
@@ -118,6 +118,8 @@ The Worker is deployed to the connected Cloudflare account as `tripreel-visual-a
 https://tripreel-visual-analysis.tripreel-prakashash18.workers.dev/v1/analyze
 ```
 
+The source in this repository now uses the versioned AI edit-plan contract. This implementation task intentionally does not deploy it; deploy the reviewed Worker source separately before testing the new iOS AI Remix against that live hostname.
+
 The `workers.dev` hostname is enabled for this initial deployment and preview URLs are disabled. Before each deployment:
 
 1. Create a dedicated OpenAI project, use a project-scoped key, restrict its access, and configure spend/rate alerts.
@@ -128,7 +130,7 @@ The `workers.dev` hostname is enabled for this initial deployment and preview UR
 6. Confirm Workers Logs remains disabled. The source contains no `console` statements, and `wrangler.toml` explicitly disables observability and invocation logs. Review Cloudflare's current [Workers Logs behavior](https://developers.cloudflare.com/workers/observability/logs/workers-logs/) whenever deployment configuration changes.
 7. Run `npm test`, `npm run typecheck`, a staging smoke test with synthetic/non-sensitive images, and negative tests for authorization, size limits, timeout, and rate limiting before production traffic.
 
-Optional `OPENAI_TIMEOUT_MS` must be an integer from 5000 through 45000. The service fails closed with a generic configuration error if required secrets or timeout/origin settings are invalid.
+Optional `OPENAI_TIMEOUT_MS` must be an integer from 5000 through 45000. Optional `OPENAI_MODEL` must be a 1–100 character safe model identifier; it defaults to `gpt-5.6-luna`. The service fails closed with a generic configuration error if required secrets or model/timeout/origin settings are invalid.
 
 The configuration opts in to Cloudflare's `enable_request_signal` flag so a disconnected client aborts the image-bearing OpenAI subrequest. It also disables importable/global environment bindings and the automatically enabled Node compatibility layer; this Worker uses Web Platform APIs only. Recheck these flags against Cloudflare's current [compatibility flags documentation](https://developers.cloudflare.com/workers/configuration/compatibility-flags/) when updating the compatibility date.
 
@@ -148,6 +150,6 @@ The production app uses no shared bearer secret: the private App Attest key is c
 - `src/app-attest-verifier.ts` — Apple certificate, nonce, authenticator data, and assertion verification.
 - `src/app-attest-state.ts` — sharded Durable Object challenge, key, replay, quota, and retention state.
 - `src/validation.ts` — streaming body cap, strict wire validation, base64/JPEG/dimension checks.
-- `src/openai.ts` — fixed Responses API request, timeout, bounded response read, and fail-closed parsing.
+- `src/openai.ts` — configurable Responses API editorial request, timeout, bounded response read, and fail-closed parsing.
 - `src/contract.ts` — limits, public types, JSON Schema, and output validation.
 - `test/worker.test.mjs` — dependency-free unit tests with a mocked upstream.

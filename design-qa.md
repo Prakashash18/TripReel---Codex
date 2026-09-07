@@ -1,6 +1,10 @@
 # TripReel design QA
 
-> September 6 update: the Film Studio now keeps its 9:16 film completely
+> September 7 update: First Cut is now always completed privately on-device.
+> After watching it, users can edit, export, or explicitly request an AI Remix.
+> The new direction, consent, processing/failure, and First Cut vs AI Cut
+> comparison screens preserve the existing cinematic language and Reduce Motion.
+> The Film Studio continues to keep its 9:16 film completely
 > unobstructed and reduces the screen to Edit film and Export film. Persistent
 > Back, an edge swipe, and VoiceOver escape restore predictable reverse
 > navigation without turning Back into another primary action. Titles now use
@@ -8,8 +12,8 @@
 > visibility, and duration can be edited. CapCut receives a rendered MPEG-4
 > handoff rather than an incompatible timing file. Full-person safe framing, similarity
 > clustering, directional navigation, cinematic montage transitions, and the
-> accessible app-wide motion system pass strict source checks. The optional
-> OpenAI consent is now a numbered plain-language flow, and Cleanup exposes
+> accessible app-wide motion system pass strict source checks. Optional cloud
+> consent now appears only after an AI direction is chosen, and Cleanup exposes
 > responsive Select all/Clear all controls with a live selected/total count.
 > These latest surfaces are not
 > represented by the older screenshots below. Fresh native capture is blocked because this
