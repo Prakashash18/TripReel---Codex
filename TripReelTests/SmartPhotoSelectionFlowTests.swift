@@ -123,7 +123,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         model.continueWithAICutDirection()
         model.keepAnalysisOnDevice()
 
-        XCTAssertEqual(model.screen, .firstWatch)
+        XCTAssertEqual(model.screen, .firstCutOptions)
         let declinedCalls = await cloud.observedCallCount()
         XCTAssertEqual(declinedCalls, 0)
         XCTAssertNotNil(model.firstCutSnapshot)
@@ -311,12 +311,70 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         model.requestBuild(trip: makeTrip(count: 40))
         try await waitUntil { model.screen == .building }
 
-        XCTAssertEqual(model.photos.count, 24)
-        XCTAssertEqual(model.excludedPhotos.count, 16)
+        XCTAssertEqual(model.photos.count, 30)
+        XCTAssertEqual(model.excludedPhotos.count, 10)
         XCTAssertTrue(model.excludedPhotos.allSatisfy { $0.reason == .notAHighlight })
         XCTAssertEqual(model.photoAnalysisProcessedCount, 40)
         XCTAssertEqual(model.photoAnalysisRecentAssets.count, 6)
         model.go(.trips)
+    }
+
+    func testSmallEventKeepsEverySafeMomentLocally() async throws {
+        let preferences = makePreferences()
+        defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: StubPhotoLibraryForSelection(),
+            cloudPhotoAnalysis: CloudAnalysisSpy(),
+            photoAnalysisThumbnails: ThumbnailStub(),
+            nativePhotoIntelligence: NativeIntelligenceStub(),
+            preferenceStore: preferences
+        )
+
+        model.requestBuild(trip: makeTrip(count: 26))
+        try await waitUntil { model.screen == .building }
+
+        XCTAssertEqual(model.photos.count, 26)
+        XCTAssertTrue(model.excludedPhotos.isEmpty)
+        model.go(.trips)
+    }
+
+    func testCloudRemixBalancesFirstCutWithSafeMorePhotosAndCanRestoreThem() async throws {
+        let preferences = makePreferences()
+        defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
+        let cloud = CloudAnalysisSpy()
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: StubPhotoLibraryForSelection(),
+            cloudPhotoAnalysis: cloud,
+            photoAnalysisThumbnails: ThumbnailStub(),
+            nativePhotoIntelligence: NativeIntelligenceStub(),
+            preferenceStore: preferences
+        )
+
+        model.requestBuild(trip: makeTrip(count: 40))
+        try await waitUntil { model.screen == .building }
+        let morePhotoIDs = Set(model.excludedPhotos.map(\.id))
+        XCTAssertEqual(morePhotoIDs.count, 10)
+
+        model.openAICutDirections()
+        model.selectAICutDirection(.people)
+        model.continueWithAICutDirection()
+        model.useCloudEnhancement()
+        try await waitUntil { model.screen == .aiComparison }
+
+        let localSelections = await cloud.observedLocalSelections()
+        XCTAssertEqual(localSelections.filter { $0 == .firstCut }.count, 26)
+        XCTAssertEqual(localSelections.filter { $0 == .morePhotos }.count, 10)
+        let aiIDs = Set(try XCTUnwrap(model.aiCutSnapshot).keptPhotos.map(\.id))
+        XCTAssertEqual(aiIDs.intersection(morePhotoIDs), morePhotoIDs)
+        XCTAssertEqual(aiIDs.count, CloudPhotoAnalysisClient.maximumBatchSize)
+
+        model.useAICut()
+        XCTAssertNil(model.smartSelectionSummary)
+        XCTAssertTrue(model.visibleExcludedPhotos.isEmpty)
     }
 
     func testDeferredPhotosUsePositiveFollowUpAndCanBeCheckedAgain() async throws {
@@ -463,6 +521,7 @@ private actor CloudAnalysisSpy: CloudPhotoAnalysisServing {
     nonisolated let isConfigured: Bool
     private(set) var callCount = 0
     private(set) var wireIDs: [String] = []
+    private(set) var localSelections: [CloudPhotoLocalSelection] = []
     private let fails: Bool
 
     init(isConfigured: Bool = true, fails: Bool = false) {
@@ -476,6 +535,7 @@ private actor CloudAnalysisSpy: CloudPhotoAnalysisServing {
     ) async throws -> AICutEditPlan {
         callCount += 1
         wireIDs = photos.map(\.id)
+        localSelections = photos.map(\.localSelection)
         if fails { throw CloudPhotoAnalysisError.invalidResponse }
         return AICutEditPlan(
             version: 1,
@@ -485,7 +545,7 @@ private actor CloudAnalysisSpy: CloudPhotoAnalysisServing {
                 AICutPlanItem(
                     photoID: photo.id,
                     order: index,
-                    durationSeconds: 1.4 + (Double(index) * 0.2),
+                    durationSeconds: min(3.8, 1.4 + (Double(index) * 0.2)),
                     role: index == 0 ? .opening : .closing,
                     emphasis: index == 0 ? .highlight : .normal,
                     motion: index.isMultiple(of: 2) ? .zoomIn : .panLeft
@@ -496,6 +556,7 @@ private actor CloudAnalysisSpy: CloudPhotoAnalysisServing {
 
     func observedCallCount() -> Int { callCount }
     func observedWireIDs() -> [String] { wireIDs }
+    func observedLocalSelections() -> [CloudPhotoLocalSelection] { localSelections }
 }
 
 private actor ThumbnailStub: PhotoAnalysisThumbnailServing {

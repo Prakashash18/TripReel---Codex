@@ -1,7 +1,9 @@
 import {
   AI_DIRECTIONS,
   LIMITS,
+  LOCAL_SELECTIONS,
   type AICutDirection,
+  type LocalSelection,
   type PhotoInput,
   type ValidatedPayload,
 } from "./contract.ts";
@@ -280,11 +282,34 @@ export function validatePayload(value: unknown): ValidatedPayload {
 
   for (let index = 0; index < value.photos.length; index += 1) {
     const photo = value.photos[index];
-    if (!isRecord(photo) || !hasExactKeys(photo, ["id", "imageBase64"])) {
+    if (!isRecord(photo)) {
       throw new RequestProblem(
         400,
         "invalid_photo",
-        `photos[${index}] must contain only id and imageBase64.`,
+        `photos[${index}] must be an object.`,
+      );
+    }
+    // Keep the deployed endpoint compatible with the previous TestFlight
+    // request while new clients add the local editorial hint.
+    const hasLegacyShape = hasExactKeys(photo, ["id", "imageBase64"]);
+    const hasCurrentShape = hasExactKeys(photo, ["id", "imageBase64", "localSelection"]);
+    if (!hasLegacyShape && !hasCurrentShape) {
+      throw new RequestProblem(
+        400,
+        "invalid_photo",
+        `photos[${index}] contains unsupported fields.`,
+      );
+    }
+    const localSelection: LocalSelection = hasCurrentShape &&
+      typeof photo.localSelection === "string" &&
+      LOCAL_SELECTIONS.includes(photo.localSelection as LocalSelection)
+      ? photo.localSelection as LocalSelection
+      : "first_cut";
+    if (hasCurrentShape && localSelection !== photo.localSelection) {
+      throw new RequestProblem(
+        400,
+        "invalid_local_selection",
+        `photos[${index}].localSelection is not supported.`,
       );
     }
     if (
@@ -319,7 +344,11 @@ export function validatePayload(value: unknown): ValidatedPayload {
     }
 
     ids.add(photo.id);
-    photos.push({ id: photo.id, imageBase64: photo.imageBase64 as string });
+    photos.push({
+      id: photo.id,
+      imageBase64: photo.imageBase64 as string,
+      localSelection,
+    });
   }
 
   return {

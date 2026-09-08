@@ -26,7 +26,8 @@ The Worker also retains `Authorization: Bearer <development-token>` for local/pr
   "photos": [
     {
       "id": "p0",
-      "imageBase64": "<base64-encoded JPEG bytes; no data-URL prefix>"
+      "imageBase64": "<base64-encoded JPEG bytes; no data-URL prefix>",
+      "localSelection": "more_photos"
     }
   ]
 }
@@ -58,7 +59,7 @@ Success:
 }
 ```
 
-Supported directions are `better_story`, `dynamic`, `calm`, `people`, and `surprise_me`. A sequence may use each supplied temporary ID at most once. Order must be contiguous, durations must be 0.6–4.0 seconds, and role, emphasis, and motion are fixed enums understood by the local renderer. Omitted previews are simply not included in the AI candidate. The iOS app validates the complete plan again and maps the temporary IDs locally; no model decision deletes or modifies an original.
+Supported directions are `better_story`, `dynamic`, `calm`, `people`, and `surprise_me`. `localSelection` is either `first_cut` or `more_photos`; it is an advisory local-editing hint, not a quality verdict. The Worker temporarily defaults the field to `first_cut` for compatibility with earlier TestFlight builds. A sequence may use each supplied temporary ID at most once. The Worker canonicalizes playback order and duplicate model selections before returning the plan; durations must be 0.6–4.0 seconds, and role, emphasis, and motion are fixed enums understood by the local renderer. Omitted previews are simply not included in the AI candidate. The iOS app validates the complete plan again and maps the temporary IDs locally; no model decision deletes or modifies an original.
 
 Errors use a stable, sanitized shape and never include an upstream response body:
 
@@ -68,9 +69,9 @@ Errors use a stable, sanitized shape and never include an upstream response body
 
 ## Enforced limits
 
-- Version `1`, one supported direction, and 1–24 photos per request.
-- 4,500,000-byte maximum JSON body, enforced while streaming as well as by `Content-Length`.
-- 128 KiB decoded JPEG maximum per photo and 3 MiB decoded maximum per batch.
+- Version `1`, one supported direction, and 1–36 photos per request.
+- 6,500,000-byte maximum JSON body, enforced while streaming as well as by `Content-Length`.
+- 128 KiB decoded JPEG maximum per photo and 4,500,000 bytes decoded maximum per batch.
 - 1024 × 1024 maximum dimensions and 1,048,576 maximum pixels per photo.
 - JPEG only: canonical base64, legal frame/scan marker progression, consistent component tables, entropy data, a terminal end marker, and dimensions are checked. EXIF/XMP, IPTC/Photoshop, and JPEG comment segments are rejected so metadata cannot ride along with a thumbnail. This is marker-level validation, not a full pixel decoder; OpenAI still performs the actual image decode.
 - IDs must be contiguous per-request placeholders `p0`, `p1`, …; stable library identifiers are rejected.

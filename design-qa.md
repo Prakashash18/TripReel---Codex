@@ -1,7 +1,8 @@
 # TripReel design QA
 
-> September 7 update: First Cut is now always completed privately on-device.
-> After watching it, users can edit, export, or explicitly request an AI Remix.
+> September 8 update: First Cut is now always completed privately on-device.
+> Its first playback is unobstructed except for progress and one Continue action;
+> the next screen offers exactly two paths: improve with AI or edit the film.
 > The new direction, consent, processing/failure, and First Cut vs AI Cut
 > comparison screens preserve the existing cinematic language and Reduce Motion.
 > The Film Studio continues to keep its 9:16 film completely
@@ -13,7 +14,10 @@
 > handoff rather than an incompatible timing file. Full-person safe framing, similarity
 > clustering, directional navigation, cinematic montage transitions, and the
 > accessible app-wide motion system pass strict source checks. Optional cloud
-> consent now appears only after an AI direction is chosen, and Cleanup exposes
+> consent now appears only after an AI direction is chosen. AI Remix can fairly
+> reconsider privacy-safe More Photos, while small events keep every safe frame
+> and repeated backdrops never collapse detected people. Internal title-type
+> labels are no longer rendered into previews or exports. Cleanup exposes
 > responsive Select all/Clear all controls with a live selected/total count.
 > These latest surfaces are not
 > represented by the older screenshots below. Fresh native capture is blocked because this
@@ -58,7 +62,7 @@
 2. Pass 2 found remaining heading rhythm, Pace vertical offset, Cleanup spacing, and uneven Welcome multiline leading. Heading spacing and section padding were tightened, Cleanup was rebalanced, and Welcome was rebuilt as three individually controlled display lines. Evidence: `qa/compare-welcome-pass2.png`, `qa/compare-welcome-pass3.png`, and `qa/compare-welcome-final.png`.
 3. Responsive review identified fixed-height pressure on Photo Access and Film Ready. Compact compositions were added and validated across the full compact workflow. Evidence: `qa/access-375x667.png`, `qa/done-375x667.png`, and `qa/responsive-375x667-final.png`.
 4. Final pass found no actionable P0/P1/P2 visual differences. Evidence: `qa/compare-states-final.png`.
-5. The latest flow removes the mandatory Refine → Pace → Edit sequence. First Watch now opens one Film Studio where the film is shown as an unobstructed 9:16 canvas. Preview and sound transport sit below it, while Photos, Framing, Style, Titles, Music, and Pace are grouped into one native Edit film menu beside a single Export film CTA. Persistent Back and left-edge swipe return choice screens to an explicit parent, and Export returns to the screen that opened it instead of relying on enum order. This pass is code- and UI-test-backed; fresh screenshot comparison remains pending for the runtime reason above.
+5. The latest flow removes the mandatory Refine → Pace → Edit sequence. First Watch is now an uncluttered full-screen playback with one Continue CTA. Continue opens a dedicated two-choice screen for AI Remix or self-editing; the Film Studio then groups Photos, More Photos, Framing, Style, Titles, Music, and Pace into one native Edit film menu beside a single Export film CTA. Persistent Back and left-edge swipe return each screen to its explicit parent, and Export returns to the screen that opened it instead of relying on enum order. This pass is code- and UI-test-backed; fresh screenshot comparison remains pending for the runtime reason above.
 
 **Open Questions**
 

@@ -69,6 +69,24 @@ final class NativePhotoIntelligenceScoringTests: XCTestCase {
         XCTAssertGreaterThan(assessment.scores.peopleScore, 0.85)
     }
 
+    func testPeopleClassificationProtectsDistantStudentsWhenDetectionMissesThem() {
+        let signals = NativePhotoIntelligenceSignals(
+            classifications: [
+                NativePhotoClassification(identifier: "student group", confidence: 0.78)
+            ],
+            faces: .init(count: 0),
+            humans: .init(count: 0),
+            aesthetics: NativePhotoAestheticsSignal(overallScore: -0.30, isUtility: false),
+            availability: .init(aesthetics: true)
+        )
+
+        let assessment = NativePhotoIntelligenceScorer.score(signals: signals)
+
+        XCTAssertTrue(assessment.tags.contains(.people))
+        XCTAssertTrue(assessment.tags.contains(.groupPhoto))
+        XCTAssertGreaterThan(assessment.scores.peopleScore, 0.60)
+    }
+
     func testAppealingGroupPhotoRanksAsStrongMemoryWithoutCloudReview() {
         let signals = NativePhotoIntelligenceSignals(
             classifications: [

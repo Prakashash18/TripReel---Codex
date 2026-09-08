@@ -19,7 +19,7 @@ struct FirstWatchScreen: View {
                 .ignoresSafeArea()
 
             LinearGradient(
-                colors: [.black.opacity(0.60), .clear, .clear, .black.opacity(0.94)],
+                colors: [.black.opacity(0.54), .clear, .clear, .black.opacity(0.82)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -38,7 +38,7 @@ struct FirstWatchScreen: View {
 
                 Spacer()
 
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 15) {
                     VStack(spacing: 12) {
                         PlaybackProgressBar()
                         HStack {
@@ -54,122 +54,89 @@ struct FirstWatchScreen: View {
                         }
                     }
 
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("How's your TripReel?")
-                            .font(TR.display(31))
-                            .fixedSize(horizontal: false, vertical: true)
-                        Label("Created privately on your iPhone", systemImage: "checkmark.shield")
-                            .font(TR.ui(11, weight: .medium))
-                            .foregroundStyle(TR.keep.opacity(0.86))
+                    Button("Continue") {
+                        model.continueFromFirstWatch()
                     }
-
-                    if let followUp = model.photoAnalysisFollowUp {
-                        Button {
-                            model.isSmartSelectionReviewPresented = true
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(TR.keep)
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Preview ready")
-                                        .font(TR.ui(12, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.86))
-                                    Text(followUp.previewMessage)
-                                        .font(TR.ui(11))
-                                        .foregroundStyle(.white.opacity(0.56))
-                                        .lineLimit(2)
-                                }
-
-                                Spacer(minLength: 8)
-
-                                Text("View")
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 10, weight: .bold))
-                            }
-                            .foregroundStyle(.white.opacity(0.72))
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 10)
-                            .background(.black.opacity(0.30))
-                            .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
-                            .clipShape(Capsule())
-                        }
-                        .buttonStyle(TactileButtonStyle())
-                        .accessibilityIdentifier("photo-analysis-follow-up-button")
-                        .accessibilityLabel("Preview ready. \(followUp.previewMessage)")
-                        .accessibilityHint("Shows optional ways to check more photos")
-                    } else if let summary = model.smartSelectionSummary {
-                        Button {
-                            model.isSmartSelectionReviewPresented = true
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "sparkles")
-                                Text(summary)
-                                Spacer()
-                                Text("Review")
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 10, weight: .bold))
-                            }
-                            .font(TR.ui(12, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.76))
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 11)
-                            .background(.black.opacity(0.30))
-                            .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
-                            .clipShape(Capsule())
-                        }
-                        .buttonStyle(TactileButtonStyle())
-                        .accessibilityIdentifier("smart-selection-review-button")
-                    }
-
-                    VStack(spacing: 11) {
-                        Button {
-                            model.openAICutDirections()
-                        } label: {
-                            VStack(spacing: 2) {
-                                Label("Improve with AI", systemImage: "sparkles")
-                                Text("Let AI direct another cut")
-                                    .font(TR.ui(10))
-                                    .foregroundStyle(TR.ink.opacity(0.58))
-                            }
-                        }
-                        .buttonStyle(CreamButtonStyle())
-                        .accessibilityHint("Choose a direction for an optional alternative cut")
-                        .accessibilityIdentifier("improve-with-ai-button")
-
-                        Button {
-                            model.editCut(
-                                model.selectedCutSource == .working ? .working : .firstCut
-                            )
-                        } label: {
-                            VStack(spacing: 2) {
-                                Text("Edit Myself")
-                                Text("Change photos, order, framing and pace")
-                                    .font(TR.ui(10))
-                                    .foregroundStyle(.white.opacity(0.52))
-                            }
-                        }
-                        .buttonStyle(GlassButtonStyle())
-                        .accessibilityIdentifier("edit-film-button")
-
-                        Button("Looks Good · Continue to export") {
-                            model.keepFirstCutForExport()
-                        }
-                        .font(TR.ui(14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.76))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 7)
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("finish-first-cut-button")
-                    }
+                    .buttonStyle(CreamButtonStyle())
+                    .accessibilityHint("Choose whether to improve this cut with AI or edit it yourself")
+                    .accessibilityIdentifier("first-cut-continue-button")
                 }
                 .padding(.horizontal, 24)
-                .padding(.bottom, 8)
+                .padding(.bottom, 10)
                 .trEntrance(1, distance: 12)
             }
         }
         .accessibilityIdentifier("first-watch-screen")
+    }
+}
+
+struct FirstCutOptionsScreen: View {
+    @EnvironmentObject private var model: TripReelModel
+
+    var body: some View {
+        ZStack {
+            WarmBackground(variant: .export)
+
+            VStack(alignment: .leading, spacing: 0) {
+                ScreenHeading(
+                    eyebrow: "First Cut · created on-device",
+                    title: "Where to next?"
+                )
+                .padding(.leading, 48)
+                .trEntrance(0, distance: 8)
+
+                Text("Your original First Cut stays safe whichever route you choose.")
+                    .font(TR.ui(14))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .lineSpacing(4)
+                    .padding(.top, 14)
+                    .trEntrance(1, distance: 8)
+
+                Spacer()
+
+                VStack(spacing: 12) {
+                    Button {
+                        model.openAICutDirections()
+                    } label: {
+                        VStack(spacing: 3) {
+                            Label("Improve with AI", systemImage: "sparkles")
+                            Text("Let AI reconsider safe More Photos and direct another cut")
+                                .font(TR.ui(10))
+                                .foregroundStyle(TR.ink.opacity(0.58))
+                        }
+                    }
+                    .buttonStyle(CreamButtonStyle())
+                    .accessibilityHint("Choose a direction for an optional alternative cut")
+                    .accessibilityIdentifier("improve-with-ai-button")
+
+                    Button {
+                        model.editCut(
+                            model.selectedCutSource == .working ? .working : .firstCut
+                        )
+                    } label: {
+                        VStack(spacing: 3) {
+                            Text("Edit Myself")
+                            Text("Change the film—or export it as it is")
+                                .font(TR.ui(10))
+                                .foregroundStyle(.white.opacity(0.52))
+                        }
+                    }
+                    .buttonStyle(GlassButtonStyle())
+                    .accessibilityIdentifier("edit-film-button")
+                }
+                .trEntrance(2, distance: 12)
+
+                Label("Created privately on your iPhone", systemImage: "checkmark.shield")
+                    .font(TR.ui(11, weight: .medium))
+                    .foregroundStyle(TR.keep.opacity(0.82))
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 18)
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 12)
+            .padding(.bottom, 28)
+        }
+        .accessibilityIdentifier("first-cut-options-screen")
     }
 }
 
@@ -1124,6 +1091,15 @@ struct SecondWatchScreen: View {
                         Label("Photos · \(model.keptCount) in", systemImage: "photo.stack")
                     }
                     .accessibilityIdentifier("studio-tool-photos")
+
+                    if let summary = model.smartSelectionSummary {
+                        Button {
+                            model.isSmartSelectionReviewPresented = true
+                        } label: {
+                            Label(summary, systemImage: "sparkles")
+                        }
+                        .accessibilityIdentifier("studio-tool-more-photos")
+                    }
 
                     Button {
                         showPhotoEditor = true

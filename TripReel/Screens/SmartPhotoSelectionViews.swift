@@ -363,7 +363,7 @@ struct SmartSelectionReviewView: View {
                         .padding(.bottom, 14)
                 }
 
-                if model.excludedPhotos.isEmpty {
+                if model.visibleExcludedPhotos.isEmpty {
                     VStack(spacing: 13) {
                         Image(systemName: "checkmark.circle")
                             .font(.system(size: 34, weight: .light))
@@ -375,7 +375,7 @@ struct SmartSelectionReviewView: View {
                 } else {
                     ScrollView(showsIndicators: false) {
                         LazyVStack(spacing: 10) {
-                            ForEach(model.excludedPhotos) { excluded in
+                            ForEach(model.visibleExcludedPhotos) { excluded in
                                 excludedRow(excluded)
                                     .transition(
                                         reduceMotion

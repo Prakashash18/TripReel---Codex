@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DEFAULT_MODEL, LIMITS, parseAIEditPlan } from "../src/contract.ts";
+import {
+  DEFAULT_MODEL,
+  LIMITS,
+  minimumSequenceCount,
+  parseAIEditPlan,
+} from "../src/contract.ts";
 import { handleRequest } from "../src/handler.ts";
 import { RequestProblem, validatePayload } from "../src/validation.ts";
 
@@ -52,11 +57,15 @@ function jpegBase64(width = 320, height = 240) {
   return Buffer.from(bytes).toString("base64");
 }
 
-function payload(ids = ["p0"], direction = "better_story") {
+function payload(ids = ["p0"], direction = "better_story", selections = []) {
   return {
     version: 1,
     direction,
-    photos: ids.map((id) => ({ id, imageBase64: jpegBase64() })),
+    photos: ids.map((id, index) => ({
+      id,
+      imageBase64: jpegBase64(),
+      localSelection: selections[index] ?? "first_cut",
+    })),
   };
 }
 
@@ -103,6 +112,19 @@ test("validates only the versioned editorial request contract", () => {
   assert.equal(valid.version, 1);
   assert.equal(valid.direction, "better_story");
   assert.equal(valid.photos[0].id, "p0");
+  assert.equal(valid.photos[0].localSelection, "first_cut");
+  const legacy = validatePayload({
+    ...payload(),
+    photos: [{ id: "p0", imageBase64: jpegBase64() }],
+  });
+  assert.equal(legacy.photos[0].localSelection, "first_cut");
+  assert.throws(
+    () => validatePayload({
+      ...payload(),
+      photos: [{ id: "p0", imageBase64: jpegBase64(), localSelection: "discarded" }],
+    }),
+    (error) => error instanceof RequestProblem && error.code === "invalid_local_selection",
+  );
   assert.throws(
     () => validatePayload({ ...payload(), filename: "IMG_0012.JPG" }),
     (error) => error instanceof RequestProblem && error.code === "invalid_request",
@@ -138,9 +160,7 @@ test("strictly validates model plans and rejects unknown, duplicate, or arbitrar
   assert.equal(parseAIEditPlan(plan(["unknown"]), ["p0"], "better_story"), null);
   const duplicate = plan(["p0", "p0"]);
   const deduplicated = parseAIEditPlan(duplicate, ["p0", "p1"], "better_story");
-  assert.deepEqual(deduplicated.sequence.map(({ photoId, order }) => ({ photoId, order })), [
-    { photoId: "p0", order: 0 },
-  ]);
+  assert.equal(deduplicated, null);
   const reordered = plan(["p0", "p1"]);
   reordered.sequence[0].order = 1;
   reordered.sequence[1].order = 0;
@@ -159,14 +179,25 @@ test("strictly validates model plans and rejects unknown, duplicate, or arbitrar
   assert.equal(parseAIEditPlan(unsupportedTransition, ["p0"], "better_story"), null);
 });
 
-test("calls Responses API as a travel-film editor with privacy settings", async () => {
+test("requires useful coverage instead of accepting an aggressively short montage", () => {
+  const ids = Array.from({ length: 24 }, (_, index) => `p${index}`);
+  assert.equal(minimumSequenceCount(ids.length, "better_story"), 15);
+  assert.equal(minimumSequenceCount(ids.length, "people"), 18);
+  assert.equal(parseAIEditPlan(plan(ids.slice(0, 14)), ids, "better_story"), null);
+});
+
+test("calls Responses API with local-selection context and privacy settings", async () => {
   let outboundUrl;
   let outboundInit;
-  const response = await handleRequest(analyzeRequest(payload()), ENV, async (url, init) => {
+  const response = await handleRequest(
+    analyzeRequest(payload(["p0"], "better_story", ["more_photos"])),
+    ENV,
+    async (url, init) => {
     outboundUrl = url;
     outboundInit = init;
     return openAISuccess(plan());
-  });
+    },
+  );
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "no-store, max-age=0");
@@ -181,6 +212,8 @@ test("calls Responses API as a travel-film editor with privacy settings", async 
   assert.equal(upstream.text.format.strict, true);
   assert.match(upstream.instructions, /editorial assistant for a short travel film/u);
   assert.match(upstream.input[0].content[0].text, /better_story/u);
+  assert.match(upstream.input[0].content[0].text, /at least 1 materially distinct moment/u);
+  assert.match(upstream.input[0].content[1].text, /local selection: more_photos/u);
   assert.equal(upstream.input[0].content[2].type, "input_image");
   assert.equal(upstream.input[0].content[2].detail, "low");
 

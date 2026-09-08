@@ -50,6 +50,18 @@ enum SmartPhotoExclusionReason: String, CaseIterable, Sendable {
         case .notAHighlight: "photo.stack"
         }
     }
+
+    /// Only locally reviewed, non-sensitive omissions may be reconsidered by
+    /// the optional cloud editor. Screenshots, utility/document images, and
+    /// assets that never completed on-device analysis stay on the iPhone.
+    var isEligibleForCloudReconsideration: Bool {
+        switch self {
+        case .lowQuality, .similarMoment, .notAHighlight:
+            true
+        case .waitingForPhotos, .screenshot, .document, .utilityImage:
+            false
+        }
+    }
 }
 
 enum SmartPhotoAnalysisOrigin: String, Sendable {
@@ -202,11 +214,21 @@ enum NativePhotoSimilarity {
         _ first: TripAsset,
         firstPrint: NativePhotoFeaturePrint,
         _ second: TripAsset,
-        secondPrint: NativePhotoFeaturePrint
+        secondPrint: NativePhotoFeaturePrint,
+        firstProtectsPeople: Bool = false,
+        secondProtectsPeople: Bool = false
     ) -> Bool {
         guard let firstDate = first.creationDate,
               let secondDate = second.creationDate else { return false }
         let interval = abs(firstDate.timeIntervalSince(secondDate))
+
+        // A global feature print can be dominated by a repeated backdrop. It
+        // cannot reliably tell two different people apart, and TripReel does
+        // not perform face identification. Preserve every people moment here;
+        // the user or explicitly consented visual editor can make the final
+        // editorial choice with the actual subjects visible.
+        guard !firstProtectsPeople, !secondProtectsPeople else { return false }
+
         guard interval <= maximumTimeInterval,
               hasComparableComposition(first, second),
               let distance = try? firstPrint.distance(to: secondPrint) else {
@@ -251,6 +273,15 @@ enum SmartHighlightSelector {
         calendar: Calendar = .current
     ) -> [SmartExcludedPhoto] {
         let candidates = assets.filter { existing[$0.id] == nil }
+
+        // For a small event the user's intent is usually "use these moments",
+        // not "summarize my camera roll." Per-photo safety decisions have
+        // already removed screenshots/documents above, so keep every remaining
+        // frame and leave fine curation to the reversible editor or AI remix.
+        // This also prevents a repeated classroom/stage backdrop from hiding
+        // different students when Vision cannot see a small or turned face.
+        guard candidates.count > 36 else { return [] }
+
         let representativeIDs = similarityRepresentativeIDs(
             in: candidates,
             nativeResults: nativeResults
@@ -318,10 +349,12 @@ enum SmartHighlightSelector {
     }
 
     static func targetCount(total: Int, dayCount: Int) -> Int {
-        guard total > 24 else { return max(0, total) }
+        // A short event or weekend should feel complete, not aggressively
+        // summarized. Larger libraries still get a concise, reversible cut.
+        guard total > 36 else { return max(0, total) }
         let editorialScale = Int((sqrt(Double(total)) * 3.1).rounded())
         let dayCoverage = max(1, dayCount) * 4
-        return min(total, max(24, min(72, max(editorialScale, dayCoverage))))
+        return min(total, max(30, min(72, max(editorialScale, dayCoverage))))
     }
 
     private static func bestCandidate(
@@ -379,15 +412,21 @@ enum SmartHighlightSelector {
         _ second: TripAsset,
         nativeResults: [String: NativePhotoIntelligenceResult]
     ) -> Bool {
-        guard let firstPrint = nativeResults[first.id]?.signals.featurePrint,
-              let secondPrint = nativeResults[second.id]?.signals.featurePrint else {
+        guard let firstResult = nativeResults[first.id],
+              let secondResult = nativeResults[second.id],
+              let firstPrint = firstResult.signals.featurePrint,
+              let secondPrint = secondResult.signals.featurePrint else {
             return false
         }
         return NativePhotoSimilarity.areSimilar(
             first,
             firstPrint: firstPrint,
             second,
-            secondPrint: secondPrint
+            secondPrint: secondPrint,
+            firstProtectsPeople: firstResult.tags.contains(.people)
+                || firstResult.tags.contains(.groupPhoto),
+            secondProtectsPeople: secondResult.tags.contains(.people)
+                || secondResult.tags.contains(.groupPhoto)
         )
     }
 

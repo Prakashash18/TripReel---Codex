@@ -1,10 +1,10 @@
 export const DEFAULT_MODEL = "gpt-5.6-luna" as const;
 
 export const LIMITS = Object.freeze({
-  maxPhotos: 24,
-  maxBodyBytes: 4_500_000,
+  maxPhotos: 36,
+  maxBodyBytes: 6_500_000,
   maxImageBytes: 128 * 1024,
-  maxBatchImageBytes: 3 * 1024 * 1024,
+  maxBatchImageBytes: 4_500_000,
   maxImageDimension: 1024,
   maxImagePixels: 1024 * 1024,
   maxIdCharacters: 64,
@@ -51,9 +51,13 @@ export const MOTIONS = [
 ] as const;
 export type Motion = (typeof MOTIONS)[number];
 
+export const LOCAL_SELECTIONS = ["first_cut", "more_photos"] as const;
+export type LocalSelection = (typeof LOCAL_SELECTIONS)[number];
+
 export interface PhotoInput {
   id: string;
   imageBase64: string;
+  localSelection: LocalSelection;
 }
 
 export interface AIEditPlanItem {
@@ -106,6 +110,15 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
   return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
 
+export function minimumSequenceCount(
+  photoCount: number,
+  direction: AICutDirection,
+): number {
+  if (photoCount <= 1) return Math.max(0, photoCount);
+  const coverage = direction === "people" ? 0.75 : 0.60;
+  return Math.min(photoCount, Math.max(2, Math.ceil(photoCount * coverage)));
+}
+
 /** Structured Outputs narrows shape; this remains the final untrusted-output gate. */
 export function parseAIEditPlan(
   value: unknown,
@@ -122,7 +135,7 @@ export function parseAIEditPlan(
     value.summary.trim().length < 1 ||
     value.summary.length > LIMITS.maxSummaryCharacters ||
     !Array.isArray(value.sequence) ||
-    value.sequence.length < 1 ||
+    value.sequence.length < minimumSequenceCount(expectedIds.length, direction) ||
     value.sequence.length > expectedIds.length ||
     value.sequence.length > LIMITS.maxPhotos
   ) {
@@ -165,7 +178,7 @@ export function parseAIEditPlan(
     });
   }
 
-  if (sequence.length === 0) return null;
+  if (sequence.length < minimumSequenceCount(expectedIds.length, direction)) return null;
 
   return {
     version: 1,
@@ -188,7 +201,7 @@ export function buildAIEditPlanSchema(
       summary: { type: "string", minLength: 1, maxLength: LIMITS.maxSummaryCharacters },
       sequence: {
         type: "array",
-        minItems: 1,
+        minItems: minimumSequenceCount(expectedIds.length, direction),
         maxItems: expectedIds.length,
         items: {
           type: "object",

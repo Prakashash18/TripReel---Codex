@@ -559,8 +559,6 @@ struct MontageTitleArtwork: View {
                 .offset(x: motionPhase && !reduceMotion ? 90 : 62, y: -170)
 
             VStack(spacing: card.style == .bold ? 10 : 13) {
-                MetadataText(text: card.kind.name, color: TR.accent.opacity(0.78))
-                    .trEntrance(0, distance: 7)
                 Text(displayTitle)
                     .font(titleFont)
                     .tracking(card.style == .editorial ? -0.6 : 0)
@@ -568,13 +566,13 @@ struct MontageTitleArtwork: View {
                     .lineLimit(3)
                     .minimumScaleFactor(0.62)
                     .foregroundStyle(TR.cream)
-                    .trEntrance(1, distance: 10)
+                    .trEntrance(0, distance: 10)
                 Text(card.subtitle)
                     .font(subtitleFont)
                     .foregroundStyle(.white.opacity(0.58))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
-                    .trEntrance(2, distance: 8)
+                    .trEntrance(1, distance: 8)
             }
             .padding(.horizontal, 30)
             .offset(y: motionPhase && !reduceMotion ? -5 : 5)

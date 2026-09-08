@@ -54,9 +54,10 @@ final class CloudPhotoAnalysisTests: XCTestCase {
             XCTAssertEqual(json["direction"] as? String, "better_story")
             XCTAssertEqual(Set(json.keys), ["version", "direction", "photos"])
             XCTAssertEqual(photos.count, 1)
-            XCTAssertEqual(Set(photos[0].keys), ["id", "imageBase64"])
+            XCTAssertEqual(Set(photos[0].keys), ["id", "imageBase64", "localSelection"])
             XCTAssertEqual(photos[0]["id"] as? String, "p0")
             XCTAssertEqual(photos[0]["imageBase64"] as? String, Data([0xFF, 0xD8, 0xFF]).base64EncodedString())
+            XCTAssertEqual(photos[0]["localSelection"] as? String, "more_photos")
             XCTAssertNil(json["apiKey"])
             XCTAssertNil(json["filename"])
             XCTAssertNil(json["location"])
@@ -78,7 +79,11 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         )
         let result = try await client.createEditPlan(
             direction: .betterStory,
-            photos: [.init(id: "p0", jpegData: Data([0xFF, 0xD8, 0xFF]))]
+            photos: [.init(
+                id: "p0",
+                jpegData: Data([0xFF, 0xD8, 0xFF]),
+                localSelection: .morePhotos
+            )]
         )
 
         XCTAssertEqual(result.direction, .betterStory)
@@ -337,6 +342,40 @@ final class CloudPhotoAnalysisTests: XCTestCase {
             requestedIDs: Set(sequence.map(\.photoID)),
             direction: .surpriseMe
         )) { XCTAssertEqual($0 as? AICutPlanValidationError, .excessiveSequence) }
+    }
+
+    func testPlanValidatorRejectsAnAggressivelyShortCut() {
+        let requestedIDs = Set((0..<10).map { "p\($0)" })
+        let sequence = (0..<5).map { index in
+            AICutPlanItem(
+                photoID: "p\(index)",
+                order: index,
+                durationSeconds: 1.2,
+                role: .people,
+                emphasis: .normal,
+                motion: .automatic
+            )
+        }
+
+        XCTAssertThrowsError(try AICutPlanValidator.validate(
+            AICutEditPlan(
+                version: 1,
+                direction: .betterStory,
+                summary: "Too much of the event was omitted.",
+                sequence: sequence
+            ),
+            requestedIDs: requestedIDs,
+            direction: .betterStory
+        )) { XCTAssertEqual($0 as? AICutPlanValidationError, .insufficientSequence) }
+
+        XCTAssertEqual(
+            AICutPlanValidator.minimumSequenceCount(requestedCount: 24, direction: .betterStory),
+            15
+        )
+        XCTAssertEqual(
+            AICutPlanValidator.minimumSequenceCount(requestedCount: 24, direction: .people),
+            18
+        )
     }
 
     func testClientRejectsArbitraryProseAndUnsupportedTransitionFields() async throws {

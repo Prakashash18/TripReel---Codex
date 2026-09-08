@@ -1,8 +1,24 @@
 import Foundation
 
+enum CloudPhotoLocalSelection: String, Codable, Hashable, Sendable {
+    case firstCut = "first_cut"
+    case morePhotos = "more_photos"
+}
+
 struct CloudPhotoAnalysisInput: Sendable {
     let id: String
     let jpegData: Data
+    let localSelection: CloudPhotoLocalSelection
+
+    init(
+        id: String,
+        jpegData: Data,
+        localSelection: CloudPhotoLocalSelection = .firstCut
+    ) {
+        self.id = id
+        self.jpegData = jpegData
+        self.localSelection = localSelection
+    }
 }
 
 enum AICutDirection: String, CaseIterable, Codable, Identifiable, Hashable, Sendable {
@@ -101,6 +117,7 @@ enum AICutPlanValidationError: Error, Equatable {
     case mismatchedDirection
     case emptySequence
     case excessiveSequence
+    case insufficientSequence
     case unknownPhotoID
     case duplicatePhotoID
     case invalidOrder
@@ -142,6 +159,12 @@ enum AICutPlanValidator {
         guard Set(ids).count == ids.count else {
             throw AICutPlanValidationError.duplicatePhotoID
         }
+        guard ordered.count >= minimumSequenceCount(
+            requestedCount: requestedIDs.count,
+            direction: direction
+        ) else {
+            throw AICutPlanValidationError.insufficientSequence
+        }
         guard ordered.allSatisfy({ $0.durationSeconds.isFinite }) else {
             throw AICutPlanValidationError.invalidDuration
         }
@@ -161,6 +184,15 @@ enum AICutPlanValidator {
                 )
             }
         )
+    }
+
+    static func minimumSequenceCount(
+        requestedCount: Int,
+        direction: AICutDirection
+    ) -> Int {
+        guard requestedCount > 1 else { return max(0, requestedCount) }
+        let coverage = direction == .people ? 0.75 : 0.60
+        return min(requestedCount, max(2, Int(ceil(Double(requestedCount) * coverage))))
     }
 }
 
@@ -278,7 +310,7 @@ enum CloudPhotoAnalysisError: LocalizedError, Equatable {
 /// embedded in the app binary. The proxy chooses the configured model and is
 /// responsible for using the Responses API with `store: false`.
 final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Sendable {
-    static let maximumBatchSize = 24
+    static let maximumBatchSize = 36
     static let maximumThumbnailBytes = 128 * 1_024
     static let endpointInfoPlistKey = "TRIPREEL_PHOTO_ANALYSIS_ENDPOINT"
 
@@ -361,7 +393,11 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
             version: 1,
             direction: direction,
             photos: photos.map {
-                CloudRequest.Photo(id: $0.id, imageBase64: $0.jpegData.base64EncodedString())
+                CloudRequest.Photo(
+                    id: $0.id,
+                    imageBase64: $0.jpegData.base64EncodedString(),
+                    localSelection: $0.localSelection
+                )
             }
         )
         let encodedBody = try JSONEncoder().encode(requestBody)
@@ -475,6 +511,7 @@ private struct CloudRequest: Encodable {
     struct Photo: Encodable {
         let id: String
         let imageBase64: String
+        let localSelection: CloudPhotoLocalSelection
     }
 
     let version: Int

@@ -11,6 +11,7 @@ enum AppScreen: String {
     case empty
     case building
     case firstWatch
+    case firstCutOptions
     case aiDirection
     case aiProcessing
     case aiComparison
@@ -31,15 +32,16 @@ enum AppScreen: String {
         case .trips, .empty: 3
         case .building: 4
         case .firstWatch: 5
-        case .aiDirection: 6
-        case .aiProcessing: 7
-        case .aiComparison: 8
-        case .secondWatch: 9
-        case .cut, .pace: 10
-        case .export: 11
-        case .paywall, .rendering: 12
-        case .done: 13
-        case .cleanup: 14
+        case .firstCutOptions: 6
+        case .aiDirection: 7
+        case .aiProcessing: 8
+        case .aiComparison: 9
+        case .secondWatch: 10
+        case .cut, .pace: 11
+        case .export: 12
+        case .paywall, .rendering: 13
+        case .done: 14
+        case .cleanup: 15
         }
     }
 }
@@ -573,13 +575,17 @@ enum MontageSequencePlanner {
         _ second: TripAsset,
         insights: [String: MontagePhotoInsight]
     ) -> Bool {
-        guard let firstPrint = insights[first.id]?.featurePrint,
-              let secondPrint = insights[second.id]?.featurePrint,
+        guard let firstInsight = insights[first.id],
+              let secondInsight = insights[second.id],
+              let firstPrint = firstInsight.featurePrint,
+              let secondPrint = secondInsight.featurePrint,
               NativePhotoSimilarity.areSimilar(
                 first,
                 firstPrint: firstPrint,
                 second,
-                secondPrint: secondPrint
+                secondPrint: secondPrint,
+                firstProtectsPeople: firstInsight.peopleCount > 0,
+                secondProtectsPeople: secondInsight.peopleCount > 0
               ) else {
             return false
         }
@@ -875,6 +881,17 @@ struct TripEditSnapshot: Hashable, Sendable {
     }
 }
 
+private struct AICutCandidatePhoto: Sendable {
+    let photo: ReelPhoto
+    let localSelection: CloudPhotoLocalSelection
+}
+
+private struct AICutCandidate: Sendable {
+    let photo: ReelPhoto
+    let asset: TripAsset
+    let localSelection: CloudPhotoLocalSelection
+}
+
 @MainActor
 final class TripReelModel: ObservableObject {
     @Published var screen: AppScreen = .welcome
@@ -957,6 +974,7 @@ final class TripReelModel: ObservableObject {
     private var aiCutGeneration = UUID()
     private var exportGeneration = UUID()
     private var exportReturnScreen: AppScreen = .secondWatch
+    private var studioReturnScreen: AppScreen = .firstCutOptions
     private var placeTask: Task<Void, Never>?
     private var detectorTask: Task<LibraryDetectionResult, Never>?
     private var scanGeneration = UUID()
@@ -1428,7 +1446,7 @@ final class TripReelModel: ObservableObject {
     /// never accidentally revisited.
     var canNavigateBack: Bool {
         switch screen {
-        case .access, .limited, .firstWatch, .aiDirection, .aiComparison,
+        case .access, .limited, .firstWatch, .firstCutOptions, .aiDirection, .aiComparison,
              .secondWatch, .pace, .export, .paywall, .done:
             true
         case .welcome, .trips, .empty, .building, .aiProcessing, .cut, .rendering, .cleanup:
@@ -1444,10 +1462,12 @@ final class TripReelModel: ObservableObject {
             go(.access, direction: .backward)
         case .firstWatch:
             go(.trips, direction: .backward)
+        case .firstCutOptions:
+            go(.firstWatch, direction: .backward)
         case .aiDirection, .aiComparison:
-            go(.firstWatch, direction: .backward)
+            go(.firstCutOptions, direction: .backward)
         case .secondWatch:
-            go(.firstWatch, direction: .backward)
+            go(studioReturnScreen, direction: .backward)
         case .pace:
             go(.secondWatch, direction: .backward)
         case .export:
@@ -1459,6 +1479,10 @@ final class TripReelModel: ObservableObject {
         case .welcome, .trips, .empty, .building, .aiProcessing, .cut, .rendering, .cleanup:
             break
         }
+    }
+
+    func continueFromFirstWatch() {
+        go(.firstCutOptions, direction: .forward)
     }
 
     func openExport() {
@@ -1492,9 +1516,17 @@ final class TripReelModel: ObservableObject {
         cloudPhotoAnalysis.isConfigured
     }
 
+    /// Photos omitted from the cut currently on screen. An AI cut can restore
+    /// a locally omitted moment without mutating the saved First Cut; filtering
+    /// here keeps More Photos truthful and makes reverting fully reversible.
+    var visibleExcludedPhotos: [SmartExcludedPhoto] {
+        let visiblePhotoIDs = Set(keptPhotos.map(\.id))
+        return excludedPhotos.filter { !visiblePhotoIDs.contains($0.id) }
+    }
+
     var smartSelectionSummary: String? {
-        guard !excludedPhotos.isEmpty else { return nil }
-        let count = excludedPhotos.count
+        let count = visibleExcludedPhotos.count
+        guard count > 0 else { return nil }
         return "\(count) photo\(count == 1 ? "" : "s") left in More Photos"
     }
 
@@ -1527,7 +1559,7 @@ final class TripReelModel: ObservableObject {
         setCloudAnalysisPreference(.onDeviceOnly)
         isCloudAnalysisConsentPresented = false
         guard !cloudConsentIsSettings else { return }
-        go(.firstWatch, direction: .backward)
+        go(.firstCutOptions, direction: .backward)
     }
 
     func openAICutDirections() {
@@ -1574,17 +1606,33 @@ final class TripReelModel: ObservableObject {
             aiCutFailureMessage = "Choose a direction before creating another cut. Your First Cut is unchanged."
             return
         }
-        let candidatePhotos = Self.evenlySampledAIPhotos(
-            firstCutSnapshot.keptPhotos.filter { photo in
-                !cloudBlockedPhotoIDs.contains(photo.id)
-            },
+        guard let sourceTrip = activeAnalysisTrip ?? selectedTrip else {
+            aiCutFailureMessage = "The original trip photos aren't available for another cut. Your First Cut is unchanged."
+            return
+        }
+        let sourceAssets = sourceTrip.assets
+        let assetsByID = Dictionary(uniqueKeysWithValues: sourceAssets.map { ($0.id, $0) })
+        let allPhotos = applyingPhotoEdits(
+            to: Self.makeReelPhotos(from: sourceTrip, insights: activePhotoInsights)
+        )
+        let allPhotosByID = Dictionary(uniqueKeysWithValues: allPhotos.map { ($0.id, $0) })
+        let recoverableIDs = Set(excludedPhotos.compactMap { excluded in
+            excluded.reason.isEligibleForCloudReconsideration ? excluded.id : nil
+        })
+        let recoverablePhotos = allPhotos.filter { recoverableIDs.contains($0.id) }
+        let candidatePhotos = Self.balancedAICandidatePhotos(
+            firstCut: firstCutSnapshot.keptPhotos,
+            morePhotos: recoverablePhotos,
+            blockedIDs: cloudBlockedPhotoIDs,
             limit: CloudPhotoAnalysisClient.maximumBatchSize
         )
-        let sourceAssets = activeAnalysisTrip?.assets ?? selectedTrip?.assets ?? []
-        let assetsByID = Dictionary(uniqueKeysWithValues: sourceAssets.map { ($0.id, $0) })
-        let candidates = candidatePhotos.compactMap { photo -> (ReelPhoto, TripAsset)? in
-            guard let asset = assetsByID[photo.id], !asset.isScreenshot else { return nil }
-            return (photo, asset)
+        let candidates = candidatePhotos.compactMap { candidate -> AICutCandidate? in
+            guard let asset = assetsByID[candidate.photo.id], !asset.isScreenshot else { return nil }
+            return AICutCandidate(
+                photo: candidate.photo,
+                asset: asset,
+                localSelection: candidate.localSelection
+            )
         }
 
         guard !candidates.isEmpty else {
@@ -1600,10 +1648,14 @@ final class TripReelModel: ObservableObject {
             for (index, candidate) in candidates.enumerated() {
                 guard self.aiCutGeneration == generation, !Task.isCancelled else { return }
                 do {
-                    let prepared = try await self.photoAnalysisThumbnails.prepare(asset: candidate.1)
+                    let prepared = try await self.photoAnalysisThumbnails.prepare(asset: candidate.asset)
                     let wireID = "p\(wireInputs.count)"
-                    wireInputs.append(CloudPhotoAnalysisInput(id: wireID, jpegData: prepared.jpegData))
-                    localIDsByWireID[wireID] = candidate.0.id
+                    wireInputs.append(CloudPhotoAnalysisInput(
+                        id: wireID,
+                        jpegData: prepared.jpegData,
+                        localSelection: candidate.localSelection
+                    ))
+                    localIDsByWireID[wireID] = candidate.photo.id
                 } catch is CancellationError {
                     return
                 } catch {
@@ -1643,7 +1695,8 @@ final class TripReelModel: ObservableObject {
                     plan: plan,
                     firstCut: firstCutSnapshot,
                     direction: direction,
-                    localIDsByWireID: localIDsByWireID
+                    localIDsByWireID: localIDsByWireID,
+                    candidatePhotosByLocalID: allPhotosByID
                 )
                 guard self.aiCutGeneration == generation, !Task.isCancelled else { return }
                 self.aiCutSnapshot = snapshot
@@ -1671,7 +1724,7 @@ final class TripReelModel: ObservableObject {
         aiCutTask = nil
         aiCutFailureMessage = nil
         aiCutProgress = 0
-        go(.firstWatch, direction: .backward)
+        go(.firstCutOptions, direction: .backward)
     }
 
     func retryAICut() {
@@ -1681,13 +1734,14 @@ final class TripReelModel: ObservableObject {
     func useAICut() {
         guard let aiCutSnapshot else { return }
         applyEditSnapshot(aiCutSnapshot, source: .aiCut)
+        studioReturnScreen = .aiComparison
         go(.secondWatch, direction: .forward)
     }
 
     func keepFirstCut() {
         guard let firstCutSnapshot else { return }
         applyEditSnapshot(firstCutSnapshot, source: .firstCut)
-        go(.firstWatch, direction: .backward)
+        go(.firstCutOptions, direction: .backward)
     }
 
     func keepFirstCutForExport() {
@@ -1699,6 +1753,7 @@ final class TripReelModel: ObservableObject {
 
     func editCut(_ source: TripCutSource) {
         guard let snapshot = editSnapshot(for: source) else { return }
+        studioReturnScreen = screen == .aiComparison ? .aiComparison : .firstCutOptions
         applyEditSnapshot(snapshot, source: .working)
         go(.secondWatch, direction: .forward)
     }
@@ -1713,18 +1768,18 @@ final class TripReelModel: ObservableObject {
         plan: AICutEditPlan,
         firstCut: TripEditSnapshot,
         direction: AICutDirection,
-        localIDsByWireID: [String: String]
+        localIDsByWireID: [String: String],
+        candidatePhotosByLocalID: [String: ReelPhoto]
     ) throws -> TripEditSnapshot {
         let validated = try AICutPlanValidator.validate(
             plan,
             requestedIDs: Set(localIDsByWireID.keys),
             direction: direction
         )
-        let firstPhotosByID = Dictionary(uniqueKeysWithValues: firstCut.photos.map { ($0.id, $0) })
         var plannedPhotos: [ReelPhoto] = []
         for item in validated.sequence {
             guard let localID = localIDsByWireID[item.photoID],
-                  var photo = firstPhotosByID[localID] else {
+                  var photo = candidatePhotosByLocalID[localID] else {
                 throw AICutPlanValidationError.unknownPhotoID
             }
             photo.durationSeconds = item.emphasis == .highlight
@@ -1750,12 +1805,60 @@ final class TripReelModel: ObservableObject {
         )
     }
 
-    private static func evenlySampledAIPhotos(_ photos: [ReelPhoto], limit: Int) -> [ReelPhoto] {
-        guard limit > 0, photos.count > limit else { return photos }
-        guard limit > 1 else { return [photos[photos.count / 2]] }
+    /// Gives the AI a balanced view of the local First Cut and safe, locally
+    /// analyzed omissions. When one pool is small, the other fills the unused
+    /// slots. This makes a 3-of-26 local cut become 3 First Cut + 23 More Photos
+    /// candidates instead of hiding those 23 moments from the visual editor.
+    private static func balancedAICandidatePhotos(
+        firstCut: [ReelPhoto],
+        morePhotos: [ReelPhoto],
+        blockedIDs: Set<String>,
+        limit: Int
+    ) -> [AICutCandidatePhoto] {
+        guard limit > 0 else { return [] }
+
+        let eligibleFirstCut = firstCut.filter { !blockedIDs.contains($0.id) }
+        let firstCutIDs = Set(eligibleFirstCut.map(\.id))
+        let eligibleMorePhotos = morePhotos.filter {
+            !blockedIDs.contains($0.id) && !firstCutIDs.contains($0.id)
+        }
+
+        let desiredMoreCount = min(eligibleMorePhotos.count, limit / 2)
+        var firstCount = min(eligibleFirstCut.count, limit - desiredMoreCount)
+        var moreCount = desiredMoreCount
+        var unfilled = limit - firstCount - moreCount
+        if unfilled > 0 {
+            let additionalMore = min(unfilled, eligibleMorePhotos.count - moreCount)
+            moreCount += additionalMore
+            unfilled -= additionalMore
+        }
+        if unfilled > 0 {
+            firstCount += min(unfilled, eligibleFirstCut.count - firstCount)
+        }
+
+        let selectedFirstCut = evenlySampled(eligibleFirstCut, limit: firstCount).map {
+            AICutCandidatePhoto(photo: $0, localSelection: .firstCut)
+        }
+        let selectedMorePhotos = evenlySampled(eligibleMorePhotos, limit: moreCount).map {
+            AICutCandidatePhoto(photo: $0, localSelection: .morePhotos)
+        }
+
+        var interleaved: [AICutCandidatePhoto] = []
+        interleaved.reserveCapacity(selectedFirstCut.count + selectedMorePhotos.count)
+        for index in 0..<max(selectedFirstCut.count, selectedMorePhotos.count) {
+            if index < selectedFirstCut.count { interleaved.append(selectedFirstCut[index]) }
+            if index < selectedMorePhotos.count { interleaved.append(selectedMorePhotos[index]) }
+        }
+        return interleaved
+    }
+
+    private static func evenlySampled<Element>(_ values: [Element], limit: Int) -> [Element] {
+        guard limit > 0 else { return [] }
+        guard values.count > limit else { return values }
+        guard limit > 1 else { return [values[values.count / 2]] }
         return (0..<limit).map { index in
-            let position = Double(index) * Double(photos.count - 1) / Double(limit - 1)
-            return photos[Int(position.rounded())]
+            let position = Double(index) * Double(values.count - 1) / Double(limit - 1)
+            return values[Int(position.rounded())]
         }
     }
 

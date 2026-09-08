@@ -21,6 +21,8 @@ struct RootView: View {
                 BuildingScreen()
             case .firstWatch:
                 FirstWatchScreen()
+            case .firstCutOptions:
+                FirstCutOptionsScreen()
             case .aiDirection:
                 AICutDirectionScreen()
             case .aiProcessing:

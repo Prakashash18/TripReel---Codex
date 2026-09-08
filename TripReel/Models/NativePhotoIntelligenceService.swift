@@ -455,6 +455,14 @@ enum NativePhotoIntelligenceScorer {
             signals.aesthetics?.isUtility == true ? 0.90 : 0
         )
         let detectedPeopleCount = max(signals.faces.count, signals.humans.count)
+        let peopleClassification = classificationConfidence(
+            in: signals.classifications,
+            matching: peopleTerms
+        )
+        let groupClassification = classificationConfidence(
+            in: signals.classifications,
+            matching: groupTerms
+        )
         if signals.isScreenshot {
             utilityProbability = 1
         } else if detectedPeopleCount >= 2, documentProbability < 0.50 {
@@ -462,9 +470,12 @@ enum NativePhotoIntelligenceScorer {
         }
         utilityProbability = clamp(utilityProbability)
 
-        let peopleScore = peopleScore(
-            for: signals.faces,
-            detectedPeopleCount: detectedPeopleCount
+        let peopleScore = max(
+            peopleScore(
+                for: signals.faces,
+                detectedPeopleCount: detectedPeopleCount
+            ),
+            peopleClassification * 0.86
         )
         let sceneryConfidence = classificationConfidence(
             in: signals.classifications,
@@ -557,8 +568,12 @@ enum NativePhotoIntelligenceScorer {
         if signals.isScreenshot { tags.insert(.screenshot) }
         if documentProbability >= 0.60 { tags.insert(.likelyDocument) }
         if textCoverage >= 0.12 || signals.text.characterCount >= 350 { tags.insert(.textHeavy) }
-        if detectedPeopleCount > 0 { tags.insert(.people) }
-        if detectedPeopleCount >= 2 { tags.insert(.groupPhoto) }
+        if detectedPeopleCount > 0 || peopleClassification >= 0.35 {
+            tags.insert(.people)
+        }
+        if detectedPeopleCount >= 2 || groupClassification >= 0.45 {
+            tags.insert(.groupPhoto)
+        }
         if sceneryConfidence >= 0.35 { tags.insert(.scenery) }
         if foodConfidence >= 0.35 { tags.insert(.food) }
         if utilityProbability >= 0.65 { tags.insert(.utility) }
@@ -596,6 +611,13 @@ enum NativePhotoIntelligenceScorer {
         "landmark", "building"
     ]
     private static let foodTerms = ["food", "dish", "meal", "cuisine", "dessert", "drink"]
+    private static let peopleTerms = [
+        "person", "people", "portrait", "human", "student", "child", "adult",
+        "man", "woman", "boy", "girl", "family", "team", "crowd", "audience"
+    ]
+    private static let groupTerms = [
+        "group", "crowd", "team", "class", "audience", "family"
+    ]
     private static let memoryTerms = [
         "animal", "event", "concert", "festival", "sports", "wedding", "vacation", "travel"
     ]

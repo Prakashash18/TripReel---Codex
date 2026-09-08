@@ -1016,15 +1016,6 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             )
         }
 
-        let eyebrow = card.kind.name.uppercased()
-        let eyebrowReveal = staggeredReveal(phase, start: 0, duration: 0.24)
-        drawCenteredText(
-            eyebrow,
-            in: CGRect(x: 50, y: bounds.midY - 142 + CGFloat(phase * 6), width: bounds.width - 100, height: 30),
-            font: UIFont.monospacedSystemFont(ofSize: 16, weight: .medium),
-            color: UIColor(red: 0.94, green: 0.71, blue: 0.37, alpha: 0.86 * eyebrowReveal),
-            tracking: 2.4
-        )
         let baseTitleSize: CGFloat = card.kind == .opening ? 70 : 59
         let titleFont: UIFont
         let displayTitle: String

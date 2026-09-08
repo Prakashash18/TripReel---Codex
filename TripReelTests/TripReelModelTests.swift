@@ -110,6 +110,21 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(model.screen, .secondWatch)
     }
 
+    func testFirstCutPlaybackAndChoiceScreenHavePredictableBackNavigation() {
+        let model = makeModel()
+
+        model.go(.firstWatch)
+        model.continueFromFirstWatch()
+        XCTAssertEqual(model.screen, .firstCutOptions)
+
+        model.openAICutDirections()
+        model.navigateBack()
+        XCTAssertEqual(model.screen, .firstCutOptions)
+
+        model.navigateBack()
+        XCTAssertEqual(model.screen, .firstWatch)
+    }
+
     func testBackNavigationSkipsTransientProcessingScreens() {
         let model = makeModel()
 
@@ -922,13 +937,14 @@ final class TripReelModelTests: XCTestCase {
 
     func testHighlightTargetMakesLargeTripsConcise() {
         XCTAssertEqual(SmartHighlightSelector.targetCount(total: 431, dayCount: 5), 64)
-        XCTAssertEqual(SmartHighlightSelector.targetCount(total: 84, dayCount: 7), 28)
+        XCTAssertEqual(SmartHighlightSelector.targetCount(total: 84, dayCount: 7), 30)
+        XCTAssertEqual(SmartHighlightSelector.targetCount(total: 26, dayCount: 1), 26)
         XCTAssertEqual(SmartHighlightSelector.targetCount(total: 20, dayCount: 3), 20)
     }
 
     func testHighlightSelectorProtectsStrongMemoriesAndMovesDuplicateToMorePhotos() {
         let start = Date(timeIntervalSince1970: 1_800_000_000)
-        let assets = (0..<32).map {
+        let assets = (0..<40).map {
             makeAsset("candidate-\($0)", start: start, minutes: $0 * 5)
         }
         let scenic = assets[10]
@@ -978,10 +994,43 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertFalse(decisions.contains { $0.id == scenic.id })
         XCTAssertFalse(decisions.contains { $0.id == group.id })
         XCTAssertEqual(decisions.first { $0.id == duplicate.id }?.reason, .similarMoment)
-        XCTAssertEqual(assets.count - decisions.count, 24)
+        XCTAssertEqual(assets.count - decisions.count, 30)
     }
 
-    func testHighlightSelectorClustersNonidenticalBurstAndKeepsStrongestFrame() {
+    func testSmallEventDoesNotCollapseARepeatedBackdropWithoutPeopleSignals() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let assets = (0..<26).map {
+            makeAsset("student-\($0)", start: start, minutes: $0)
+        }
+        let repeatedBackdropPrint = NativePhotoFeaturePrint(
+            revision: 2,
+            elementTypeRawValue: 1,
+            elementCount: 3,
+            data: [Float(0.1), 0.2, 0.3].withUnsafeBytes { Data($0) }
+        )
+        let results = Dictionary(uniqueKeysWithValues: assets.map { asset in
+            (
+                asset.id,
+                makeNativeResult(
+                    id: asset.id,
+                    memory: 0.52,
+                    aesthetic: 0.52,
+                    tags: [],
+                    featurePrint: repeatedBackdropPrint
+                )
+            )
+        })
+
+        let decisions = SmartHighlightSelector.decisions(
+            for: assets,
+            nativeResults: results,
+            excluding: [:]
+        )
+
+        XCTAssertTrue(decisions.isEmpty)
+    }
+
+    func testHighlightSelectorDoesNotCollapseDifferentPeopleAgainstTheSameBackdrop() {
         let start = Date(timeIntervalSince1970: 1_800_000_000)
         let assets = (0..<20).map {
             makeAsset("burst-candidate-\($0)", start: start, minutes: $0 * 5)
@@ -1023,9 +1072,8 @@ final class TripReelModelTests: XCTestCase {
             excluding: [:]
         )
 
-        XCTAssertEqual(decisions.count, 1)
-        XCTAssertEqual(decisions.first?.id, weaker.id)
-        XCTAssertEqual(decisions.first?.reason, .similarMoment)
+        XCTAssertTrue(decisions.isEmpty)
+        XCTAssertFalse(decisions.contains { $0.id == weaker.id })
         XCTAssertFalse(decisions.contains { $0.id == stronger.id })
     }
 
