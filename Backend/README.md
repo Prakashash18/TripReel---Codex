@@ -85,6 +85,8 @@ TripReel creates reduced, re-encoded JPEG thumbnails in memory only after the us
 
 This Worker holds the JSON and thumbnails in memory only long enough to validate the request and make the foreground OpenAI request. It does not write them to KV, D1, R2, Cache API, logs, or any other persistence layer. Client and upstream fetches are marked `no-store`. Worker observability and invocation logging are disabled in `wrangler.toml`; also audit account-level Logpush, Tail Workers, WAF rules, reverse proxies, and error trackers before production so none capture bodies. Platform metadata such as method, URL, status, timing, and billing may still exist, so never put content in the URL.
 
+The `tripreel_app_attest_diagnostics` Analytics Engine dataset is a narrow operational exception used only when secure-device verification fails. Each event contains the operation, a bounded failure stage, an error category, and sanitized error text. It never contains a thumbnail, request body or hash, IP address, App Attest key ID, Photos identifier, filename, or model response. Normal Worker Logs remain disabled.
+
 `store: false` prevents this response from being stored as retrievable Responses API application state. It does **not** turn on Zero Data Retention. Under OpenAI's default API data controls, abuse-monitoring logs may contain API content and are retained for up to 30 days unless longer retention is legally or safety-required. Eligible organizations can apply for Zero Data Retention (ZDR); image inputs that are flagged by OpenAI's CSAM classifier can still be retained for manual review even with ZDR. OpenAI states that API data is not used to train or improve its models by default unless the organization explicitly opts in. See OpenAI's current [data controls documentation](https://developers.openai.com/api/docs/guides/your-data) before launch.
 
 The model defaults to `gpt-5.6-luna`; operators may select another compatible model only with the validated `OPENAI_MODEL` Worker setting. Image-input support and Structured Outputs requirements must be checked before changing it. See the [Responses API reference](https://developers.openai.com/api/reference/cli/resources/responses/methods/create).
@@ -118,7 +120,7 @@ The Worker is deployed to the connected Cloudflare account as `tripreel-visual-a
 https://tripreel-visual-analysis.tripreel-prakashash18.workers.dev/v1/analyze
 ```
 
-The source in this repository now uses the versioned AI edit-plan contract. This implementation task intentionally does not deploy it; deploy the reviewed Worker source separately before testing the new iOS AI Remix against that live hostname.
+The live Worker uses the versioned AI edit-plan contract in this repository. Deploy reviewed changes from `Backend/` before testing a newer iOS AI Remix build against that hostname.
 
 The `workers.dev` hostname is enabled for this initial deployment and preview URLs are disabled. Before each deployment:
 
@@ -128,7 +130,8 @@ The `workers.dev` hostname is enabled for this initial deployment and preview UR
 4. Leave `ALLOWED_ORIGIN` unset for the native iOS app. CORS is then off and browser-origin requests are rejected. If a browser client is genuinely required, configure exactly one HTTPS origin. Wildcards and comma-separated origins are rejected.
 5. Before production launch, consider putting the Worker behind a dedicated HTTPS custom domain. The current `workers.dev` hostname is suitable for development and TestFlight integration work; preview URLs remain disabled. Edge rate-limit bindings provide a fast abuse guard (60 assertion-route operations per minute, covering challenge plus analysis), while the Durable Object enforces the authoritative per-key assertion counter, 30 analyses/minute quota, and 1,000-photo/UTC-day quota.
 6. Confirm Workers Logs remains disabled. The source contains no `console` statements, and `wrangler.toml` explicitly disables observability and invocation logs. Review Cloudflare's current [Workers Logs behavior](https://developers.cloudflare.com/workers/observability/logs/workers-logs/) whenever deployment configuration changes.
-7. Run `npm test`, `npm run typecheck`, a staging smoke test with synthetic/non-sensitive images, and negative tests for authorization, size limits, timeout, and rate limiting before production traffic.
+7. Confirm the `APP_ATTEST_DIAGNOSTICS` binding targets `tripreel_app_attest_diagnostics`. Retain only the minimum operational window needed for troubleshooting.
+8. Run `npm test`, `npm run typecheck`, a staging smoke test with synthetic/non-sensitive images, and negative tests for authorization, size limits, timeout, and rate limiting before production traffic.
 
 Optional `OPENAI_TIMEOUT_MS` must be an integer from 5000 through 45000. Optional `OPENAI_MODEL` must be a 1–100 character safe model identifier; it defaults to `gpt-5.6-luna`. The service fails closed with a generic configuration error if required secrets or model/timeout/origin settings are invalid.
 

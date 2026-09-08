@@ -61,6 +61,13 @@ export interface AppAttestStateFailure {
   ok: false;
   code: AppAttestStateFailureCode;
   retryAfter?: number;
+  diagnostic?: AppAttestDiagnostic;
+}
+
+export interface AppAttestDiagnostic {
+  stage: string;
+  errorName: string;
+  message: string;
 }
 
 export interface AppAttestChallengeSuccess {
@@ -169,8 +176,36 @@ function verificationMetadataAllowed(
   return true;
 }
 
-function stateFailure(code: AppAttestStateFailureCode, retryAfter?: number): AppAttestStateFailure {
-  return retryAfter === undefined ? { ok: false, code } : { ok: false, code, retryAfter };
+function sanitizedDiagnosticPart(value: string, maximumLength: number): string {
+  return value
+    .replace(/[\u0000-\u001f\u007f]+/gu, " ")
+    .replace(/(?:[A-Za-z0-9+/_=-]{24,})/gu, "[redacted]")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, maximumLength) || "unknown";
+}
+
+function diagnosticFor(stage: string, error: unknown): AppAttestDiagnostic {
+  const errorName = error instanceof Error ? error.name : typeof error;
+  const message = error instanceof Error ? error.message : "non_error_throw";
+  return {
+    stage: sanitizedDiagnosticPart(stage, 64),
+    errorName: sanitizedDiagnosticPart(errorName, 64),
+    message: sanitizedDiagnosticPart(message, 240),
+  };
+}
+
+function stateFailure(
+  code: AppAttestStateFailureCode,
+  retryAfter?: number,
+  diagnostic?: AppAttestDiagnostic,
+): AppAttestStateFailure {
+  return {
+    ok: false,
+    code,
+    ...(retryAfter === undefined ? {} : { retryAfter }),
+    ...(diagnostic === undefined ? {} : { diagnostic }),
+  };
 }
 
 /**
@@ -391,7 +426,15 @@ export class AppAttestShard extends DurableObject<AppAttestStateEnv> {
     if (existingKey?.status === "active") {
       // Registration is idempotent so a lost 204 response does not force the
       // app to generate another App Attest key.
-      await this.scheduleNextAlarm();
+      try {
+        await this.scheduleNextAlarm();
+      } catch (error) {
+        return stateFailure(
+          "server_misconfigured",
+          undefined,
+          diagnosticFor("registration_existing_key_alarm", error),
+        );
+      }
       return { ok: true };
     }
     if (existingKey !== undefined) {
@@ -414,10 +457,28 @@ export class AppAttestShard extends DurableObject<AppAttestStateEnv> {
         now: new Date(input.nowMs),
       });
     } catch (error) {
-      if (error instanceof AppAttestVerificationError || error instanceof TypeError) {
-        return stateFailure("invalid_attestation");
+      if (error instanceof AppAttestVerificationError) {
+        return stateFailure(
+          "invalid_attestation",
+          undefined,
+          {
+            ...diagnosticFor("attestation_verification", error),
+            message: sanitizedDiagnosticPart(`${error.code}: ${error.message}`, 240),
+          },
+        );
       }
-      throw error;
+      if (error instanceof TypeError) {
+        return stateFailure(
+          "invalid_attestation",
+          undefined,
+          diagnosticFor("attestation_decoding", error),
+        );
+      }
+      return stateFailure(
+        "server_misconfigured",
+        undefined,
+        diagnosticFor("attestation_verifier_runtime", error),
+      );
     }
 
     if (
@@ -428,46 +489,71 @@ export class AppAttestShard extends DurableObject<AppAttestStateEnv> {
         verified.bundleVersion,
       )
     ) {
-      return stateFailure("invalid_attestation");
+      return stateFailure(
+        "invalid_attestation",
+        undefined,
+        {
+          stage: "attestation_policy",
+          errorName: "VerificationPolicyError",
+          message: "verified_key_or_metadata_not_allowed",
+        },
+      );
     }
 
-    const result = this.ctx.storage.transactionSync<AppAttestOperationResult>(() => {
-      const concurrentKey = this.keyRow(input.keyID);
-      if (concurrentKey?.status === "active") {
-        return { ok: true };
-      }
-      if (concurrentKey !== undefined) {
-        return stateFailure("key_already_registered");
-      }
-      const problem = this.challengeStatus(input.keyID, "attestation", challengeHash, input.nowMs);
-      if (problem !== null) {
-        return problem;
-      }
+    let result: AppAttestOperationResult;
+    try {
+      result = this.ctx.storage.transactionSync<AppAttestOperationResult>(() => {
+        const concurrentKey = this.keyRow(input.keyID);
+        if (concurrentKey?.status === "active") {
+          return { ok: true };
+        }
+        if (concurrentKey !== undefined) {
+          return stateFailure("key_already_registered");
+        }
+        const problem = this.challengeStatus(input.keyID, "attestation", challengeHash, input.nowMs);
+        if (problem !== null) {
+          return problem;
+        }
 
-      this.ctx.storage.sql.exec(
-        `DELETE FROM app_attest_challenges
-          WHERE key_hash = ? AND purpose = 'attestation' AND challenge_hash = ?`,
-        exactBuffer(input.keyID),
-        exactBuffer(challengeHash),
+        this.ctx.storage.sql.exec(
+          `DELETE FROM app_attest_challenges
+            WHERE key_hash = ? AND purpose = 'attestation' AND challenge_hash = ?`,
+          exactBuffer(input.keyID),
+          exactBuffer(challengeHash),
+        );
+        this.ctx.storage.sql.exec(
+          `INSERT INTO app_attest_keys
+             (key_hash, public_key_spki, receipt, environment, aaguid, sign_count,
+              status, last_validation_category, last_bundle_version, created_at_ms, last_seen_at_ms)
+           VALUES (?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?)`,
+          exactBuffer(input.keyID),
+          exactBuffer(verified.publicKeySpki),
+          exactBuffer(verified.receipt),
+          this.env.APP_ATTEST_ENVIRONMENT,
+          exactBuffer(verified.aaguid),
+          verified.validationCategory ?? null,
+          verified.bundleVersion ?? null,
+          input.nowMs,
+          input.nowMs,
+        );
+        return { ok: true };
+      });
+    } catch (error) {
+      return stateFailure(
+        "server_misconfigured",
+        undefined,
+        diagnosticFor("registration_storage", error),
       );
-      this.ctx.storage.sql.exec(
-        `INSERT INTO app_attest_keys
-           (key_hash, public_key_spki, receipt, environment, aaguid, sign_count,
-            status, last_validation_category, last_bundle_version, created_at_ms, last_seen_at_ms)
-         VALUES (?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?)`,
-        exactBuffer(input.keyID),
-        exactBuffer(verified.publicKeySpki),
-        exactBuffer(verified.receipt),
-        this.env.APP_ATTEST_ENVIRONMENT,
-        exactBuffer(verified.aaguid),
-        verified.validationCategory ?? null,
-        verified.bundleVersion ?? null,
-        input.nowMs,
-        input.nowMs,
+    }
+    try {
+      await this.scheduleNextAlarm();
+    } catch (error) {
+      return stateFailure(
+        "server_misconfigured",
+        undefined,
+        diagnosticFor("registration_alarm", error),
       );
-      return { ok: true };
-    });
-    await this.scheduleNextAlarm();
+    }
     return result;
   }
 

@@ -138,6 +138,45 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         XCTAssertEqual(authorizerSnapshot.recoveryStatuses, [404])
     }
 
+    func testClientPreservesSanitizedServiceErrorCodeForHelpfulMessaging() async {
+        URLProtocolStub.handler = { request in
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: request.url!,
+                statusCode: 503,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            ))
+            return (
+                response,
+                Data(#"{"error":{"code":"upstream_rate_limited","message":"Busy"}}"#.utf8)
+            )
+        }
+        let client = CloudPhotoAnalysisClient(
+            endpoint: URL(string: "https://analysis.example.test/v1/analyze"),
+            session: makeSession(),
+            authorizer: TestCloudAuthorizer()
+        )
+
+        do {
+            _ = try await client.createEditPlan(
+                direction: .dynamic,
+                photos: [.init(id: "p0", jpegData: Data([0xFF, 0xD8, 0xFF]))]
+            )
+            XCTFail("Expected the service error")
+        } catch let error as CloudPhotoAnalysisError {
+            XCTAssertEqual(
+                error,
+                .server(statusCode: 503, code: "upstream_rate_limited")
+            )
+            XCTAssertEqual(
+                error.errorDescription,
+                "AI editing is busy right now. Please wait a minute and try again."
+            )
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testClientRejectsStablePhotoIdentifiersBeforeNetworking() async {
         URLProtocolStub.handler = { _ in
             XCTFail("A local Photos identifier must never reach the network")
@@ -460,6 +499,52 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         XCTAssertEqual(recordedDelays, [300_000_000, 900_000_000])
     }
 
+    func testAppAttestResumesTheExactPendingRegistrationAfterServerFailure() async throws {
+        let keyID = Data(repeating: 0xB6, count: 32).base64EncodedString()
+        let attestationChallenge = try makeChallenge(data: Data(repeating: 0x33, count: 32))
+        let assertionChallenge = try makeChallenge(data: Data(repeating: 0x34, count: 32))
+        let service = TestAppAttestService(keyIDs: [keyID])
+        let backend = TestAppAttestBackend(
+            attestationChallenge: attestationChallenge,
+            assertionChallenge: assertionChallenge,
+            registrationErrors: [.server(statusCode: 500, code: "internal_error")]
+        )
+        let store = TestAppAttestKeyStore()
+        let authorizer = AppAttestCloudPhotoAnalysisAuthorizer(
+            service: service,
+            backend: backend,
+            keyStore: store,
+            environment: .production,
+            sleep: { _ in },
+            now: { Date(timeIntervalSince1970: 1_000) }
+        )
+
+        do {
+            _ = try await authorizer.authorizationHeaders(for: Data("body".utf8))
+            XCTFail("The first registration should surface the server failure")
+        } catch let error as TripReelAppAttestError {
+            XCTAssertEqual(error, .server(statusCode: 500, code: "internal_error"))
+        }
+
+        let loadedPendingRecord = try await store.load(environment: .production)
+        let pendingRecord = try XCTUnwrap(loadedPendingRecord)
+        XCTAssertEqual(pendingRecord.state, .registrationPending)
+        XCTAssertEqual(pendingRecord.pendingChallenge, attestationChallenge.encodedValue)
+        XCTAssertEqual(pendingRecord.pendingAttestationObject, TestAppAttestService.attestationObject)
+
+        let headers = try await authorizer.authorizationHeaders(for: Data("body".utf8))
+        XCTAssertEqual(headers["Authorization"], "AppAttest \(keyID)")
+
+        let serviceSnapshot = await service.snapshot()
+        XCTAssertEqual(serviceSnapshot.generatedKeyIDs, [keyID])
+        XCTAssertEqual(serviceSnapshot.attestations.count, 1)
+        let backendSnapshot = await backend.snapshot()
+        XCTAssertEqual(backendSnapshot.registrations.count, 2)
+        XCTAssertEqual(backendSnapshot.registrations[0], backendSnapshot.registrations[1])
+        let registeredRecord = try await store.load(environment: .production)
+        XCTAssertEqual(registeredRecord, .init(keyID: keyID, state: .registered))
+    }
+
     func testAppAttestInvalidKeyClearsStoredKeyAndRetriesOnlyOnce() async throws {
         let firstKeyID = Data(repeating: 0xC1, count: 32).base64EncodedString()
         let secondKeyID = Data(repeating: 0xC2, count: 32).base64EncodedString()
@@ -490,6 +575,52 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         XCTAssertEqual(serviceSnapshot.attestations.map(\.keyID), [firstKeyID, secondKeyID])
         XCTAssertEqual(serviceSnapshot.assertions.map(\.keyID), [firstKeyID, secondKeyID])
         XCTAssertEqual(deletionCount, 1)
+    }
+
+    func testAppAttestInvalidInputRotatesAPreviouslyAttestedGeneratedKey() async throws {
+        let staleKeyID = Data(repeating: 0xC3, count: 32).base64EncodedString()
+        let replacementKeyID = Data(repeating: 0xC4, count: 32).base64EncodedString()
+        let service = TestAppAttestService(
+            keyIDs: [replacementKeyID],
+            attestationFailures: [.invalidInput]
+        )
+        let backend = TestAppAttestBackend(
+            attestationChallenge: try makeChallenge(data: Data(repeating: 0x43, count: 32)),
+            assertionChallenge: try makeChallenge(data: Data(repeating: 0x44, count: 32))
+        )
+        let store = TestAppAttestKeyStore(
+            record: .init(keyID: staleKeyID, state: .generated)
+        )
+        let authorizer = AppAttestCloudPhotoAnalysisAuthorizer(
+            service: service,
+            backend: backend,
+            keyStore: store,
+            environment: .production,
+            sleep: { _ in },
+            now: { Date(timeIntervalSince1970: 1_000) }
+        )
+
+        let headers = try await authorizer.authorizationHeaders(for: Data("body".utf8))
+
+        XCTAssertEqual(headers["Authorization"], "AppAttest \(replacementKeyID)")
+        let snapshot = await service.snapshot()
+        XCTAssertEqual(snapshot.generatedKeyIDs, [replacementKeyID])
+        XCTAssertEqual(snapshot.attestations.map(\.keyID), [staleKeyID, replacementKeyID])
+        XCTAssertEqual(snapshot.assertions.map(\.keyID), [replacementKeyID])
+        let deletionCount = await store.deleteCount()
+        XCTAssertEqual(deletionCount, 1)
+    }
+
+    func testAppAttestKeyRecordDecodesTheLegacyGeneratedShape() throws {
+        let keyID = Data(repeating: 0xC5, count: 32).base64EncodedString()
+        let data = try JSONSerialization.data(withJSONObject: [
+            "keyID": keyID,
+            "state": "generated"
+        ])
+
+        let record = try JSONDecoder().decode(TripReelAppAttestKeyRecord.self, from: data)
+
+        XCTAssertEqual(record, .init(keyID: keyID, state: .generated))
     }
 
     func testAppAttestRecoverableServerResponseInvalidatesKeyForOneClientRetry() async throws {
@@ -784,17 +915,20 @@ private actor TestAppAttestBackend: TripReelAppAttestBackendServing {
     private let attestationChallenge: TripReelAppAttestChallenge
     private let assertionChallenge: TripReelAppAttestChallenge
     private let attestationChallengeError: TripReelAppAttestError?
+    private var registrationErrors: [TripReelAppAttestError]
     private var challengePurposes: [TripReelAppAttestPurpose] = []
     private var registrations: [Registration] = []
 
     init(
         attestationChallenge: TripReelAppAttestChallenge,
         assertionChallenge: TripReelAppAttestChallenge,
-        attestationChallengeError: TripReelAppAttestError? = nil
+        attestationChallengeError: TripReelAppAttestError? = nil,
+        registrationErrors: [TripReelAppAttestError] = []
     ) {
         self.attestationChallenge = attestationChallenge
         self.assertionChallenge = assertionChallenge
         self.attestationChallengeError = attestationChallengeError
+        self.registrationErrors = registrationErrors
     }
 
     func challenge(
@@ -818,6 +952,9 @@ private actor TestAppAttestBackend: TripReelAppAttestBackendServing {
             challenge: challenge,
             attestationObject: attestationObject
         ))
+        if !registrationErrors.isEmpty {
+            throw registrationErrors.removeFirst()
+        }
     }
 
     func snapshot() -> Snapshot {

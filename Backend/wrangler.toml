@@ -47,6 +47,13 @@ namespace_id = "53102"
 limit = 60
 period = 60
 
+# Stores only coarse secure-device failure stages and sanitized exception
+# categories. It never receives photos, request bodies, App Attest key IDs,
+# Photos identifiers, or IP addresses.
+[[analytics_engine_datasets]]
+binding = "APP_ATTEST_DIAGNOSTICS"
+dataset = "tripreel_app_attest_diagnostics"
+
 # The Worker itself contains no console logging. Keep automatic Worker Logs off so
 # request diagnostics cannot accidentally grow into a content-logging pipeline.
 [observability]

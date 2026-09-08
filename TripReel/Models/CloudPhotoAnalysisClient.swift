@@ -232,7 +232,7 @@ enum CloudPhotoAnalysisError: LocalizedError, Equatable {
     case thumbnailTooLarge
     case invalidEphemeralIdentifier
     case invalidResponse
-    case server(statusCode: Int)
+    case server(statusCode: Int, code: String?)
 
     var errorDescription: String? {
         switch self {
@@ -250,8 +250,26 @@ enum CloudPhotoAnalysisError: LocalizedError, Equatable {
             "AI preview identifiers must be temporary per-request values."
         case .invalidResponse:
             "TripReel received an invalid cloud analysis response."
-        case let .server(statusCode):
-            "TripReel's cloud analysis service returned error \(statusCode)."
+        case let .server(statusCode, code):
+            Self.serverMessage(statusCode: statusCode, code: code)
+        }
+    }
+
+    private static func serverMessage(statusCode: Int, code: String?) -> String {
+        switch code {
+        case "rate_limited", "upstream_rate_limited":
+            "AI editing is busy right now. Please wait a minute and try again."
+        case "upstream_timeout", "upstream_unavailable", "upstream_error":
+            "The AI editor is temporarily unavailable. Your First Cut is still ready."
+        case "internal_error", "server_misconfigured":
+            "TripReel's secure AI service hit a temporary setup problem. Your First Cut is still ready."
+        case "invalid_attestation", "invalid_assertion", "counter_replay",
+             "key_not_registered", "authentication_unavailable":
+            "This iPhone couldn't be securely verified. Please try once more."
+        case "invalid_upstream_response":
+            "The AI editor returned an unusable cut. Please try a different direction."
+        default:
+            "TripReel's AI service returned error \(statusCode). Your First Cut is still ready."
         }
     }
 }
@@ -385,7 +403,10 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
                ) {
                 continue
             }
-            throw CloudPhotoAnalysisError.server(statusCode: httpResponse.statusCode)
+            throw CloudPhotoAnalysisError.server(
+                statusCode: httpResponse.statusCode,
+                code: HTTPTripReelAppAttestBackendClient.errorCode(from: data)
+            )
         }
 
         guard let data = responseData else { throw CloudPhotoAnalysisError.invalidResponse }

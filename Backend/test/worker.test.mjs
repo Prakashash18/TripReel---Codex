@@ -13,7 +13,11 @@ const ENV = Object.freeze({
 const APP_ATTEST_KEY_ID = Buffer.alloc(32, 0x5a).toString("base64");
 const APP_ATTEST_CHALLENGE = Buffer.alloc(32, 0x31).toString("base64url");
 
-function appAttestEnvironment(stub, rateLimit = async () => ({ success: true })) {
+function appAttestEnvironment(
+  stub,
+  rateLimit = async () => ({ success: true }),
+  diagnostics,
+) {
   return {
     ...ENV,
     APP_ATTEST_APP_ID: "GT9EAB8826.com.prakashash18.tripreel",
@@ -29,6 +33,7 @@ function appAttestEnvironment(stub, rateLimit = async () => ({ success: true }))
     },
     APP_ATTEST_ENROLL_LIMITER: { limit: rateLimit },
     APP_ATTEST_ANALYZE_LIMITER: { limit: rateLimit },
+    ...(diagnostics === undefined ? {} : { APP_ATTEST_DIAGNOSTICS: diagnostics }),
   };
 }
 
@@ -273,6 +278,91 @@ test("maps already-registered challenges to a stable conflict", async () => {
   }), environment);
   assert.equal(response.status, 409);
   assert.equal((await response.json()).error.code, "key_already_registered");
+});
+
+test("records only sanitized App Attest registration diagnostics", async () => {
+  const dataPoints = [];
+  const diagnostic = {
+    writeDataPoint(dataPoint) {
+      dataPoints.push(dataPoint);
+    },
+  };
+  const environment = appAttestEnvironment({
+    async registerKey() {
+      return {
+        ok: false,
+        code: "server_misconfigured",
+        diagnostic: {
+          stage: "registration_storage",
+          errorName: "Error",
+          message: "SQLITE_CONSTRAINT: missing column",
+        },
+      };
+    },
+  }, undefined, diagnostic);
+  const response = await handleRequest(new Request("https://analysis.example/v1/app-attest/register", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      keyId: APP_ATTEST_KEY_ID,
+      challenge: APP_ATTEST_CHALLENGE,
+      attestationObject: Buffer.from("synthetic-attestation").toString("base64url"),
+    }),
+  }), environment);
+
+  assert.equal(response.status, 500);
+  const responseBody = await response.json();
+  assert.deepEqual(responseBody, {
+    error: {
+      code: "server_misconfigured",
+      message: "The service is not configured correctly.",
+    },
+  });
+  assert.equal(dataPoints.length, 1);
+  assert.deepEqual(dataPoints[0].blobs, [
+    "registration",
+    "server_misconfigured",
+    "registration_storage",
+    "Error",
+    "SQLITE_CONSTRAINT: missing column",
+  ]);
+  assert.equal(dataPoints[0].doubles.length, 1);
+  assert.equal(JSON.stringify(dataPoints).includes(APP_ATTEST_KEY_ID), false);
+});
+
+test("records a sanitized diagnostic when the App Attest shard call throws", async () => {
+  const dataPoints = [];
+  const diagnostic = {
+    writeDataPoint(dataPoint) {
+      dataPoints.push(dataPoint);
+    },
+  };
+  const environment = appAttestEnvironment({
+    async registerKey() {
+      throw new Error(`Durable Object failed for ${APP_ATTEST_KEY_ID}`);
+    },
+  }, undefined, diagnostic);
+  const response = await handleRequest(new Request("https://analysis.example/v1/app-attest/register", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      keyId: APP_ATTEST_KEY_ID,
+      challenge: APP_ATTEST_CHALLENGE,
+      attestationObject: Buffer.from("synthetic-attestation").toString("base64url"),
+    }),
+  }), environment);
+
+  assert.equal(response.status, 500);
+  assert.equal((await response.json()).error.code, "server_misconfigured");
+  assert.equal(dataPoints.length, 1);
+  assert.deepEqual(dataPoints[0].blobs.slice(0, 4), [
+    "registration",
+    "server_misconfigured",
+    "registration_rpc",
+    "Error",
+  ]);
+  assert.equal(dataPoints[0].blobs[4].includes(APP_ATTEST_KEY_ID), false);
+  assert.equal(dataPoints[0].blobs[4].includes("[redacted]"), true);
 });
 
 test("authorizes the exact editorial body with App Attest before OpenAI", async () => {

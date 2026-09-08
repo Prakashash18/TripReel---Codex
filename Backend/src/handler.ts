@@ -5,6 +5,7 @@ import {
 } from "./app-attest-encoding.ts";
 import type {
   AppAttestChallengeResult,
+  AppAttestDiagnostic,
   AppAttestOperationResult,
   AppAttestPurpose,
   AuthorizeAnalysisInput,
@@ -49,6 +50,7 @@ export interface Env {
   APP_ATTEST_SHARDS?: AppAttestShardNamespace;
   APP_ATTEST_ENROLL_LIMITER?: RateLimitBinding;
   APP_ATTEST_ANALYZE_LIMITER?: RateLimitBinding;
+  APP_ATTEST_DIAGNOSTICS?: AnalyticsEngineDataset;
 }
 
 type Fetcher = typeof fetch;
@@ -469,6 +471,45 @@ function responseForStateResult(
   return errorResponse(definition.status, result.code, definition.message, origin, headers);
 }
 
+function recordAppAttestDiagnostic(
+  env: Env,
+  operation: string,
+  result: AppAttestOperationResult | AppAttestChallengeResult,
+): void {
+  if (result.ok || result.diagnostic === undefined) {
+    return;
+  }
+  const diagnostic: AppAttestDiagnostic = result.diagnostic;
+  try {
+    env.APP_ATTEST_DIAGNOSTICS?.writeDataPoint({
+      blobs: [
+        operation,
+        result.code,
+        diagnostic.stage,
+        diagnostic.errorName,
+        diagnostic.message,
+      ],
+      doubles: [Date.now()],
+    });
+  } catch {
+    // Operational telemetry must never alter the authentication response.
+  }
+}
+
+function diagnosticForRPC(stage: string, error: unknown): AppAttestDiagnostic {
+  const sanitize = (value: string, maximumLength: number): string => value
+    .replace(/[\u0000-\u001f\u007f]+/gu, " ")
+    .replace(/(?:[A-Za-z0-9+/_=-]{24,})/gu, "[redacted]")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, maximumLength) || "unknown";
+  return {
+    stage: sanitize(stage, 64),
+    errorName: sanitize(error instanceof Error ? error.name : typeof error, 64),
+    message: sanitize(error instanceof Error ? error.message : "non_error_throw", 240),
+  };
+}
+
 async function handleChallenge(
   request: Request,
   env: Env,
@@ -493,11 +534,21 @@ async function handleChallenge(
     // to twice the authoritative 30-request Durable Object quota.
     await enforceRateLimit(configuration.analyzeLimiter, `key:${routedKey.limiterKey}`);
   }
-  const result = await routedKey.stub.issueChallenge({
-    keyID: routedKey.keyID,
-    purpose: value.purpose as AppAttestPurpose,
-    nowMs: Date.now(),
-  });
+  let result: AppAttestChallengeResult;
+  try {
+    result = await routedKey.stub.issueChallenge({
+      keyID: routedKey.keyID,
+      purpose: value.purpose as AppAttestPurpose,
+      nowMs: Date.now(),
+    });
+  } catch (error) {
+    result = {
+      ok: false,
+      code: "server_misconfigured",
+      diagnostic: diagnosticForRPC(`challenge_${value.purpose}_rpc`, error),
+    };
+  }
+  recordAppAttestDiagnostic(env, `challenge_${value.purpose}`, result);
   if (!result.ok) {
     return responseForStateResult(result, origin) ?? errorResponse(
       500,
@@ -511,6 +562,7 @@ async function handleChallenge(
 
 async function handleRegistration(
   request: Request,
+  env: Env,
   configuration: AppAttestConfiguration,
   origin?: string,
 ): Promise<Response> {
@@ -538,13 +590,23 @@ async function handleRegistration(
   } catch {
     throw new RequestProblem(400, "invalid_request", "The registration request is invalid.");
   }
-  const result = await routedKey.stub.registerKey({
-    keyId: routedKey.keyId,
-    keyID: routedKey.keyID,
-    challenge,
-    attestationObject,
-    nowMs: Date.now(),
-  });
+  let result: AppAttestOperationResult;
+  try {
+    result = await routedKey.stub.registerKey({
+      keyId: routedKey.keyId,
+      keyID: routedKey.keyID,
+      challenge,
+      attestationObject,
+      nowMs: Date.now(),
+    });
+  } catch (error) {
+    result = {
+      ok: false,
+      code: "server_misconfigured",
+      diagnostic: diagnosticForRPC("registration_rpc", error),
+    };
+  }
+  recordAppAttestDiagnostic(env, "registration", result);
   const failure = responseForStateResult(result, origin);
   return failure ?? emptyResponse(204, origin);
 }
@@ -623,16 +685,26 @@ async function handleAnalyze(
 
   const { value, bytes } = await readJSONWithBytes(request, LIMITS.maxBodyBytes);
   const payload = validatePayload(value);
-  const result = await routedKey.stub.authorizeAnalysis({
-    keyID: routedKey.keyID,
-    challenge,
-    assertionObject,
-    method: "POST",
-    path: ANALYZE_PATH,
-    bodyHash: await sha256(bytes),
-    photoCount: payload.photos.length,
-    nowMs: Date.now(),
-  });
+  let result: AppAttestOperationResult;
+  try {
+    result = await routedKey.stub.authorizeAnalysis({
+      keyID: routedKey.keyID,
+      challenge,
+      assertionObject,
+      method: "POST",
+      path: ANALYZE_PATH,
+      bodyHash: await sha256(bytes),
+      photoCount: payload.photos.length,
+      nowMs: Date.now(),
+    });
+  } catch (error) {
+    result = {
+      ok: false,
+      code: "server_misconfigured",
+      diagnostic: diagnosticForRPC("assertion_rpc", error),
+    };
+  }
+  recordAppAttestDiagnostic(env, "assertion", result);
   const failure = responseForStateResult(result, origin);
   if (failure !== null) {
     return failure;
@@ -663,7 +735,7 @@ export async function handleRequest(request: Request, env: Env, fetcher: Fetcher
       return await handleChallenge(request, env, requireAppAttestConfiguration(env), responseOrigin);
     }
     if (url.pathname === REGISTER_PATH) {
-      return await handleRegistration(request, requireAppAttestConfiguration(env), responseOrigin);
+      return await handleRegistration(request, env, requireAppAttestConfiguration(env), responseOrigin);
     }
     return await handleAnalyze(request, env, configuration, responseOrigin, fetcher);
   } catch (error) {

@@ -1656,7 +1656,11 @@ final class TripReelModel: ObservableObject {
             } catch {
                 guard self.aiCutGeneration == generation else { return }
                 self.aiCutTask = nil
-                self.aiCutFailureMessage = "AI couldn't create another cut right now. Your First Cut is still ready."
+                let localizedMessage = (error as? any LocalizedError)?.errorDescription?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                self.aiCutFailureMessage = localizedMessage?.isEmpty == false
+                    ? localizedMessage
+                    : "AI couldn't create another cut right now. Your First Cut is still ready."
             }
         }
     }

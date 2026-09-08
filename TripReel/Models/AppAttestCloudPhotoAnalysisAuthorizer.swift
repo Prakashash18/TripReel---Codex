@@ -17,15 +17,28 @@ enum TripReelAppAttestPurpose: String, Codable, Sendable {
     case assertion
 }
 
-enum TripReelAppAttestServiceError: Error, Equatable, Sendable {
+enum TripReelAppAttestServiceError: LocalizedError, Equatable, Sendable {
     case featureUnsupported
     case invalidInput
     case invalidKey
     case serverUnavailable
     case systemFailure
+
+    var errorDescription: String? {
+        switch self {
+        case .featureUnsupported:
+            "Secure AI editing isn't supported on this iPhone. Your First Cut is still ready."
+        case .invalidInput, .invalidKey:
+            "This iPhone's secure AI access needs to be refreshed. Please try again."
+        case .serverUnavailable:
+            "Apple's secure device check is temporarily unavailable. Please try again shortly."
+        case .systemFailure:
+            "This iPhone couldn't complete its secure device check. Please try again."
+        }
+    }
 }
 
-enum TripReelAppAttestError: Error, Equatable, Sendable {
+enum TripReelAppAttestError: LocalizedError, Equatable, Sendable {
     case unsupported
     case invalidEndpoint
     case invalidChallenge
@@ -34,6 +47,39 @@ enum TripReelAppAttestError: Error, Equatable, Sendable {
     case keyStore(status: OSStatus)
     case keyStoreCorrupt
     case server(statusCode: Int, code: String?)
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupported:
+            "Secure AI editing isn't supported on this iPhone. Your First Cut is still ready."
+        case .invalidEndpoint:
+            "TripReel's secure AI service address isn't valid. Your First Cut is still ready."
+        case .invalidChallenge, .invalidServerResponse:
+            "TripReel couldn't complete the secure device check. Please try again shortly."
+        case .invalidKeyIdentifier, .keyStoreCorrupt:
+            "This iPhone's secure AI access needs to be refreshed. Please try again."
+        case .keyStore:
+            "TripReel couldn't access this iPhone's secure AI key. Please unlock your iPhone and try again."
+        case let .server(statusCode, code):
+            Self.serverMessage(statusCode: statusCode, code: code)
+        }
+    }
+
+    private static func serverMessage(statusCode: Int, code: String?) -> String {
+        switch code {
+        case "internal_error", "server_misconfigured":
+            "TripReel's secure device check hit a temporary setup problem. Your First Cut is still ready."
+        case "rate_limited":
+            "Secure AI editing is busy right now. Please wait a minute and try again."
+        case "authentication_unavailable":
+            "Secure device verification is temporarily unavailable. Please try again shortly."
+        case "invalid_attestation", "invalid_assertion", "counter_replay",
+             "key_not_registered", "unknown_key", "invalid_key":
+            "This iPhone couldn't be securely verified. Please try once more."
+        default:
+            "TripReel's secure device check returned error \(statusCode). Your First Cut is still ready."
+        }
+    }
 }
 
 protocol TripReelAppAttestServicing: Sendable {
@@ -128,11 +174,29 @@ protocol TripReelAppAttestBackendServing: Sendable {
 struct TripReelAppAttestKeyRecord: Codable, Equatable, Sendable {
     enum State: String, Codable, Sendable {
         case generated
+        case registrationPending
         case registered
     }
 
     let keyID: String
     let state: State
+    let pendingChallenge: String?
+    let pendingChallengeExpiresAt: Date?
+    let pendingAttestationObject: Data?
+
+    init(
+        keyID: String,
+        state: State,
+        pendingChallenge: String? = nil,
+        pendingChallengeExpiresAt: Date? = nil,
+        pendingAttestationObject: Data? = nil
+    ) {
+        self.keyID = keyID
+        self.state = state
+        self.pendingChallenge = pendingChallenge
+        self.pendingChallengeExpiresAt = pendingChallengeExpiresAt
+        self.pendingAttestationObject = pendingAttestationObject
+    }
 }
 
 protocol TripReelAppAttestKeyStoring: Sendable {
@@ -486,7 +550,7 @@ actor TripReelAppAttestCoordinator {
 
     private func registeredKey() async throws -> String {
         let existingRecord = try await keyStore.load(environment: environment)
-        let record: TripReelAppAttestKeyRecord
+        var record: TripReelAppAttestKeyRecord
         if let existingRecord {
             try Self.validate(keyID: existingRecord.keyID)
             record = existingRecord
@@ -498,6 +562,45 @@ actor TripReelAppAttestCoordinator {
         }
 
         if record.state == .registered { return record.keyID }
+
+        if record.state == .registrationPending {
+            guard let encodedChallenge = record.pendingChallenge,
+                  let challengeExpiresAt = record.pendingChallengeExpiresAt,
+                  let attestationObject = record.pendingAttestationObject,
+                  !attestationObject.isEmpty,
+                  attestationObject.count <= 65_536 else {
+                throw TripReelAppAttestError.keyStoreCorrupt
+            }
+            guard challengeExpiresAt > now() else {
+                throw TripReelAppAttestError.server(
+                    statusCode: 410,
+                    code: "challenge_expired"
+                )
+            }
+            do {
+                _ = try TripReelAppAttestChallenge(
+                    encodedValue: encodedChallenge,
+                    expiresAt: challengeExpiresAt
+                )
+            } catch {
+                throw TripReelAppAttestError.keyStoreCorrupt
+            }
+            do {
+                try await backend.register(
+                    keyID: record.keyID,
+                    challenge: encodedChallenge,
+                    attestationObject: attestationObject
+                )
+            } catch let error as TripReelAppAttestError where Self.isAlreadyRegistered(error) {
+                // A lost registration response is safe to resume because the
+                // server treats this key identifier idempotently.
+            }
+            try await keyStore.save(
+                TripReelAppAttestKeyRecord(keyID: record.keyID, state: .registered),
+                environment: environment
+            )
+            return record.keyID
+        }
 
         do {
             let challenge = try await backend.challenge(
@@ -512,6 +615,14 @@ actor TripReelAppAttestCoordinator {
                 record.keyID,
                 clientDataHash: clientDataHash
             )
+            record = TripReelAppAttestKeyRecord(
+                keyID: record.keyID,
+                state: .registrationPending,
+                pendingChallenge: challenge.encodedValue,
+                pendingChallengeExpiresAt: challenge.expiresAt,
+                pendingAttestationObject: attestationObject
+            )
+            try await keyStore.save(record, environment: environment)
             try await backend.register(
                 keyID: record.keyID,
                 challenge: challenge.encodedValue,
@@ -566,7 +677,7 @@ actor TripReelAppAttestCoordinator {
 
     private static func requiresKeyReset(_ error: Error) -> Bool {
         if let serviceError = error as? TripReelAppAttestServiceError {
-            return serviceError == .invalidKey
+            return serviceError == .invalidKey || serviceError == .invalidInput
         }
         if let appAttestError = error as? TripReelAppAttestError {
             switch appAttestError {
@@ -582,7 +693,10 @@ actor TripReelAppAttestCoordinator {
                         code == "unauthorized"
                 }
                 if statusCode == 409 {
-                    return code == "counter_replay"
+                    return code == "counter_replay" || code == "challenge_used"
+                }
+                if statusCode == 410 {
+                    return code == "challenge_expired"
                 }
                 return false
             default:
