@@ -881,6 +881,21 @@ struct TripEditSnapshot: Hashable, Sendable {
     }
 }
 
+struct AICutRecommendation: Identifiable, Hashable, Sendable {
+    enum Kind: String, Hashable, Sendable {
+        case story
+        case titles
+        case music
+        case treatment
+    }
+
+    let kind: Kind
+    let title: String
+    let detail: String
+
+    var id: Kind { kind }
+}
+
 private struct AICutCandidatePhoto: Sendable {
     let photo: ReelPhoto
     let localSelection: CloudPhotoLocalSelection
@@ -933,6 +948,7 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var aiCutSnapshot: TripEditSnapshot?
     @Published private(set) var selectedCutSource: TripCutSource = .firstCut
     @Published private(set) var aiCutSummary: String?
+    @Published private(set) var aiCutRecommendations: [AICutRecommendation] = []
     @Published private(set) var aiCutProgress = 0.0
     @Published private(set) var aiCutStatus = "Finding the strongest moments…"
     @Published private(set) var aiCutFailureMessage: String?
@@ -1388,6 +1404,46 @@ final class TripReelModel: ObservableObject {
         tracks.first { $0.id == selectedTrackID }
     }
 
+    func musicTrack(withID id: String?) -> MusicTrack? {
+        guard let id else { return nil }
+        return tracks.first { $0.id == id && $0.id != "none" }
+    }
+
+    var recommendedAICutDirection: AICutDirection {
+        let relevantIDs = Set((activeAnalysisTrip ?? selectedTrip)?.assets.map(\.id) ?? [])
+        let insights = activePhotoInsights.filter { relevantIDs.isEmpty || relevantIDs.contains($0.key) }.values
+        let analyzedCount = insights.count
+        guard analyzedCount > 0 else { return .betterStory }
+
+        let peopleMoments = insights.filter { $0.peopleCount > 0 || $0.contentKind == .people }.count
+        if peopleMoments >= max(3, Int(ceil(Double(analyzedCount) * 0.34))) {
+            return .people
+        }
+
+        let scenicMoments = insights.filter { $0.contentKind == .scenery }.count
+        if scenicMoments >= max(3, Int(ceil(Double(analyzedCount) * 0.45))) {
+            return .calm
+        }
+
+        let candidateCount = firstCutSnapshot?.keptPhotos.count ?? photos.count
+        return candidateCount >= 24 ? .betterStory : .surpriseMe
+    }
+
+    var recommendedAICutReason: String {
+        switch recommendedAICutDirection {
+        case .people:
+            "Recommended because this film contains several distinct people moments."
+        case .calm:
+            "Recommended because scenery is one of the strongest themes in this film."
+        case .betterStory:
+            "Recommended to shape a larger set of moments into a clear beginning, middle and ending."
+        case .surpriseMe:
+            "Recommended for a varied set where the director can choose the strongest overall rhythm."
+        case .dynamic:
+            "Recommended for a quicker, more energetic sequence."
+        }
+    }
+
     var selectedFormat: ProjectFormat {
         formats.first { $0.id == selectedFormatID } ?? formats[0]
     }
@@ -1564,6 +1620,7 @@ final class TripReelModel: ObservableObject {
 
     func openAICutDirections() {
         aiCutFailureMessage = nil
+        selectedAICutDirection = recommendedAICutDirection
         go(.aiDirection, direction: .forward)
     }
 
@@ -1582,6 +1639,9 @@ final class TripReelModel: ObservableObject {
         let generation = UUID()
         aiCutGeneration = generation
         aiCutFailureMessage = nil
+        aiCutSnapshot = nil
+        aiCutSummary = nil
+        aiCutRecommendations = []
         aiCutProgress = 0
         aiCutStatus = "Finding the strongest moments…"
         go(.aiProcessing, direction: .forward)
@@ -1690,7 +1750,7 @@ final class TripReelModel: ObservableObject {
                 )
                 guard self.aiCutGeneration == generation, !Task.isCancelled else { return }
                 self.aiCutProgress = 0.88
-                self.aiCutStatus = "Creating your AI cut…"
+                self.aiCutStatus = "Writing your hook and matching music…"
                 let snapshot = try self.materializeAICut(
                     plan: plan,
                     firstCut: firstCutSnapshot,
@@ -1701,6 +1761,7 @@ final class TripReelModel: ObservableObject {
                 guard self.aiCutGeneration == generation, !Task.isCancelled else { return }
                 self.aiCutSnapshot = snapshot
                 self.aiCutSummary = plan.summary
+                self.aiCutRecommendations = Self.recommendations(for: plan)
                 self.aiCutProgress = 1
                 self.aiCutTask = nil
                 self.go(.aiComparison, direction: .forward)
@@ -1760,7 +1821,7 @@ final class TripReelModel: ObservableObject {
 
     func tryAnotherAICut() {
         aiCutFailureMessage = nil
-        selectedAICutDirection = nil
+        selectedAICutDirection = recommendedAICutDirection
         go(.aiDirection, direction: .backward)
     }
 
@@ -1792,17 +1853,75 @@ final class TripReelModel: ObservableObject {
         let includedIDs = Set(plannedPhotos.map(\.id))
         let remaining = firstCut.photos.filter { !includedIDs.contains($0.id) }
         let settings = Self.aiSettings(for: direction, fallback: firstCut)
+        var titleCards = firstCut.titleCards
+        var titleDrafts = firstCut.titleDrafts
+        titleCards.insert(.opening)
+        titleDrafts[.opening] = TitleCardDraft(
+            title: validated.hook.title,
+            subtitle: validated.hook.subtitle,
+            style: Self.titleStyle(for: validated.hook.style),
+            duration: validated.hook.durationSeconds
+        )
+        if validated.ending.enabled {
+            titleCards.insert(.ending)
+            titleDrafts[.ending] = TitleCardDraft(
+                title: validated.ending.title,
+                subtitle: validated.ending.subtitle,
+                style: Self.titleStyle(for: validated.ending.style),
+                duration: validated.ending.durationSeconds
+            )
+        } else {
+            titleCards.remove(.ending)
+        }
         return TripEditSnapshot(
             photos: plannedPhotos + remaining,
             cutPhotoIDs: Set(remaining.map(\.id)),
             pace: settings.pace,
-            montageLook: settings.look,
-            motionIntensity: settings.motion,
-            titleCards: firstCut.titleCards,
-            titleDrafts: firstCut.titleDrafts,
-            selectedTrackID: firstCut.selectedTrackID,
-            cutToBeat: firstCut.cutToBeat
+            montageLook: MontageLook(rawValue: validated.treatment.look.rawValue) ?? settings.look,
+            motionIntensity: MontageMotionIntensity(
+                rawValue: validated.treatment.motionIntensity.rawValue
+            ) ?? settings.motion,
+            titleCards: titleCards,
+            titleDrafts: titleDrafts,
+            selectedTrackID: validated.soundtrack.trackID.rawValue,
+            cutToBeat: true
         )
+    }
+
+    private static func titleStyle(for style: AICutTitleStyle) -> MontageTitleStyle {
+        switch style {
+        case .editorial: .editorial
+        case .clean: .clean
+        case .bold: .bold
+        }
+    }
+
+    private static func recommendations(for plan: AICutEditPlan) -> [AICutRecommendation] {
+        let closing = plan.ending.enabled
+            ? " Opens with “\(plan.hook.title)” and closes with “\(plan.ending.title)”."
+            : " Opens with “\(plan.hook.title)” and lets the final photo close the film."
+        return [
+            AICutRecommendation(
+                kind: .story,
+                title: plan.story.title,
+                detail: plan.story.arc
+            ),
+            AICutRecommendation(
+                kind: .titles,
+                title: "A stronger hook",
+                detail: closing.trimmingCharacters(in: .whitespaces)
+            ),
+            AICutRecommendation(
+                kind: .music,
+                title: plan.soundtrack.trackID.displayName,
+                detail: plan.soundtrack.reason
+            ),
+            AICutRecommendation(
+                kind: .treatment,
+                title: "\(plan.treatment.look.displayName) · \(plan.treatment.motionIntensity.displayName)",
+                detail: plan.treatment.reason
+            )
+        ]
     }
 
     /// Gives the AI a balanced view of the local First Cut and safe, locally
@@ -1907,12 +2026,31 @@ final class TripReelModel: ObservableObject {
             pace: 0.68,
             montageLook: .story,
             motionIntensity: .expressive,
-            titleCards: firstCutSnapshot.titleCards,
-            titleDrafts: firstCutSnapshot.titleDrafts,
-            selectedTrackID: firstCutSnapshot.selectedTrackID,
-            cutToBeat: firstCutSnapshot.cutToBeat
+            titleCards: firstCutSnapshot.titleCards.union([.opening, .ending]),
+            titleDrafts: firstCutSnapshot.titleDrafts.merging([
+                .opening: TitleCardDraft(
+                    title: "One trip, many little turns",
+                    subtitle: "A different way to remember it",
+                    style: .editorial,
+                    duration: 2.4
+                ),
+                .ending: TitleCardDraft(
+                    title: "Until the next road",
+                    subtitle: "Made with TripReel",
+                    style: .clean,
+                    duration: 2.0
+                )
+            ]) { _, aiDraft in aiDraft },
+            selectedTrackID: "simplicity",
+            cutToBeat: true
         )
         aiCutSummary = "A tighter alternative with a stronger opening, fewer repeated moments and a quicker finish."
+        aiCutRecommendations = [
+            AICutRecommendation(kind: .story, title: "Arrival to afterglow", detail: "Open with discovery, build through people and details, then finish on a quiet memory."),
+            AICutRecommendation(kind: .titles, title: "A stronger hook", detail: "Opens with “One trip, many little turns” and adds a brief closing thought."),
+            AICutRecommendation(kind: .music, title: "Simplicity", detail: "A light acoustic rhythm supports the warmer, quicker edit."),
+            AICutRecommendation(kind: .treatment, title: "Story · Expressive", detail: "Varied framing and movement give each moment a distinct role.")
+        ]
     }
 
     func cancelPhotoAnalysis() {
@@ -2559,6 +2697,7 @@ final class TripReelModel: ObservableObject {
         selectedCutSource = .firstCut
         aiCutSnapshot = nil
         aiCutSummary = nil
+        aiCutRecommendations = []
         aiCutFailureMessage = nil
         aiCutProgress = 0
         firstCutSnapshot = makeCurrentEditSnapshot()
@@ -2972,6 +3111,7 @@ final class TripReelModel: ObservableObject {
         aiCutSnapshot = nil
         firstCutSnapshot = nil
         aiCutSummary = nil
+        aiCutRecommendations = []
         aiCutFailureMessage = nil
         aiCutProgress = 0
         pendingBuildTrip = nil

@@ -87,6 +87,81 @@ enum AICutMotion: String, Codable, CaseIterable, Hashable, Sendable {
     case settle
 }
 
+enum AICutTitleStyle: String, Codable, CaseIterable, Hashable, Sendable {
+    case editorial
+    case clean
+    case bold
+}
+
+enum AICutSoundtrackID: String, Codable, CaseIterable, Hashable, Sendable {
+    case wanderlust
+    case simplicity
+    case castles
+    case longWayHome = "long-way-home"
+
+    var displayName: String {
+        switch self {
+        case .wanderlust: "Wanderlust"
+        case .simplicity: "Simplicity"
+        case .castles: "Castles in the Sky"
+        case .longWayHome: "The Long Way Home"
+        }
+    }
+}
+
+enum AICutLook: String, Codable, CaseIterable, Hashable, Sendable {
+    case story
+    case cinema
+    case journal
+    case clean
+
+    var displayName: String { rawValue.capitalized }
+}
+
+enum AICutMotionIntensity: String, Codable, CaseIterable, Hashable, Sendable {
+    case still
+    case gentle
+    case expressive
+
+    var displayName: String { rawValue.capitalized }
+}
+
+struct AICutStory: Codable, Hashable, Sendable {
+    let title: String
+    let arc: String
+}
+
+struct AICutTitleCardPlan: Codable, Hashable, Sendable {
+    let title: String
+    let subtitle: String
+    let style: AICutTitleStyle
+    let durationSeconds: Double
+}
+
+struct AICutEndingPlan: Codable, Hashable, Sendable {
+    let enabled: Bool
+    let title: String
+    let subtitle: String
+    let style: AICutTitleStyle
+    let durationSeconds: Double
+}
+
+struct AICutSoundtrackPlan: Codable, Hashable, Sendable {
+    let trackID: AICutSoundtrackID
+    let reason: String
+
+    enum CodingKeys: String, CodingKey {
+        case trackID = "trackId"
+        case reason
+    }
+}
+
+struct AICutTreatmentPlan: Codable, Hashable, Sendable {
+    let look: AICutLook
+    let motionIntensity: AICutMotionIntensity
+    let reason: String
+}
+
 struct AICutPlanItem: Codable, Hashable, Sendable {
     let photoID: String
     let order: Int
@@ -109,6 +184,11 @@ struct AICutEditPlan: Codable, Hashable, Sendable {
     let version: Int
     let direction: AICutDirection
     let summary: String
+    let story: AICutStory
+    let hook: AICutTitleCardPlan
+    let ending: AICutEndingPlan
+    let soundtrack: AICutSoundtrackPlan
+    let treatment: AICutTreatmentPlan
     let sequence: [AICutPlanItem]
 }
 
@@ -123,6 +203,11 @@ enum AICutPlanValidationError: Error, Equatable {
     case invalidOrder
     case invalidDuration
     case invalidSummary
+    case invalidStory
+    case invalidHook
+    case invalidEnding
+    case invalidSoundtrack
+    case invalidTreatment
 }
 
 enum AICutPlanValidator {
@@ -134,18 +219,39 @@ enum AICutPlanValidator {
         requestedIDs: Set<String>,
         direction: AICutDirection
     ) throws -> AICutEditPlan {
-        guard plan.version == 1 else { throw AICutPlanValidationError.invalidVersion }
+        guard plan.version == 2 else { throw AICutPlanValidationError.invalidVersion }
         guard plan.direction == direction else { throw AICutPlanValidationError.mismatchedDirection }
         guard !plan.sequence.isEmpty else { throw AICutPlanValidationError.emptySequence }
         guard plan.sequence.count <= requestedIDs.count,
               plan.sequence.count <= CloudPhotoAnalysisClient.maximumBatchSize else {
             throw AICutPlanValidationError.excessiveSequence
         }
-        guard !plan.summary.isEmpty, plan.summary.count <= 240 else {
+        guard let summary = normalizedText(plan.summary, minimum: 1, maximum: 240) else {
             throw AICutPlanValidationError.invalidSummary
         }
-        guard !plan.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw AICutPlanValidationError.invalidSummary
+        guard let storyTitle = normalizedText(plan.story.title, minimum: 1, maximum: 60),
+              let storyArc = normalizedText(plan.story.arc, minimum: 1, maximum: 240) else {
+            throw AICutPlanValidationError.invalidStory
+        }
+        guard let hookTitle = normalizedText(plan.hook.title, minimum: 1, maximum: 60),
+              let hookSubtitle = normalizedText(plan.hook.subtitle, minimum: 0, maximum: 100),
+              plan.hook.durationSeconds.isFinite else {
+            throw AICutPlanValidationError.invalidHook
+        }
+        guard let endingTitle = normalizedText(
+            plan.ending.title,
+            minimum: plan.ending.enabled ? 1 : 0,
+            maximum: 60
+        ),
+              let endingSubtitle = normalizedText(plan.ending.subtitle, minimum: 0, maximum: 100),
+              plan.ending.durationSeconds.isFinite else {
+            throw AICutPlanValidationError.invalidEnding
+        }
+        guard let soundtrackReason = normalizedText(plan.soundtrack.reason, minimum: 1, maximum: 180) else {
+            throw AICutPlanValidationError.invalidSoundtrack
+        }
+        guard let treatmentReason = normalizedText(plan.treatment.reason, minimum: 1, maximum: 180) else {
+            throw AICutPlanValidationError.invalidTreatment
         }
 
         let ordered = plan.sequence.sorted { $0.order < $1.order }
@@ -170,9 +276,32 @@ enum AICutPlanValidator {
         }
 
         return AICutEditPlan(
-            version: 1,
+            version: 2,
             direction: direction,
-            summary: plan.summary,
+            summary: summary,
+            story: AICutStory(title: storyTitle, arc: storyArc),
+            hook: AICutTitleCardPlan(
+                title: hookTitle,
+                subtitle: hookSubtitle,
+                style: plan.hook.style,
+                durationSeconds: min(max(plan.hook.durationSeconds, 1), 4)
+            ),
+            ending: AICutEndingPlan(
+                enabled: plan.ending.enabled,
+                title: endingTitle,
+                subtitle: endingSubtitle,
+                style: plan.ending.style,
+                durationSeconds: min(max(plan.ending.durationSeconds, 1), 4)
+            ),
+            soundtrack: AICutSoundtrackPlan(
+                trackID: plan.soundtrack.trackID,
+                reason: soundtrackReason
+            ),
+            treatment: AICutTreatmentPlan(
+                look: plan.treatment.look,
+                motionIntensity: plan.treatment.motionIntensity,
+                reason: treatmentReason
+            ),
             sequence: ordered.enumerated().map { index, item in
                 AICutPlanItem(
                     photoID: item.photoID,
@@ -184,6 +313,21 @@ enum AICutPlanValidator {
                 )
             }
         )
+    }
+
+    private static func normalizedText(
+        _ value: String,
+        minimum: Int,
+        maximum: Int
+    ) -> String? {
+        guard !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+            return nil
+        }
+        let result = value
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return (minimum...maximum).contains(result.count) ? result : nil
     }
 
     static func minimumSequenceCount(
@@ -390,7 +534,7 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
         }
 
         let requestBody = CloudRequest(
-            version: 1,
+            version: 2,
             direction: direction,
             photos: photos.map {
                 CloudRequest.Photo(
@@ -410,7 +554,7 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
             request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.setValue("TripReel-iOS/1", forHTTPHeaderField: "X-TripReel-Client")
+            request.setValue("TripReel-iOS/2", forHTTPHeaderField: "X-TripReel-Client")
 
             let authorizationHeaders = try await authorizer.authorizationHeaders(for: encodedBody)
             guard !authorizationHeaders.isEmpty else { throw CloudPhotoAnalysisError.notConfigured }
@@ -488,7 +632,20 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               Set(root.keys) == ["model", "plan", "retention"],
               let plan = root["plan"] as? [String: Any],
-              Set(plan.keys) == ["version", "direction", "summary", "sequence"],
+              Set(plan.keys) == [
+                  "version", "direction", "summary", "story", "hook", "ending",
+                  "soundtrack", "treatment", "sequence"
+              ],
+              let story = plan["story"] as? [String: Any],
+              Set(story.keys) == ["title", "arc"],
+              let hook = plan["hook"] as? [String: Any],
+              Set(hook.keys) == ["title", "subtitle", "style", "durationSeconds"],
+              let ending = plan["ending"] as? [String: Any],
+              Set(ending.keys) == ["enabled", "title", "subtitle", "style", "durationSeconds"],
+              let soundtrack = plan["soundtrack"] as? [String: Any],
+              Set(soundtrack.keys) == ["trackId", "reason"],
+              let treatment = plan["treatment"] as? [String: Any],
+              Set(treatment.keys) == ["look", "motionIntensity", "reason"],
               let sequence = plan["sequence"] as? [[String: Any]],
               sequence.allSatisfy({ item in
                   Set(item.keys) == ["photoId", "order", "durationSeconds", "role", "emphasis", "motion"]

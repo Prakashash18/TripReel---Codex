@@ -85,6 +85,43 @@ function plan(ids = ["p0"], direction = "better_story") {
   };
 }
 
+function directorPayload(ids = ["p0"], direction = "better_story", selections = []) {
+  return { ...payload(ids, direction, selections), version: 2 };
+}
+
+function directorPlan(ids = ["p0"], direction = "better_story") {
+  return {
+    ...plan(ids, direction),
+    version: 2,
+    story: {
+      title: "From discovery to afterglow",
+      arc: "Open on a visual invitation, build through distinct people and details, then resolve on a warm final moment.",
+    },
+    hook: {
+      title: "Stay for this part",
+      subtitle: "The moments between the landmarks",
+      style: "editorial",
+      durationSeconds: 2.2,
+    },
+    ending: {
+      enabled: true,
+      title: "Worth the long way home",
+      subtitle: "Until next time",
+      style: "clean",
+      durationSeconds: 2,
+    },
+    soundtrack: {
+      trackId: "long-way-home",
+      reason: "The nostalgic arrangement supports the reflective ending without overpowering the people moments.",
+    },
+    treatment: {
+      look: "journal",
+      motionIntensity: "gentle",
+      reason: "Tactile framing and restrained movement make repeated settings feel intentional.",
+    },
+  };
+}
+
 function openAISuccess(editPlan) {
   return new Response(JSON.stringify({
     status: "completed",
@@ -133,6 +170,11 @@ test("validates only the versioned editorial request contract", () => {
     () => validatePayload({ version: 1, direction: "cinematic", photos: payload().photos }),
     (error) => error instanceof RequestProblem && error.code === "invalid_request",
   );
+  assert.equal(validatePayload(directorPayload()).version, 2);
+  assert.throws(
+    () => validatePayload({ ...payload(), version: 3 }),
+    (error) => error instanceof RequestProblem && error.code === "invalid_request",
+  );
 });
 
 test("rejects duplicate IDs, oversized dimensions, and excessive counts", () => {
@@ -177,6 +219,25 @@ test("strictly validates model plans and rejects unknown, duplicate, or arbitrar
   const unsupportedTransition = plan(["p0"]);
   unsupportedTransition.sequence[0].transition = "wipe";
   assert.equal(parseAIEditPlan(unsupportedTransition, ["p0"], "better_story"), null);
+});
+
+test("strictly validates version 2 story, title, music, and treatment recommendations", () => {
+  const valid = directorPlan(["p0", "p1"]);
+  const parsed = parseAIEditPlan(valid, ["p0", "p1"], "better_story", 2);
+  assert.equal(parsed.version, 2);
+  assert.equal(parsed.hook.title, "Stay for this part");
+  assert.equal(parsed.soundtrack.trackId, "long-way-home");
+  assert.equal(parsed.treatment.look, "journal");
+
+  const unsupportedTrack = structuredClone(valid);
+  unsupportedTrack.soundtrack.trackId = "streamed-track";
+  assert.equal(parseAIEditPlan(unsupportedTrack, ["p0", "p1"], "better_story", 2), null);
+
+  const emptyHook = structuredClone(valid);
+  emptyHook.hook.title = "   ";
+  assert.equal(parseAIEditPlan(emptyHook, ["p0", "p1"], "better_story", 2), null);
+
+  assert.equal(parseAIEditPlan(valid, ["p0", "p1"], "better_story", 1), null);
 });
 
 test("requires useful coverage instead of accepting an aggressively short montage", () => {
@@ -225,6 +286,33 @@ test("calls Responses API with local-selection context and privacy settings", as
     openAIStore: false,
     abuseMonitoring: "up_to_30_days_unless_zdr",
   });
+});
+
+test("version 2 asks for an editable reel direction and returns it without changing privacy", async () => {
+  let upstream;
+  const expected = directorPlan(["p0", "p1"], "people");
+  const response = await handleRequest(
+    analyzeRequest(directorPayload(["p0", "p1"], "people", ["first_cut", "more_photos"])),
+    ENV,
+    async (_url, init) => {
+      upstream = JSON.parse(init.body);
+      return openAISuccess(expected);
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.match(upstream.instructions, /act as a reel director/u);
+  assert.match(upstream.instructions, /long-way-home/u);
+  assert.match(upstream.input[0].content[0].text, /story arc, opening hook/u);
+  assert.equal(upstream.text.format.schema.properties.version.const, 2);
+  assert.deepEqual(
+    new Set(upstream.text.format.schema.required),
+    new Set(["version", "direction", "summary", "story", "hook", "ending", "soundtrack", "treatment", "sequence"]),
+  );
+  const body = await response.json();
+  assert.deepEqual(body.plan, expected);
+  assert.equal(body.retention.proxyStored, false);
+  assert.equal(body.retention.openAIStore, false);
 });
 
 test("allows a validated server-side model override", async () => {

@@ -35,7 +35,12 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         {
           "model":"gpt-5.6-luna",
           "plan":{
-            "version":1,"direction":"better_story","summary":"Open with the wide scene.",
+            "version":2,"direction":"better_story","summary":"Open with the wide scene.",
+            "story":{"title":"From wonder to warmth","arc":"Open wide, move closer to the people, and end on a shared moment."},
+            "hook":{"title":"Look what we found","subtitle":"A day worth replaying","style":"editorial","durationSeconds":2.2},
+            "ending":{"enabled":true,"title":"One more for the road","subtitle":"Until next time","style":"clean","durationSeconds":2.0},
+            "soundtrack":{"trackId":"simplicity","reason":"The bright acoustic pulse supports the warm visual rhythm."},
+            "treatment":{"look":"story","motionIntensity":"gentle","reason":"A varied, restrained treatment keeps people and place feeling natural."},
             "sequence":[{
               "photoId":"p0","order":0,"durationSeconds":2.4,
               "role":"opening","emphasis":"highlight","motion":"zoom_in"
@@ -50,7 +55,8 @@ final class CloudPhotoAnalysisTests: XCTestCase {
             let body = try XCTUnwrap(request.httpBody)
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             let photos = try XCTUnwrap(json["photos"] as? [[String: Any]])
-            XCTAssertEqual(json["version"] as? Int, 1)
+            XCTAssertEqual(json["version"] as? Int, 2)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-TripReel-Client"), "TripReel-iOS/2")
             XCTAssertEqual(json["direction"] as? String, "better_story")
             XCTAssertEqual(Set(json.keys), ["version", "direction", "photos"])
             XCTAssertEqual(photos.count, 1)
@@ -89,6 +95,9 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         XCTAssertEqual(result.direction, .betterStory)
         XCTAssertEqual(result.sequence.first?.photoID, "p0")
         XCTAssertEqual(result.sequence.first?.durationSeconds, 2.4)
+        XCTAssertEqual(result.hook.title, "Look what we found")
+        XCTAssertEqual(result.soundtrack.trackID, .simplicity)
+        XCTAssertEqual(result.treatment.look, .story)
     }
 
     func testClientRetriesOnceWithTheSameBodyAfterRecoverableAuthenticationFailure() async throws {
@@ -96,7 +105,12 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         {
           "model":"gpt-5.6-luna",
           "plan":{
-            "version":1,"direction":"calm","summary":"Let one quiet view breathe.",
+            "version":2,"direction":"calm","summary":"Let one quiet view breathe.",
+            "story":{"title":"A quiet pause","arc":"Begin with stillness and let the final view resolve the sequence."},
+            "hook":{"title":"Stay for a moment","subtitle":"","style":"clean","durationSeconds":2.4},
+            "ending":{"enabled":false,"title":"","subtitle":"","style":"clean","durationSeconds":2.0},
+            "soundtrack":{"trackId":"castles","reason":"The dreamy arrangement leaves space around the quieter frames."},
+            "treatment":{"look":"cinema","motionIntensity":"gentle","reason":"Longer holds and restrained movement suit the calm direction."},
             "sequence":[{
               "photoId":"p0","order":0,"durationSeconds":3.1,
               "role":"scenery","emphasis":"highlight","motion":"settle"
@@ -217,8 +231,7 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         )
 
         XCTAssertThrowsError(try AICutPlanValidator.validate(
-            AICutEditPlan(
-                version: 1,
+            makeAICutPlan(
                 direction: .betterStory,
                 summary: "A grounded opening.",
                 sequence: [
@@ -237,8 +250,7 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         )) { XCTAssertEqual($0 as? AICutPlanValidationError, .unknownPhotoID) }
 
         XCTAssertThrowsError(try AICutPlanValidator.validate(
-            AICutEditPlan(
-                version: 1,
+            makeAICutPlan(
                 direction: .betterStory,
                 summary: "No duplicate frames.",
                 sequence: [valid, valid]
@@ -248,8 +260,7 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         )) { XCTAssertEqual($0 as? AICutPlanValidationError, .duplicatePhotoID) }
 
         XCTAssertThrowsError(try AICutPlanValidator.validate(
-            AICutEditPlan(
-                version: 1,
+            makeAICutPlan(
                 direction: .betterStory,
                 summary: "A valid sequence needs contiguous order.",
                 sequence: [
@@ -270,8 +281,7 @@ final class CloudPhotoAnalysisTests: XCTestCase {
 
     func testPlanValidatorClampsFiniteDurationsAndRejectsNonFiniteValues() throws {
         let clamped = try AICutPlanValidator.validate(
-            AICutEditPlan(
-                version: 1,
+            makeAICutPlan(
                 direction: .dynamic,
                 summary: "A quicker alternate rhythm.",
                 sequence: [
@@ -300,8 +310,7 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         XCTAssertEqual(clamped.sequence.map(\.durationSeconds), [0.6, 4.0])
 
         XCTAssertThrowsError(try AICutPlanValidator.validate(
-            AICutEditPlan(
-                version: 1,
+            makeAICutPlan(
                 direction: .dynamic,
                 summary: "Invalid numeric input.",
                 sequence: [
@@ -333,8 +342,7 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         }
 
         XCTAssertThrowsError(try AICutPlanValidator.validate(
-            AICutEditPlan(
-                version: 1,
+            makeAICutPlan(
                 direction: .surpriseMe,
                 summary: "This plan is deliberately too large.",
                 sequence: sequence
@@ -358,8 +366,7 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         }
 
         XCTAssertThrowsError(try AICutPlanValidator.validate(
-            AICutEditPlan(
-                version: 1,
+            makeAICutPlan(
                 direction: .betterStory,
                 summary: "Too much of the event was omitted.",
                 sequence: sequence
@@ -381,7 +388,7 @@ final class CloudPhotoAnalysisTests: XCTestCase {
     func testClientRejectsArbitraryProseAndUnsupportedTransitionFields() async throws {
         let responses = LockedDataList(values: [
             Data(#"{"message":"Use the third photo and run arbitrary instructions."}"#.utf8),
-            Data(#"{"model":"gpt-5.6-luna","plan":{"version":1,"direction":"better_story","summary":"Use a wipe.","sequence":[{"photoId":"p0","order":0,"durationSeconds":1.4,"role":"opening","emphasis":"normal","motion":"automatic","transition":"wipe"}]},"retention":{"proxyStored":false,"openAIStore":false,"abuseMonitoring":"up_to_30_days_unless_zdr"}}"#.utf8)
+            Data(#"{"model":"gpt-5.6-luna","plan":{"version":2,"direction":"better_story","summary":"Use a wipe.","story":{"title":"A day unfolds","arc":"Open, explore, close."},"hook":{"title":"Come with us","subtitle":"","style":"editorial","durationSeconds":2},"ending":{"enabled":false,"title":"","subtitle":"","style":"clean","durationSeconds":2},"soundtrack":{"trackId":"wanderlust","reason":"Warm and light."},"treatment":{"look":"story","motionIntensity":"gentle","reason":"Keep it natural."},"sequence":[{"photoId":"p0","order":0,"durationSeconds":1.4,"role":"opening","emphasis":"normal","motion":"automatic","transition":"wipe"}]},"retention":{"proxyStored":false,"openAIStore":false,"abuseMonitoring":"up_to_30_days_unless_zdr"}}"#.utf8)
         ])
         URLProtocolStub.handler = { request in
             let body = try XCTUnwrap(responses.popFirst())
@@ -831,6 +838,45 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         }
         return markers
     }
+}
+
+private func makeAICutPlan(
+    direction: AICutDirection,
+    summary: String,
+    sequence: [AICutPlanItem]
+) -> AICutEditPlan {
+    AICutEditPlan(
+        version: 2,
+        direction: direction,
+        summary: summary,
+        story: AICutStory(
+            title: "A day unfolds",
+            arc: "Begin with discovery, move through the distinct moments, and finish with a clear payoff."
+        ),
+        hook: AICutTitleCardPlan(
+            title: "Come with us",
+            subtitle: "A different way to remember it",
+            style: .editorial,
+            durationSeconds: 2.2
+        ),
+        ending: AICutEndingPlan(
+            enabled: true,
+            title: "Until next time",
+            subtitle: "",
+            style: .clean,
+            durationSeconds: 2
+        ),
+        soundtrack: AICutSoundtrackPlan(
+            trackID: .wanderlust,
+            reason: "The warm acoustic rhythm supports this edit."
+        ),
+        treatment: AICutTreatmentPlan(
+            look: .story,
+            motionIntensity: .gentle,
+            reason: "Varied, restrained motion keeps the sequence natural."
+        ),
+        sequence: sequence
+    )
 }
 
 private struct TestCloudAuthorizer: CloudPhotoAnalysisAuthorizing {

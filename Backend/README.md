@@ -21,7 +21,7 @@ The Worker also retains `Authorization: Bearer <development-token>` for local/pr
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "direction": "better_story",
   "photos": [
     {
@@ -39,9 +39,35 @@ Success:
 {
   "model": "gpt-5.6-luna",
   "plan": {
-    "version": 1,
+    "version": 2,
     "direction": "better_story",
     "summary": "A concise arc opening wide and ending on a shared moment.",
+    "story": {
+      "title": "From discovery to afterglow",
+      "arc": "Open with wonder, move closer to the people, and finish on a warm shared moment."
+    },
+    "hook": {
+      "title": "Stay for this part",
+      "subtitle": "The moments between the landmarks",
+      "style": "editorial",
+      "durationSeconds": 2.2
+    },
+    "ending": {
+      "enabled": true,
+      "title": "Worth the long way home",
+      "subtitle": "Until next time",
+      "style": "clean",
+      "durationSeconds": 2.0
+    },
+    "soundtrack": {
+      "trackId": "long-way-home",
+      "reason": "The nostalgic arrangement supports the reflective ending."
+    },
+    "treatment": {
+      "look": "journal",
+      "motionIntensity": "gentle",
+      "reason": "Tactile framing and restrained movement keep the memories natural."
+    },
     "sequence": [{
       "photoId": "p0",
       "order": 0,
@@ -59,7 +85,7 @@ Success:
 }
 ```
 
-Supported directions are `better_story`, `dynamic`, `calm`, `people`, and `surprise_me`. `localSelection` is either `first_cut` or `more_photos`; it is an advisory local-editing hint, not a quality verdict. The Worker temporarily defaults the field to `first_cut` for compatibility with earlier TestFlight builds. A sequence may use each supplied temporary ID at most once. The Worker canonicalizes playback order and duplicate model selections before returning the plan; durations must be 0.6–4.0 seconds, and role, emphasis, and motion are fixed enums understood by the local renderer. Omitted previews are simply not included in the AI candidate. The iOS app validates the complete plan again and maps the temporary IDs locally; no model decision deletes or modifies an original.
+Supported directions are `better_story`, `dynamic`, `calm`, `people`, and `surprise_me`. `localSelection` is either `first_cut` or `more_photos`; it is an advisory local-editing hint, not a quality verdict. The Worker temporarily defaults the field to `first_cut` and accepts request version `1` for compatibility with earlier TestFlight builds. Version `2` adds a story arc, editable opening/ending copy, one supported bundled soundtrack, and an editable look/motion treatment. It can choose only `wanderlust`, `simplicity`, `castles`, or `long-way-home`; music is shipped with the app rather than streamed or generated. A sequence may use each supplied temporary ID at most once. The Worker canonicalizes playback order and duplicate model selections before returning the plan; durations must be 0.6–4.0 seconds, and role, emphasis, and motion are fixed enums understood by the local renderer. Omitted previews are simply not included in the AI candidate. The iOS app validates the complete plan again and maps the temporary IDs locally; no model decision deletes or modifies an original.
 
 Errors use a stable, sanitized shape and never include an upstream response body:
 
@@ -69,7 +95,7 @@ Errors use a stable, sanitized shape and never include an upstream response body
 
 ## Enforced limits
 
-- Version `1`, one supported direction, and 1–36 photos per request.
+- Version `1` (legacy sequence) or `2` (director recommendations), one supported direction, and 1–36 photos per request.
 - 6,500,000-byte maximum JSON body, enforced while streaming as well as by `Content-Length`.
 - 128 KiB decoded JPEG maximum per photo and 4,500,000 bytes decoded maximum per batch.
 - 1024 × 1024 maximum dimensions and 1,048,576 maximum pixels per photo.

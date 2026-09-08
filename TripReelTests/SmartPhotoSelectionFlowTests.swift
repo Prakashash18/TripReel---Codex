@@ -55,8 +55,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         let firstIDs = try XCTUnwrap(model.firstCutSnapshot).keptPhotos.map(\.id)
 
         model.openAICutDirections()
-        XCTAssertNil(model.selectedAICutDirection)
-        model.continueWithAICutDirection()
+        XCTAssertEqual(model.selectedAICutDirection, .surpriseMe)
         XCTAssertFalse(model.isCloudAnalysisConsentPresented)
         model.selectAICutDirection(.dynamic)
         XCTAssertEqual(model.screen, .aiDirection)
@@ -81,6 +80,12 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         XCTAssertEqual(thumbnailsAfterConsent, ["asset-0", "asset-1", "asset-0", "asset-1"])
         XCTAssertEqual(model.firstCutSnapshot?.keptPhotos.map(\.id), firstIDs)
         XCTAssertEqual(model.aiCutSnapshot?.keptPhotos.map(\.id), Array(firstIDs.reversed()))
+        XCTAssertEqual(model.aiCutSnapshot?.selectedTrackID, "simplicity")
+        XCTAssertEqual(model.aiCutSnapshot?.montageLook, .journal)
+        XCTAssertEqual(model.aiCutSnapshot?.motionIntensity, .expressive)
+        XCTAssertEqual(model.aiCutSnapshot?.titleDrafts[.opening]?.title, "A different angle")
+        XCTAssertTrue(model.aiCutSnapshot?.titleCards.contains(.ending) == true)
+        XCTAssertEqual(model.aiCutRecommendations.count, 4)
 
         model.useAICut()
         XCTAssertEqual(model.selectedCutSource, .aiCut)
@@ -538,9 +543,35 @@ private actor CloudAnalysisSpy: CloudPhotoAnalysisServing {
         localSelections = photos.map(\.localSelection)
         if fails { throw CloudPhotoAnalysisError.invalidResponse }
         return AICutEditPlan(
-            version: 1,
+            version: 2,
             direction: direction,
             summary: "A distinct alternative using only the selected previews.",
+            story: AICutStory(
+                title: "People make the moment",
+                arc: "Open with a strong shared moment, vary the details, and resolve on a warm final frame."
+            ),
+            hook: AICutTitleCardPlan(
+                title: "A different angle",
+                subtitle: "The moments between the moments",
+                style: .bold,
+                durationSeconds: 2.2
+            ),
+            ending: AICutEndingPlan(
+                enabled: true,
+                title: "Worth another look",
+                subtitle: "",
+                style: .clean,
+                durationSeconds: 2
+            ),
+            soundtrack: AICutSoundtrackPlan(
+                trackID: .simplicity,
+                reason: "A bright acoustic pulse supports the people-led edit."
+            ),
+            treatment: AICutTreatmentPlan(
+                look: .journal,
+                motionIntensity: .expressive,
+                reason: "Tactile frames and varied movement separate similar settings."
+            ),
             sequence: photos.reversed().enumerated().map { index, photo in
                 AICutPlanItem(
                     photoID: photo.id,

@@ -38,6 +38,24 @@ Safety and privacy rules:
 - Do not describe pixel edits, face changes, generated media, code, file paths, or AVFoundation instructions.
 - Return only the strict structured edit-plan schema.`;
 
+const DIRECTOR_INSTRUCTIONS = `
+
+For version 2, act as a reel director, not only a photo ranker:
+- Build a visible hook, development, and payoff. Explain that arc concretely in story without claiming facts you cannot see.
+- Write a short opening hook of 2 to 7 words. It should create curiosity or feeling without clickbait.
+- A subtitle may add context, but it may also be empty. Never copy private text visible in an image.
+- Add a closing card only when it gives the sequence a satisfying payoff. Otherwise set enabled to false and use empty title text.
+- Recommend exactly one bundled royalty-free soundtrack based on the visible emotional rhythm:
+  wanderlust = folksy, warm, carefree;
+  simplicity = bright, acoustic, uplifting;
+  castles = dreamy, gentle, urban;
+  long-way-home = nostalgic piano and strings.
+- Recommend a treatment: story balances formats, cinema is quiet and spacious, journal feels tactile and personal, clean is minimal and direct.
+- Vary shot scale, subject, duration, and motion so adjacent images feel intentionally different. Never repeat the same explicit motion more than twice in a row.
+- Use highlights sparingly for true hero moments. Let details and bridges breathe between people or scenery anchors.
+- The recommendations must be immediately usable and editable; do not suggest unavailable tracks, fonts, transitions, effects, or generated media.
+- Do not identify a person, infer a relationship, name a place, or state an event from uncertain visual evidence.`;
+
 export class ServiceProblem extends Error {
   readonly status: number;
   readonly code: string;
@@ -90,10 +108,13 @@ export function buildOpenAIRequest(
 ): Record<string, unknown> {
   const ids = payload.photos.map((photo) => photo.id);
   const minimumMoments = minimumSequenceCount(payload.photos.length, payload.direction);
+  const directorRequest = payload.version === 2
+    ? " Also direct the story arc, opening hook, optional ending, bundled soundtrack, visual look, and motion intensity."
+    : "";
   const content: Array<Record<string, unknown>> = [
     {
       type: "input_text",
-      text: `Create one ${payload.direction} travel-film edit plan from these ${payload.photos.length} previews. Keep at least ${minimumMoments} materially distinct moments, use more when they add value, and use temporary IDs exactly as provided.`,
+      text: `Create one version ${payload.version} ${payload.direction} travel-film edit plan from these ${payload.photos.length} previews. Keep at least ${minimumMoments} materially distinct moments, use more when they add value, and use temporary IDs exactly as provided.${directorRequest}`,
     },
   ];
 
@@ -118,14 +139,14 @@ export function buildOpenAIRequest(
     store: false,
     prompt_cache_options: { mode: "explicit" },
     max_output_tokens: 4_000,
-    instructions: INSTRUCTIONS,
+    instructions: payload.version === 2 ? INSTRUCTIONS + DIRECTOR_INSTRUCTIONS : INSTRUCTIONS,
     input: [{ role: "user", content }],
     text: {
       format: {
         type: "json_schema",
         name: "tripreel_ai_edit_plan",
         strict: true,
-        schema: buildAIEditPlanSchema(ids, payload.direction),
+        schema: buildAIEditPlanSchema(ids, payload.direction, payload.version),
       },
     },
   };
@@ -338,7 +359,12 @@ export async function analyzeWithOpenAI(
         "structured_output_not_json",
       );
     }
-    const result = parseAIEditPlan(candidate, payload.photos.map((photo) => photo.id), payload.direction);
+    const result = parseAIEditPlan(
+      candidate,
+      payload.photos.map((photo) => photo.id),
+      payload.direction,
+      payload.version,
+    );
     if (result === null) {
       throw new ServiceProblem(
         502,

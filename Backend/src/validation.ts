@@ -2,9 +2,11 @@ import {
   AI_DIRECTIONS,
   LIMITS,
   LOCAL_SELECTIONS,
+  REQUEST_VERSIONS,
   type AICutDirection,
   type LocalSelection,
   type PhotoInput,
+  type RequestVersion,
   type ValidatedPayload,
 } from "./contract.ts";
 
@@ -257,7 +259,8 @@ export function validatePayload(value: unknown): ValidatedPayload {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ["version", "direction", "photos"]) ||
-    value.version !== 1 ||
+    typeof value.version !== "number" ||
+    !REQUEST_VERSIONS.includes(value.version as RequestVersion) ||
     typeof value.direction !== "string" ||
     !AI_DIRECTIONS.includes(value.direction as AICutDirection) ||
     !Array.isArray(value.photos)
@@ -352,7 +355,7 @@ export function validatePayload(value: unknown): ValidatedPayload {
   }
 
   return {
-    version: 1,
+    version: value.version as RequestVersion,
     direction: value.direction as AICutDirection,
     photos,
   };

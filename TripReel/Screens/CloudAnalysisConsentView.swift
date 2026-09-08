@@ -86,7 +86,7 @@ struct CloudAnalysisConsentView: View {
                 .tracking(-0.4)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("To direct another version, TripReel will send selected reduced photo previews through TripReel's secure service to OpenAI. Nothing leaves this iPhone until you continue.")
+            Text("To direct another version, TripReel will send selected reduced photo previews through TripReel's secure service to OpenAI’s GPT-5.6 Luna. Nothing leaves this iPhone until you continue.")
                 .font(TR.ui(15))
                 .foregroundStyle(.white.opacity(0.76))
                 .lineSpacing(5)
@@ -120,9 +120,9 @@ struct CloudAnalysisConsentView: View {
                 symbol: "checkmark",
                 tint: TR.keep,
                 items: [
-                    "Choose stronger moments",
-                    "Rearrange the story",
-                    "Suggest pacing and motion"
+                    "Shape the story and moments",
+                    "Write editable title hooks",
+                    "Pick bundled music and a look"
                 ]
             )
 
@@ -132,8 +132,8 @@ struct CloudAnalysisConsentView: View {
                 tint: TR.cut,
                 items: [
                     "Change originals",
-                    "Replace faces",
-                    "Invent trip photos"
+                    "Identify people or places",
+                    "Invent photos or external music"
                 ]
             )
         }
@@ -176,8 +176,8 @@ struct CloudAnalysisConsentView: View {
             Divider().overlay(.white.opacity(0.10)).padding(.leading, 56)
             summaryRow(
                 symbol: "wand.and.stars",
-                title: "Editing decisions return",
-                detail: "TripReel maps temporary IDs and builds the alternative locally."
+                title: "Editable recommendations return",
+                detail: "Story, titles, bundled music, look and photo decisions are applied locally."
             )
             Divider().overlay(.white.opacity(0.10)).padding(.leading, 56)
             summaryRow(
@@ -212,7 +212,7 @@ struct CloudAnalysisConsentView: View {
             VStack(alignment: .leading, spacing: 12) {
                 detailPoint(
                     title: "External processor",
-                    body: "Selected previews are sent to an OpenAI image-capable model through TripReel's Cloudflare service."
+                    body: "Selected previews are sent to OpenAI’s GPT-5.6 Luna through TripReel's Cloudflare service."
                 )
                 detailPoint(
                     title: "OpenAI retention",

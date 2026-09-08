@@ -151,12 +151,12 @@ struct AICutDirectionScreen: View {
                 VStack(alignment: .leading, spacing: 22) {
                     ScreenHeading(
                         eyebrow: "AI Remix · no upload yet",
-                        title: "Choose a direction"
+                        title: "Choose a reel recipe"
                     )
                     .padding(.leading, 48)
                     .trEntrance(0, distance: 8)
 
-                    Text("Pick the feeling for a different cut. Your First Cut stays exactly as it is.")
+                    Text("Start with TripReel’s on-device recommendation or choose a different feeling. Your First Cut stays exactly as it is.")
                         .font(TR.ui(14))
                         .foregroundStyle(.white.opacity(0.64))
                         .lineSpacing(4)
@@ -167,12 +167,20 @@ struct AICutDirectionScreen: View {
                         ForEach(AICutDirection.allCases) { direction in
                             AICutDirectionCard(
                                 direction: direction,
-                                selected: model.selectedAICutDirection == direction
+                                selected: model.selectedAICutDirection == direction,
+                                recommended: model.recommendedAICutDirection == direction
                             ) {
                                 model.selectAICutDirection(direction)
                             }
                         }
                     }
+
+                    Label(model.recommendedAICutReason, systemImage: "iphone.and.arrow.forward")
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.52))
+                        .lineSpacing(3)
+                        .padding(.horizontal, 4)
+                        .accessibilityIdentifier("ai-direction-reason")
 
                     Button("Continue") {
                         model.continueWithAICutDirection()
@@ -202,6 +210,7 @@ private struct AICutDirectionCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let direction: AICutDirection
     let selected: Bool
+    let recommended: Bool
     let action: () -> Void
     @State private var animates = false
 
@@ -212,6 +221,12 @@ private struct AICutDirectionCard: View {
                     .frame(width: 78, height: 54)
 
                 VStack(alignment: .leading, spacing: 4) {
+                    if recommended {
+                        Text("RECOMMENDED")
+                            .font(TR.mono(9, weight: .semibold))
+                            .tracking(1.1)
+                            .foregroundStyle(TR.keep)
+                    }
                     Text(direction.title)
                         .font(TR.ui(15, weight: .semibold))
                     Text(direction.detail)
@@ -232,7 +247,11 @@ private struct AICutDirectionCard: View {
         }
         .buttonStyle(TactileButtonStyle())
         .accessibilityLabel("\(direction.title). \(direction.detail)")
-        .accessibilityValue(selected ? "Selected" : "Not selected")
+        .accessibilityValue(
+            [recommended ? "Recommended" : nil, selected ? "Selected" : "Not selected"]
+                .compactMap { $0 }
+                .joined(separator: ", ")
+        )
         .accessibilityIdentifier("ai-direction-\(direction.rawValue)")
         .onAppear {
             guard !reduceMotion else { return }
@@ -402,9 +421,18 @@ struct AICutComparisonScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var previewSource: TripCutSource = .aiCut
+    @StateObject private var soundtrack = LocalSoundtrackPlayer()
 
     private var snapshot: TripEditSnapshot? {
         model.editSnapshot(for: previewSource) ?? model.firstCutSnapshot
+    }
+
+    private var previewTrack: MusicTrack? {
+        model.musicTrack(withID: snapshot?.selectedTrackID)
+    }
+
+    private var audioTaskID: String {
+        "\(previewSource.rawValue)-\(previewTrack?.id ?? "none")"
     }
 
     var body: some View {
@@ -415,15 +443,32 @@ struct AICutComparisonScreen: View {
                 VStack(spacing: 20) {
                     VStack(spacing: 6) {
                         MetadataText(text: "Your AI Cut is ready", color: TR.accent)
-                        Text("A different way to tell it.")
+                        Text("Your AI-directed reel.")
                             .font(TR.display(35))
-                        Text("Both cuts use only your photos. Your First Cut is still here.")
+                        Text("Preview the applied story, titles, music and visual treatment. Your First Cut is still here.")
                             .font(TR.ui(12))
                             .foregroundStyle(.white.opacity(0.55))
                             .multilineTextAlignment(.center)
                     }
                     .padding(.horizontal, 28)
                     .trEntrance(0, distance: 8)
+                    .overlay(alignment: .topTrailing) {
+                        Menu {
+                            Button("Try another AI direction", systemImage: "arrow.triangle.2.circlepath") {
+                                model.tryAnotherAICut()
+                            }
+                            Button("Keep First Cut", systemImage: "checkmark.shield") {
+                                model.keepFirstCut()
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.system(size: 22, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.72))
+                                .frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("More cut options")
+                        .accessibilityIdentifier("ai-comparison-more")
+                    }
 
                     if let snapshot {
                         MontageView(
@@ -452,6 +497,33 @@ struct AICutComparisonScreen: View {
                     .background(.black.opacity(0.22))
                     .clipShape(Capsule())
 
+                    if let previewTrack {
+                        Button {
+                            soundtrack.toggle(track: previewTrack)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: soundtrack.isPlaying ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                                    .foregroundStyle(TR.accent)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(previewSource == .aiCut ? "AI music · \(previewTrack.name)" : previewTrack.name)
+                                        .font(TR.ui(12, weight: .semibold))
+                                    Text(soundtrack.isPlaying ? "Tap to pause" : "Tap to hear this cut")
+                                        .font(TR.ui(10))
+                                        .foregroundStyle(.white.opacity(0.48))
+                                }
+                                Spacer()
+                                Image(systemName: "waveform")
+                                    .foregroundStyle(.white.opacity(0.35))
+                            }
+                            .foregroundStyle(TR.cream)
+                            .padding(.horizontal, 15)
+                            .padding(.vertical, 11)
+                            .glassCard(cornerRadius: 16)
+                        }
+                        .buttonStyle(TactileButtonStyle())
+                        .accessibilityIdentifier("ai-comparison-audio")
+                    }
+
                     if previewSource == .aiCut, let summary = model.aiCutSummary {
                         Text(summary)
                             .font(TR.ui(13))
@@ -462,8 +534,19 @@ struct AICutComparisonScreen: View {
                             .transition(.opacity)
                     }
 
+                    if previewSource == .aiCut, !model.aiCutRecommendations.isEmpty {
+                        AICutRecommendationsCard(recommendations: model.aiCutRecommendations)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+
                     VStack(spacing: 11) {
-                        Button("Use AI Cut") { model.useAICut() }
+                        Button(previewSource == .aiCut ? "Use AI Cut" : "Keep First Cut") {
+                            if previewSource == .aiCut {
+                                model.useAICut()
+                            } else {
+                                model.keepFirstCut()
+                            }
+                        }
                             .buttonStyle(CreamButtonStyle())
                             .accessibilityIdentifier("use-ai-cut-button")
 
@@ -471,15 +554,6 @@ struct AICutComparisonScreen: View {
                             .buttonStyle(GlassButtonStyle())
                             .accessibilityIdentifier("edit-compared-cut-button")
 
-                        HStack {
-                            Button("Keep First Cut") { model.keepFirstCut() }
-                            Spacer()
-                            Button("Try Another AI Cut") { model.tryAnotherAICut() }
-                        }
-                        .font(TR.ui(13, weight: .semibold))
-                        .foregroundStyle(TR.accent)
-                        .padding(.horizontal, 8)
-                        .padding(.top, 4)
                     }
                 }
                 .padding(.horizontal, 24)
@@ -488,6 +562,10 @@ struct AICutComparisonScreen: View {
             }
         }
         .animation(reduceMotion ? nil : TRMotion.selection, value: previewSource)
+        .task(id: audioTaskID) {
+            soundtrack.play(track: previewTrack)
+        }
+        .onDisappear { soundtrack.stop() }
         .accessibilityIdentifier("ai-comparison-screen")
     }
 
@@ -510,6 +588,60 @@ struct AICutComparisonScreen: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("compare-\(source.rawValue)")
+    }
+}
+
+private struct AICutRecommendationsCard: View {
+    let recommendations: [AICutRecommendation]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            MetadataText(text: "AI director’s picks", color: TR.accent)
+                .padding(.bottom, 5)
+
+            ForEach(recommendations) { recommendation in
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: recommendation.kind.symbol)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(TR.accent)
+                        .frame(width: 28, height: 28)
+                        .background(TR.accent.opacity(0.10))
+                        .clipShape(Circle())
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(recommendation.title)
+                            .font(TR.ui(13, weight: .semibold))
+                            .foregroundStyle(TR.cream)
+                        Text(recommendation.detail)
+                            .font(TR.ui(11))
+                            .foregroundStyle(.white.opacity(0.52))
+                            .lineSpacing(2)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 10)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("ai-recommendation-\(recommendation.kind.rawValue)")
+
+                if recommendation.id != recommendations.last?.id {
+                    Divider().overlay(.white.opacity(0.08)).padding(.leading, 40)
+                }
+            }
+        }
+        .padding(16)
+        .glassCard(cornerRadius: 20)
+        .accessibilityIdentifier("ai-recommendations-card")
+    }
+}
+
+private extension AICutRecommendation.Kind {
+    var symbol: String {
+        switch self {
+        case .story: "point.3.connected.trianglepath.dotted"
+        case .titles: "textformat"
+        case .music: "music.note"
+        case .treatment: "wand.and.stars"
+        }
     }
 }
 
