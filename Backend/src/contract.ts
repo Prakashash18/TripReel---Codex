@@ -137,11 +137,14 @@ export function parseAIEditPlan(
     if (!isRecord(item) || !hasExactKeys(item, ITEM_KEYS)) {
       return null;
     }
+    const itemOrder = item.order;
     if (
       typeof item.photoId !== "string" ||
       !requested.has(item.photoId) ||
-      used.has(item.photoId) ||
-      item.order !== index ||
+      typeof itemOrder !== "number" ||
+      !Number.isInteger(itemOrder) ||
+      itemOrder < 0 ||
+      itemOrder >= expectedIds.length ||
       typeof item.durationSeconds !== "number" ||
       !Number.isFinite(item.durationSeconds) ||
       item.durationSeconds < 0.6 ||
@@ -152,9 +155,17 @@ export function parseAIEditPlan(
     ) {
       return null;
     }
+    if (used.has(item.photoId)) {
+      continue;
+    }
     used.add(item.photoId);
-    sequence.push(item as unknown as AIEditPlanItem);
+    sequence.push({
+      ...(item as unknown as AIEditPlanItem),
+      order: sequence.length,
+    });
   }
+
+  if (sequence.length === 0) return null;
 
   return {
     version: 1,

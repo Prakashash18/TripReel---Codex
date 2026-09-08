@@ -137,7 +137,18 @@ test("strictly validates model plans and rejects unknown, duplicate, or arbitrar
   assert.ok(parseAIEditPlan(plan(["p0", "p1"]), ["p0", "p1"], "better_story"));
   assert.equal(parseAIEditPlan(plan(["unknown"]), ["p0"], "better_story"), null);
   const duplicate = plan(["p0", "p0"]);
-  assert.equal(parseAIEditPlan(duplicate, ["p0", "p1"], "better_story"), null);
+  const deduplicated = parseAIEditPlan(duplicate, ["p0", "p1"], "better_story");
+  assert.deepEqual(deduplicated.sequence.map(({ photoId, order }) => ({ photoId, order })), [
+    { photoId: "p0", order: 0 },
+  ]);
+  const reordered = plan(["p0", "p1"]);
+  reordered.sequence[0].order = 1;
+  reordered.sequence[1].order = 0;
+  const canonical = parseAIEditPlan(reordered, ["p0", "p1"], "better_story");
+  assert.deepEqual(canonical.sequence.map(({ photoId, order }) => ({ photoId, order })), [
+    { photoId: "p0", order: 0 },
+    { photoId: "p1", order: 1 },
+  ]);
   const invalidOrder = plan(["p0", "p1"]);
   invalidOrder.sequence[1].order = 7;
   assert.equal(parseAIEditPlan(invalidOrder, ["p0", "p1"], "better_story"), null);
@@ -161,7 +172,7 @@ test("calls Responses API as a travel-film editor with privacy settings", async 
   assert.equal(response.headers.get("cache-control"), "no-store, max-age=0");
   assert.equal(outboundUrl, "https://api.openai.com/v1/responses");
   assert.equal(outboundInit.cache, "no-store");
-  assert.equal(outboundInit.redirect, "error");
+  assert.equal(outboundInit.redirect, "manual");
   const upstream = JSON.parse(outboundInit.body);
   assert.equal(upstream.model, DEFAULT_MODEL);
   assert.deepEqual(upstream.reasoning, { effort: "none" });
@@ -219,13 +230,80 @@ test("rejects malformed upstream plans and never relays upstream error bodies", 
   assert.equal((await malformed.json()).error.code, "invalid_upstream_response");
 
   const sentinel = "PRIVATE_IMAGE_OR_PROMPT_MUST_NOT_ESCAPE";
+  const dataPoints = [];
   const failed = await handleRequest(
     analyzeRequest(payload()),
-    ENV,
+    {
+      ...ENV,
+      APP_ATTEST_DIAGNOSTICS: {
+        writeDataPoint(dataPoint) {
+          dataPoints.push(dataPoint);
+        },
+      },
+    },
     async () => new Response(JSON.stringify({ error: sentinel }), { status: 400 }),
   );
   assert.equal(failed.status, 502);
   assert.doesNotMatch(await failed.text(), new RegExp(sentinel));
+  assert.deepEqual(dataPoints[0].blobs, [
+    "openai",
+    "upstream_error",
+    "responses_api",
+    "ServiceProblem",
+    "provider_status_400",
+  ]);
+  assert.equal(JSON.stringify(dataPoints).includes(sentinel), false);
+});
+
+test("records a bounded sanitized provider exception without request content", async () => {
+  const dataPoints = [];
+  const privateToken = "private-provider-token-abcdefghijklmnopqrstuvwxyz";
+  const response = await handleRequest(
+    analyzeRequest(payload()),
+    {
+      ...ENV,
+      APP_ATTEST_DIAGNOSTICS: {
+        writeDataPoint(dataPoint) {
+          dataPoints.push(dataPoint);
+        },
+      },
+    },
+    async () => {
+      throw new TypeError(`Network failed with ${privateToken}`);
+    },
+  );
+
+  assert.equal(response.status, 502);
+  assert.equal((await response.json()).error.code, "upstream_unavailable");
+  assert.equal(dataPoints.length, 1);
+  assert.deepEqual(dataPoints[0].blobs.slice(0, 4), [
+    "openai",
+    "upstream_unavailable",
+    "responses_api",
+    "ServiceProblem",
+  ]);
+  assert.match(dataPoints[0].blobs[4], /^TypeError: Network failed with \[redacted\]$/u);
+  assert.equal(JSON.stringify(dataPoints).includes(privateToken), false);
+});
+
+test("never follows an OpenAI redirect with the image-bearing request", async () => {
+  let fetchCalls = 0;
+  const response = await handleRequest(
+    analyzeRequest(payload()),
+    ENV,
+    async (_url, init) => {
+      fetchCalls += 1;
+      assert.equal(init.redirect, "manual");
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://redirect.example/collect" },
+      });
+    },
+  );
+
+  assert.equal(fetchCalls, 1);
+  assert.equal(response.status, 502);
+  assert.equal((await response.json()).error.code, "upstream_error");
 });
 
 test("CORS remains off by default and exact-origin when configured", async () => {

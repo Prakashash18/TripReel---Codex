@@ -510,6 +510,28 @@ function diagnosticForRPC(stage: string, error: unknown): AppAttestDiagnostic {
   };
 }
 
+function recordOpenAIDiagnostic(env: Env, error: ServiceProblem): void {
+  if (!error.code.startsWith("upstream_") && error.code !== "invalid_upstream_response") {
+    return;
+  }
+  try {
+    env.APP_ATTEST_DIAGNOSTICS?.writeDataPoint({
+      blobs: [
+        "openai",
+        error.code,
+        "responses_api",
+        error.name,
+        error.providerStatus !== undefined
+          ? `provider_status_${error.providerStatus}`
+          : error.providerDiagnostic ?? "no_provider_status",
+      ],
+      doubles: [Date.now()],
+    });
+  } catch {
+    // Operational telemetry must never alter the analysis response.
+  }
+}
+
 async function handleChallenge(
   request: Request,
   env: Env,
@@ -614,18 +636,27 @@ async function handleRegistration(
 async function performAnalysis(
   payload: ValidatedPayload,
   request: Request,
+  env: Env,
   configuration: BaseConfiguration,
   fetcher: Fetcher,
   origin?: string,
 ): Promise<Response> {
-  const analysis = await analyzeWithOpenAI(
-    payload,
-    configuration.apiKey,
-    configuration.model,
-    configuration.openAITimeoutMs,
-    fetcher,
-    request.signal,
-  );
+  let analysis: Awaited<ReturnType<typeof analyzeWithOpenAI>>;
+  try {
+    analysis = await analyzeWithOpenAI(
+      payload,
+      configuration.apiKey,
+      configuration.model,
+      configuration.openAITimeoutMs,
+      fetcher,
+      request.signal,
+    );
+  } catch (error) {
+    if (error instanceof ServiceProblem) {
+      recordOpenAIDiagnostic(env, error);
+    }
+    throw error;
+  }
   const body: PublicAnalysisResponse = {
     model: configuration.model,
     plan: analysis,
@@ -648,7 +679,7 @@ async function handleAnalyze(
     (await constantTimeTokenMatch(authorization, configuration.authToken))
   ) {
     const { value } = await readJSONWithBytes(request, LIMITS.maxBodyBytes);
-    return performAnalysis(validatePayload(value), request, configuration, fetcher, origin);
+    return performAnalysis(validatePayload(value), request, env, configuration, fetcher, origin);
   }
 
   if (authorization?.startsWith(APP_ATTEST_AUTH_PREFIX) !== true) {
@@ -709,7 +740,7 @@ async function handleAnalyze(
   if (failure !== null) {
     return failure;
   }
-  return performAnalysis(payload, request, configuration, fetcher, origin);
+  return performAnalysis(payload, request, env, configuration, fetcher, origin);
 }
 
 export async function handleRequest(request: Request, env: Env, fetcher: Fetcher = fetch): Promise<Response> {
