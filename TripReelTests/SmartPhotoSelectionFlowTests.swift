@@ -34,7 +34,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         model.go(.trips)
     }
 
-    func testDirectionDoesNotUploadAndAffirmativeConsentCreatesSeparateAICut() async throws {
+    func testConsentComesBeforeDirectionAndCreatesSeparateAICut() async throws {
         let preferences = makePreferences()
         defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
         let cloud = CloudAnalysisSpy()
@@ -53,25 +53,30 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         model.requestBuild(trip: trip)
         try await waitUntil { model.screen == .building }
         let firstIDs = try XCTUnwrap(model.firstCutSnapshot).keptPhotos.map(\.id)
+        model.go(.firstCutOptions)
 
         model.openAICutDirections()
         XCTAssertEqual(model.selectedAICutDirection, .surpriseMe)
-        XCTAssertFalse(model.isCloudAnalysisConsentPresented)
-        model.selectAICutDirection(.dynamic)
-        XCTAssertEqual(model.screen, .aiDirection)
+        XCTAssertTrue(model.isCloudAnalysisConsentPresented)
+        XCTAssertEqual(model.aiCutSelectedPhotoCount, 2)
+        XCTAssertFalse(model.aiCutCanCreate)
+        model.continueWithAICutDirection()
         let callsBeforeConsent = await cloud.observedCallCount()
         let thumbnailsBeforeConsent = await thumbnails.observedRequestedIDs()
         XCTAssertEqual(callsBeforeConsent, 0)
         XCTAssertEqual(thumbnailsBeforeConsent, ["asset-0", "asset-1"])
 
-        model.continueWithAICutDirection()
-        XCTAssertTrue(model.isCloudAnalysisConsentPresented)
+        model.useCloudEnhancement()
+        XCTAssertEqual(model.screen, .aiDirection)
+        XCTAssertFalse(model.isCloudAnalysisConsentPresented)
+        XCTAssertTrue(model.aiCutCanCreate)
         let callsOnConsent = await cloud.observedCallCount()
         let thumbnailsOnConsent = await thumbnails.observedRequestedIDs()
         XCTAssertEqual(callsOnConsent, 0)
         XCTAssertEqual(thumbnailsOnConsent, thumbnailsBeforeConsent)
 
-        model.useCloudEnhancement()
+        model.selectAICutDirection(.dynamic)
+        model.continueWithAICutDirection()
         try await waitUntil { model.screen == .aiComparison }
 
         let callsAfterConsent = await cloud.observedCallCount()
@@ -123,12 +128,13 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
 
         model.requestBuild(trip: makeTrip(count: 2))
         try await waitUntil { model.screen == .building }
+        model.go(.firstCutOptions)
         model.openAICutDirections()
-        model.selectAICutDirection(.calm)
-        model.continueWithAICutDirection()
+        XCTAssertTrue(model.isCloudAnalysisConsentPresented)
         model.keepAnalysisOnDevice()
 
         XCTAssertEqual(model.screen, .firstCutOptions)
+        XCTAssertFalse(model.isCloudAnalysisConsentPresented)
         let declinedCalls = await cloud.observedCallCount()
         XCTAssertEqual(declinedCalls, 0)
         XCTAssertNotNil(model.firstCutSnapshot)
@@ -152,13 +158,14 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         model.requestBuild(trip: makeTrip(count: 3))
         try await waitUntil { model.screen == .building }
         let first = try XCTUnwrap(model.firstCutSnapshot)
+        model.go(.firstCutOptions)
         model.openAICutDirections()
-        model.selectAICutDirection(.betterStory)
-        model.continueWithAICutDirection()
+        XCTAssertTrue(model.isCloudAnalysisConsentPresented)
         model.useCloudEnhancement()
 
-        XCTAssertEqual(model.screen, .aiProcessing)
-        XCTAssertNotNil(model.aiCutFailureMessage)
+        XCTAssertEqual(model.screen, .firstCutOptions)
+        XCTAssertTrue(model.isCloudAnalysisConsentPresented)
+        XCTAssertNil(model.aiCutFailureMessage)
         XCTAssertEqual(model.firstCutSnapshot, first)
         XCTAssertNil(model.aiCutSnapshot)
         let unavailableCalls = await cloud.observedCallCount()
@@ -182,10 +189,11 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         model.requestBuild(trip: makeTrip(count: 3))
         try await waitUntil { model.screen == .building }
         let first = try XCTUnwrap(model.firstCutSnapshot)
+        model.go(.firstCutOptions)
         model.openAICutDirections()
+        model.useCloudEnhancement()
         model.selectAICutDirection(.surpriseMe)
         model.continueWithAICutDirection()
-        model.useCloudEnhancement()
 
         try await waitUntil { model.aiCutFailureMessage != nil }
 
@@ -253,9 +261,9 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         XCTAssertEqual(Set(model.photos.map(\.id)), ["screen", "camera"])
 
         model.openAICutDirections()
+        model.useCloudEnhancement()
         model.selectAICutDirection(.people)
         model.continueWithAICutDirection()
-        model.useCloudEnhancement()
         try await waitUntil { model.screen == .aiComparison }
 
         let remixCalls = await cloud.observedCallCount()
@@ -287,9 +295,9 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         XCTAssertEqual(Set(try XCTUnwrap(model.firstCutSnapshot).keptPhotos.map(\.id)), ["asset-0", "asset-1"])
 
         model.openAICutDirections()
+        model.useCloudEnhancement()
         model.selectAICutDirection(.betterStory)
         model.continueWithAICutDirection()
-        model.useCloudEnhancement()
         try await waitUntil { model.screen == .aiComparison }
 
         let wireIDs = await cloud.observedWireIDs()
@@ -365,9 +373,9 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         XCTAssertEqual(morePhotoIDs.count, 10)
 
         model.openAICutDirections()
+        model.useCloudEnhancement()
         model.selectAICutDirection(.people)
         model.continueWithAICutDirection()
-        model.useCloudEnhancement()
         try await waitUntil { model.screen == .aiComparison }
 
         let localSelections = await cloud.observedLocalSelections()
@@ -380,6 +388,47 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         model.useAICut()
         XCTAssertNil(model.smartSelectionSummary)
         XCTAssertTrue(model.visibleExcludedPhotos.isEmpty)
+    }
+
+    func testUserChoosesExactPhotosSentToAIDirector() async throws {
+        let preferences = makePreferences()
+        defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
+        let cloud = CloudAnalysisSpy()
+        let thumbnails = ThumbnailStub()
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: StubPhotoLibraryForSelection(),
+            cloudPhotoAnalysis: cloud,
+            photoAnalysisThumbnails: thumbnails,
+            nativePhotoIntelligence: NativeIntelligenceStub(),
+            preferenceStore: preferences
+        )
+
+        model.requestBuild(trip: makeTrip(count: 6))
+        try await waitUntil { model.screen == .building }
+        model.go(.firstCutOptions)
+        model.openAICutDirections()
+        model.useCloudEnhancement()
+
+        XCTAssertEqual(model.screen, .aiDirection)
+        XCTAssertEqual(model.aiCutPhotoOptions.count, 6)
+        XCTAssertEqual(model.aiCutSelectedPhotoCount, 6)
+
+        model.clearAICutPhotoSelection()
+        model.toggleAICutPhotoSelection("asset-1")
+        model.toggleAICutPhotoSelection("asset-4")
+        XCTAssertEqual(model.selectedAICutPhotoIDs, ["asset-1", "asset-4"])
+
+        model.selectAICutDirection(.betterStory)
+        model.continueWithAICutDirection()
+        try await waitUntil { model.screen == .aiComparison }
+
+        let allRequests = await thumbnails.observedRequestedIDs()
+        let cloudCalls = await cloud.observedCallCount()
+        XCTAssertEqual(cloudCalls, 1)
+        XCTAssertEqual(Array(allRequests.suffix(2)), ["asset-1", "asset-4"])
+        XCTAssertEqual(model.aiCutSnapshot?.keptPhotos.map(\.id), ["asset-4", "asset-1"])
     }
 
     func testDeferredPhotosUsePositiveFollowUpAndCanBeCheckedAgain() async throws {

@@ -253,7 +253,17 @@ final class CloudPhotoAnalysisTests: XCTestCase {
             makeAICutPlan(
                 direction: .betterStory,
                 summary: "No duplicate frames.",
-                sequence: [valid, valid]
+                sequence: [
+                    valid,
+                    AICutPlanItem(
+                        photoID: "p0",
+                        order: 1,
+                        durationSeconds: 1.8,
+                        role: .detail,
+                        emphasis: .normal,
+                        motion: .automatic
+                    )
+                ]
             ),
             requestedIDs: ["p0", "p1"],
             direction: .betterStory

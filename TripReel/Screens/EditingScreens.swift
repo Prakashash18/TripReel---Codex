@@ -35,6 +35,7 @@ struct FirstWatchScreen: View {
                 .padding(.top, 4)
                 .padding(.horizontal, 62)
                 .trEntrance(0, distance: 7)
+                .accessibilityIdentifier("first-watch-screen")
 
                 Spacer()
 
@@ -66,7 +67,6 @@ struct FirstWatchScreen: View {
                 .trEntrance(1, distance: 12)
             }
         }
-        .accessibilityIdentifier("first-watch-screen")
     }
 }
 
@@ -84,6 +84,7 @@ struct FirstCutOptionsScreen: View {
                 )
                 .padding(.leading, 48)
                 .trEntrance(0, distance: 8)
+                .accessibilityIdentifier("first-cut-options-screen")
 
                 Text("Your original First Cut stays safe whichever route you choose.")
                     .font(TR.ui(14))
@@ -136,32 +137,33 @@ struct FirstCutOptionsScreen: View {
             .padding(.top, 12)
             .padding(.bottom, 28)
         }
-        .accessibilityIdentifier("first-cut-options-screen")
     }
 }
 
 struct AICutDirectionScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @State private var showsPhotoSelection = false
 
     var body: some View {
         ZStack {
             WarmBackground(variant: .export)
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 18) {
                     ScreenHeading(
-                        eyebrow: "AI Remix · no upload yet",
-                        title: "Choose a reel recipe"
+                        eyebrow: "AI Director · permission granted",
+                        title: "Choose photos & direction"
                     )
                     .padding(.leading, 48)
                     .trEntrance(0, distance: 8)
 
-                    Text("Start with TripReel’s on-device recommendation or choose a different feeling. Your First Cut stays exactly as it is.")
-                        .font(TR.ui(14))
-                        .foregroundStyle(.white.opacity(0.64))
-                        .lineSpacing(4)
-                        .padding(.horizontal, 2)
+                    AICutPhotoSelectionCard {
+                        showsPhotoSelection = true
+                    }
                         .trEntrance(1, distance: 8)
+
+                    MetadataText(text: "Reel recipe", color: .white.opacity(0.52))
+                        .padding(.top, 2)
 
                     LazyVStack(spacing: 11) {
                         ForEach(AICutDirection.allCases) { direction in
@@ -175,23 +177,16 @@ struct AICutDirectionScreen: View {
                         }
                     }
 
-                    Label(model.recommendedAICutReason, systemImage: "iphone.and.arrow.forward")
-                        .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.52))
-                        .lineSpacing(3)
-                        .padding(.horizontal, 4)
-                        .accessibilityIdentifier("ai-direction-reason")
-
-                    Button("Continue") {
+                    Button("Create AI cut") {
                         model.continueWithAICutDirection()
                     }
                     .buttonStyle(CreamButtonStyle())
-                    .disabled(model.selectedAICutDirection == nil)
-                    .opacity(model.selectedAICutDirection == nil ? 0.48 : 1)
-                    .accessibilityHint("Reviews what will be shared before anything leaves this iPhone")
+                    .disabled(!model.aiCutCanCreate)
+                    .opacity(model.aiCutCanCreate ? 1 : 0.48)
+                    .accessibilityHint("Sends only the selected reduced previews to OpenAI and creates another cut")
                     .accessibilityIdentifier("ai-direction-continue")
 
-                    Text("Selected previews are prepared only after you review and accept the next step.")
+                    Text("\(model.aiCutSelectedPhotoCount) small previews will be sent to OpenAI’s GPT-5.6 Luna.")
                         .font(TR.ui(11))
                         .foregroundStyle(.white.opacity(0.42))
                         .multilineTextAlignment(.center)
@@ -202,7 +197,224 @@ struct AICutDirectionScreen: View {
                 .padding(.bottom, 34)
             }
         }
+        .sheet(isPresented: $showsPhotoSelection) {
+            AICutPhotoSelectionSheet()
+                .environmentObject(model)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+                .presentationCornerRadius(26)
+                .presentationBackground(TR.sheet)
+        }
         .accessibilityIdentifier("ai-direction-screen")
+    }
+}
+
+private struct AICutPhotoSelectionCard: View {
+    @EnvironmentObject private var model: TripReelModel
+    let action: () -> Void
+
+    private var selectedPhotos: [ReelPhoto] {
+        model.aiCutPhotoOptions
+            .filter { model.selectedAICutPhotoIDs.contains($0.id) }
+            .prefix(3)
+            .map(\.photo)
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                ZStack {
+                    ForEach(Array(selectedPhotos.enumerated()), id: \.element.id) { index, photo in
+                        PhotoAssetView(source: photo.source)
+                            .frame(width: 46, height: 58)
+                            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .stroke(.white.opacity(0.22), lineWidth: 1)
+                            )
+                            .rotationEffect(.degrees(Double(index - 1) * 5))
+                            .offset(x: CGFloat(index - 1) * 14)
+                            .zIndex(Double(index))
+                    }
+                }
+                .frame(width: 72, height: 62)
+                .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Photos for AI")
+                        .font(TR.ui(15, weight: .semibold))
+                    Text("\(model.aiCutSelectedPhotoCount) selected · max \(model.aiCutPhotoSelectionLimit)")
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.56))
+                    Text("Only these previews are shared")
+                        .font(TR.ui(10, weight: .medium))
+                        .foregroundStyle(TR.keep.opacity(0.82))
+                }
+
+                Spacer(minLength: 4)
+
+                Text("Choose")
+                    .font(TR.ui(12, weight: .semibold))
+                    .foregroundStyle(TR.accent)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(TR.accent.opacity(0.75))
+            }
+            .foregroundStyle(TR.cream)
+            .padding(14)
+            .glassCard(cornerRadius: 18, highlighted: true)
+        }
+        .buttonStyle(TactileButtonStyle())
+        .accessibilityLabel("Photos for AI, \(model.aiCutSelectedPhotoCount) selected")
+        .accessibilityHint("Choose which reduced photo previews may be sent")
+        .accessibilityIdentifier("ai-photo-selection-card")
+    }
+}
+
+private struct AICutPhotoSelectionSheet: View {
+    @EnvironmentObject private var model: TripReelModel
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let columns = Array(
+        repeating: GridItem(.flexible(), spacing: 8),
+        count: 3
+    )
+
+    private var selectionIsFull: Bool {
+        model.aiCutSelectedPhotoCount >= model.aiCutPhotoSelectionLimit
+    }
+
+    var body: some View {
+        ZStack {
+            WarmBackground(variant: .cleanup)
+
+            VStack(spacing: 0) {
+                SheetHeader(title: "Choose photos") { dismiss() }
+                    .padding(.horizontal, 22)
+                    .padding(.top, 20)
+
+                HStack {
+                    Text("\(model.aiCutSelectedPhotoCount) of \(model.aiCutPhotoSelectionLimit) selected")
+                        .font(TR.ui(12, weight: .semibold))
+                        .foregroundStyle(selectionIsFull ? TR.accent : .white.opacity(0.64))
+
+                    Spacer()
+
+                    Button("Suggested") {
+                        withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                            model.selectSuggestedAICutPhotos()
+                        }
+                    }
+                    .accessibilityIdentifier("ai-photos-suggested")
+
+                    Button("Clear") {
+                        withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                            model.clearAICutPhotoSelection()
+                        }
+                    }
+                    .accessibilityIdentifier("ai-photos-clear")
+                }
+                .font(TR.ui(12, weight: .semibold))
+                .foregroundStyle(TR.accent)
+                .padding(.horizontal, 22)
+                .padding(.top, 13)
+                .padding(.bottom, 12)
+
+                ScrollView(showsIndicators: false) {
+                    LazyVGrid(columns: columns, spacing: 8) {
+                        ForEach(model.aiCutPhotoOptions) { option in
+                            photoCell(option)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 118)
+                }
+            }
+        }
+        .foregroundStyle(TR.cream)
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 6) {
+                if selectionIsFull {
+                    Text("Deselect one photo to choose another")
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.52))
+                } else {
+                    Text("Only selected previews go to OpenAI")
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.52))
+                }
+
+                Button("Done") { dismiss() }
+                    .buttonStyle(CreamButtonStyle())
+                    .disabled(model.aiCutSelectedPhotoCount == 0)
+                    .opacity(model.aiCutSelectedPhotoCount == 0 ? 0.48 : 1)
+                    .accessibilityIdentifier("ai-photos-done")
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
+            .background(.ultraThinMaterial)
+            .background(TR.sheet.opacity(0.94))
+        }
+        .accessibilityIdentifier("ai-photo-selection-sheet")
+    }
+
+    private func photoCell(_ option: AICutPhotoOption) -> some View {
+        let selected = model.selectedAICutPhotoIDs.contains(option.id)
+        let canSelect = selected || !selectionIsFull
+
+        return Button {
+            withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                model.toggleAICutPhotoSelection(option.id)
+            }
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                PhotoAssetView(source: option.photo.source)
+                    .aspectRatio(1, contentMode: .fill)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(selected ? TR.accent.opacity(0.10) : .clear)
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(
+                                selected ? TR.accent : .white.opacity(0.10),
+                                lineWidth: selected ? 2 : 1
+                            )
+                    }
+
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22, weight: .semibold))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(
+                        selected ? TR.ink : .white,
+                        selected ? TR.accent : .black.opacity(0.44)
+                    )
+                    .padding(7)
+
+                if option.localSelection == .morePhotos {
+                    Text("MORE")
+                        .font(TR.mono(8, weight: .semibold))
+                        .tracking(0.8)
+                        .foregroundStyle(TR.cream)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 5)
+                        .background(.black.opacity(0.62))
+                        .clipShape(Capsule())
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        .padding(7)
+                }
+            }
+            .opacity(canSelect ? 1 : 0.42)
+            .aspectRatio(1, contentMode: .fit)
+        }
+        .buttonStyle(TactileButtonStyle(pressedScale: 0.96))
+        .accessibilityLabel(option.localSelection == .firstCut ? "First Cut photo" : "More Photos photo")
+        .accessibilityValue(selected ? "Selected" : "Not selected")
+        .accessibilityHint(canSelect ? "Double tap to toggle" : "Deselect another photo first")
+        .accessibilityIdentifier("ai-photo-\(option.id)")
     }
 }
 
@@ -346,7 +558,7 @@ struct AICutProcessingScreen: View {
                 } else {
                     VStack(spacing: 10) {
                         MetadataText(
-                            text: model.selectedAICutDirection?.title ?? "AI Remix",
+                            text: model.selectedAICutDirection?.title ?? "AI Director",
                             color: TR.accent
                         )
                         Text(model.aiCutStatus)
@@ -669,6 +881,7 @@ struct CutScreen: View {
                                 .tracking(1)
                                 .foregroundStyle(.white.opacity(0.57))
                                 .frame(width: 82, alignment: .leading)
+                                .accessibilityIdentifier("cut-screen")
 
                             Spacer()
 
@@ -766,7 +979,6 @@ struct CutScreen: View {
             dragOffset = .zero
         }
         .sensoryFeedback(.selection, trigger: decisionFeedback)
-        .accessibilityIdentifier("cut-screen")
     }
 
     private var motionReduced: Bool {
@@ -951,6 +1163,7 @@ struct PaceScreen: View {
                 .padding(.leading, 48)
                 .padding(.top, 4)
                 .trEntrance(0, distance: 10)
+                .accessibilityIdentifier("pace-screen")
 
                 VStack(spacing: 30) {
                     VStack(alignment: .leading, spacing: 12) {
@@ -1027,7 +1240,6 @@ struct PaceScreen: View {
                 .presentationCornerRadius(26)
                 .presentationBackground(TR.sheet)
         }
-        .accessibilityIdentifier("pace-screen")
     }
 }
 
@@ -1131,7 +1343,6 @@ struct SecondWatchScreen: View {
         .onDisappear {
             soundtrack.stop()
         }
-        .accessibilityIdentifier("second-watch-screen")
     }
 
     private func studioContent(previewHeight: CGFloat, compact: Bool) -> some View {
@@ -1145,6 +1356,7 @@ struct SecondWatchScreen: View {
             .padding(.horizontal, 62)
             .padding(.top, 4)
             .trEntrance(0, distance: 7)
+            .accessibilityIdentifier("second-watch-screen")
 
             Spacer(minLength: compact ? 5 : 12)
 
@@ -1725,6 +1937,7 @@ private struct FilmStyleSheet: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 18) {
                 SheetHeader(title: "Film style") { dismiss() }
+                    .accessibilityIdentifier("film-style-sheet")
 
                 Text("Choose the mood, not every tiny transition. TripReel still adapts portrait and landscape photos automatically.")
                     .font(TR.ui(13))
@@ -1783,7 +1996,6 @@ private struct FilmStyleSheet: View {
             .padding(.bottom, 34)
         }
         .sensoryFeedback(.selection, trigger: selectionFeedback)
-        .accessibilityIdentifier("film-style-sheet")
     }
 
     private var stylePreview: some View {
@@ -1915,7 +2127,7 @@ private struct TitlesSheet: View {
                 VStack(alignment: .leading, spacing: 17) {
                     SheetHeader(title: "Titles & text") { dismiss() }
 
-                    Text("Edit every title on one timeline. Tap a clip, change its text below, and watch the live canvas update without closing the editor.")
+                    Text("Suggested privately from this film's place, days and visual themes. Tap any card to rewrite it or remove it.")
                         .font(TR.ui(13))
                         .foregroundStyle(.white.opacity(0.58))
                         .lineSpacing(4)
@@ -1961,7 +2173,7 @@ private struct TitlesSheet: View {
             Spacer(minLength: 0)
             MontageTitleArtwork(
                 card: selectedCard,
-                backgroundSource: model.previewSource(at: selectedIndex),
+                backgroundSource: model.previewSource(forTitle: selectedKind),
                 motionPhase: false,
                 reduceMotion: true
             )
@@ -2145,10 +2357,6 @@ private struct TitlesSheet: View {
 
     private var selectedCard: MontageTitleCard {
         model.montageTitleCard(for: selectedKind)
-    }
-
-    private var selectedIndex: Int {
-        TitleCardKind.allCases.firstIndex(of: selectedKind) ?? 0
     }
 
     private var titleBinding: Binding<String> {

@@ -11,6 +11,7 @@ final class TripReelFlowUITests: XCTestCase {
     private func launchApp(at screen: String = "trips") {
         app = XCUIApplication()
         app.launchArguments = ["-qaScreen", screen, "-qaNoHint"]
+        app.launchEnvironment["TRIPREEL_DEVELOPMENT_AUTH_TOKEN"] = String(repeating: "u", count: 32)
         app.launch()
     }
 
@@ -18,20 +19,37 @@ final class TripReelFlowUITests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
+    private func button(startingWith label: String) -> XCUIElement {
+        app.buttons
+            .matching(NSPredicate(format: "label BEGINSWITH[c] %@", label))
+            .firstMatch
+    }
+
+    private func attachScreenshot(named name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testCoreFilmCreationFlow() {
         launchApp()
         XCTAssertTrue(screen("trips-screen").waitForExistence(timeout: 3))
 
-        app.buttons["Da Nang, Vietnam, 84 photos"].tap()
+        app.buttons["trip-row-demo-da-nang"].tap()
         XCTAssertTrue(screen("building-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 7))
 
-        screen("first-cut-continue-button").tap()
+        let continueButton = screen("first-cut-continue-button")
+        XCTAssertTrue(continueButton.waitForExistence(timeout: 3))
+        continueButton.tap()
         XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
         screen("edit-film-button").tap()
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
 
-        screen("studio-edit-menu").tap()
+        let editMenu = screen("studio-edit-menu")
+        XCTAssertTrue(editMenu.waitForExistence(timeout: 3))
+        editMenu.tap()
         screen("studio-tool-photos").tap()
         XCTAssertTrue(screen("cut-screen").waitForExistence(timeout: 3))
 
@@ -81,6 +99,7 @@ final class TripReelFlowUITests: XCTestCase {
     func testTripsAndNearbyStayInOneCalmCollectionScreen() {
         launchApp()
         XCTAssertTrue(screen("trips-screen").waitForExistence(timeout: 3))
+        XCTAssertFalse(screen("cloud-analysis-settings-card").exists)
 
         app.buttons["Nearby"].tap()
 
@@ -129,20 +148,46 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Created privately on your iPhone"].exists)
     }
 
-    func testAIDirectionDoesNotRequireConsentUntilContinueAndDeclineReturnsSafely() {
-        launchApp(at: "firstWatch")
-        screen("first-cut-continue-button").tap()
+    func testAIConsentComesBeforeDirectionAndDeclineReturnsSafely() {
+        launchApp(at: "firstCutOptions")
         XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
-        screen("improve-with-ai-button").tap()
-        XCTAssertTrue(screen("ai-direction-screen").waitForExistence(timeout: 3))
-        XCTAssertFalse(screen("cloud-analysis-consent").exists)
-
-        screen("ai-direction-calm").tap()
-        screen("ai-direction-continue").tap()
+        button(startingWith: "Improve with AI").tap()
         XCTAssertTrue(screen("cloud-analysis-consent").waitForExistence(timeout: 3))
-        screen("cloud-analysis-decline").tap()
+        XCTAssertFalse(screen("ai-direction-screen").exists)
+        XCTAssertTrue(
+            app.staticTexts
+                .matching(NSPredicate(format: "label CONTAINS[c] %@", "GPT-5.6 Luna"))
+                .firstMatch
+                .exists
+        )
+        attachScreenshot(named: "AI consent before direction")
+        button(startingWith: "Not now").tap()
 
         XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
+    }
+
+    func testAIConsentThenLetsUserChooseExactPhotos() {
+        launchApp(at: "firstCutOptions")
+        XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
+        button(startingWith: "Improve with AI").tap()
+        XCTAssertTrue(screen("cloud-analysis-consent").waitForExistence(timeout: 3))
+
+        button(startingWith: "Allow & choose photos").tap()
+
+        XCTAssertTrue(screen("ai-direction-screen").waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Choose photos & direction"].exists)
+        XCTAssertTrue(app.staticTexts["36 small previews will be sent to OpenAI’s GPT-5.6 Luna."].exists)
+        attachScreenshot(named: "AI photo and direction choices")
+
+        let photoPicker = button(startingWith: "Photos for AI")
+        XCTAssertTrue(photoPicker.waitForExistence(timeout: 2))
+        photoPicker.tap()
+
+        XCTAssertTrue(screen("ai-photo-selection-sheet").waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Deselect one photo to choose another"].exists)
+        XCTAssertTrue(app.buttons["Suggested"].exists)
+        XCTAssertTrue(app.buttons["Clear"].exists)
+        attachScreenshot(named: "AI exact photo selection")
     }
 
     func testAICutComparisonKeepsBothVersionsEditable() {
@@ -160,7 +205,9 @@ final class TripReelFlowUITests: XCTestCase {
         launchApp(at: "secondWatch")
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
 
-        screen("studio-edit-menu").tap()
+        let editMenu = screen("studio-edit-menu")
+        XCTAssertTrue(editMenu.waitForExistence(timeout: 3))
+        editMenu.tap()
         screen("studio-tool-titles").tap()
 
         XCTAssertTrue(screen("title-editor-screen").waitForExistence(timeout: 3))
@@ -222,7 +269,7 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Nothing selected"].waitForExistence(timeout: 2))
 
         let firstPhoto = app.buttons
-            .matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Select "))
+            .matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Select IMG_"))
             .firstMatch
         XCTAssertTrue(firstPhoto.waitForExistence(timeout: 2))
         firstPhoto.tap()

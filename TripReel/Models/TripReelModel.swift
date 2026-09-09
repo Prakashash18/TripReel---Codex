@@ -388,6 +388,7 @@ struct MontagePhotoInsight: Hashable, Sendable {
     let aestheticScore: Double
     let contentKind: MontageContentKind
     let peopleCount: Int
+    let classifications: [NativePhotoClassification]
     let featurePrint: NativePhotoFeaturePrint?
     let focalPoint: NativePhotoFocalPoint?
 
@@ -396,6 +397,7 @@ struct MontagePhotoInsight: Hashable, Sendable {
         aestheticScore: Double = 0.5,
         contentKind: MontageContentKind = .moment,
         peopleCount: Int = 0,
+        classifications: [NativePhotoClassification] = [],
         featurePrint: NativePhotoFeaturePrint? = nil,
         focalPoint: NativePhotoFocalPoint? = nil
     ) {
@@ -403,6 +405,7 @@ struct MontagePhotoInsight: Hashable, Sendable {
         self.aestheticScore = min(max(aestheticScore, 0), 1)
         self.contentKind = contentKind
         self.peopleCount = max(0, peopleCount)
+        self.classifications = classifications
         self.featurePrint = featurePrint
         self.focalPoint = focalPoint
     }
@@ -423,6 +426,7 @@ struct MontagePhotoInsight: Hashable, Sendable {
             aestheticScore: result.scores.aestheticScore ?? 0.5,
             contentKind: kind,
             peopleCount: max(result.signals.faces.count, result.signals.humans.count),
+            classifications: result.signals.classifications,
             featurePrint: result.signals.featurePrint,
             focalPoint: result.signals.focalPoint
         )
@@ -676,6 +680,382 @@ enum MontageSequencePlanner {
     }
 }
 
+struct LocalTitlePlan: Hashable, Sendable {
+    let enabledCards: Set<TitleCardKind>
+    let drafts: [TitleCardKind: TitleCardDraft]
+}
+
+/// Turns PhotoKit time/place metadata and Apple's on-device Vision labels into
+/// restrained editorial language. This deliberately uses a small deterministic
+/// vocabulary: local classification can suggest a useful theme, but it should
+/// never invent a landmark, activity, or relationship that the phone did not
+/// actually observe.
+enum LocalStoryIntelligence {
+    private enum Theme: Hashable, Sendable {
+        case people
+        case event
+        case food
+        case water
+        case nature
+        case city
+        case mixed
+    }
+
+    static func collectionTitle(
+        for trip: Trip,
+        isNearby: Bool,
+        calendar: Calendar = .current
+    ) -> String {
+        let place = friendlyPlaceName(from: trip.place)
+        let days = inclusiveDayCount(for: trip, calendar: calendar)
+
+        if isNearby {
+            let moment = nearbyMoment(for: trip, calendar: calendar)
+            return place.map { "\(moment) around \($0)" }
+                ?? "\(moment) nearby"
+        }
+
+        guard let place else {
+            if days == 1 { return "A day away" }
+            if (6...8).contains(days) { return "A week away" }
+            return "\(dayWord(days)) days away"
+        }
+        if days == 1 { return "A day in \(place)" }
+        if (6...8).contains(days) { return "A week in \(place)" }
+        return "\(dayWord(days)) days in \(place)"
+    }
+
+    static func locationContext(for trip: Trip) -> String? {
+        let trimmed = trip.place.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isPlaceholderPlace(trimmed) else { return nil }
+        return trimmed
+    }
+
+    static func friendlyPlaceName(from rawPlace: String) -> String? {
+        guard !isPlaceholderPlace(rawPlace) else { return nil }
+        var name = rawPlace
+            .split(separator: ",", maxSplits: 1)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !name.isEmpty else { return nil }
+
+        name = removingPrefix("Mueang ", from: name)
+        for suffix in [" Metropolitan District", " Municipality", " Province", " District"] {
+            name = removingSuffix(suffix, from: name)
+        }
+        if name.compare("Singapore Island", options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame {
+            name = "Singapore"
+        }
+        return name.isEmpty ? nil : name
+    }
+
+    static func makeTitlePlan(
+        for trip: Trip,
+        photos: [ReelPhoto],
+        insights: [String: MontagePhotoInsight],
+        isNearby: Bool,
+        calendar: Calendar = .current
+    ) -> LocalTitlePlan {
+        let photoIDs = Set(photos.map(\.id))
+        let relevantInsights = insights.filter { photoIDs.contains($0.key) }
+        let theme = dominantTheme(for: photos, insights: relevantInsights)
+        let place = friendlyPlaceName(from: trip.place)
+        let openingTitle = openingHeadline(
+            theme: theme,
+            trip: trip,
+            place: place,
+            isNearby: isNearby,
+            calendar: calendar
+        )
+        let exactPlace = locationContext(for: trip)
+        let openingSubtitle: String
+        if let exactPlace,
+           openingTitle.range(
+               of: place ?? exactPlace,
+               options: [.caseInsensitive, .diacriticInsensitive]
+           ) == nil {
+            openingSubtitle = "\(exactPlace) · \(trip.dates)"
+        } else {
+            openingSubtitle = trip.dates
+        }
+
+        var enabled: Set<TitleCardKind> = [.opening]
+        var drafts: [TitleCardKind: TitleCardDraft] = [
+            .opening: TitleCardDraft(
+                title: openingTitle,
+                subtitle: openingSubtitle,
+                style: theme == .event ? .bold : .editorial,
+                duration: TitleCardKind.opening.defaultDuration
+            )
+        ]
+
+        if photos.count >= 6,
+           let insertion = middleInsertion(
+               for: trip,
+               photos: photos,
+               insights: relevantInsights,
+               calendar: calendar
+           ) {
+            enabled.insert(.place)
+            drafts[.place] = TitleCardDraft(
+                title: middleHeadline(for: insertion.theme),
+                subtitle: insertion.dayNumber.map { "Day \($0) of \(insertion.totalDays)" } ?? "",
+                style: insertion.theme == .event ? .bold : .clean,
+                duration: TitleCardKind.place.defaultDuration,
+                afterPhotoID: insertion.afterPhotoID
+            )
+        } else {
+            drafts[.place] = TitleCardDraft(
+                title: "A new chapter",
+                subtitle: "",
+                style: .clean,
+                duration: TitleCardKind.place.defaultDuration
+            )
+        }
+
+        if photos.count >= 12 {
+            enabled.insert(.ending)
+        }
+        drafts[.ending] = TitleCardDraft(
+            title: theme == .people ? "The moments we shared" : "Until next time",
+            subtitle: monthYear(for: trip.startDate),
+            style: .editorial,
+            duration: TitleCardKind.ending.defaultDuration
+        )
+
+        return LocalTitlePlan(enabledCards: enabled, drafts: drafts)
+    }
+
+    private struct MiddleInsertion {
+        let afterPhotoID: String
+        let theme: Theme
+        let dayNumber: Int?
+        let totalDays: Int
+    }
+
+    private static func middleInsertion(
+        for trip: Trip,
+        photos: [ReelPhoto],
+        insights: [String: MontagePhotoInsight],
+        calendar: Calendar
+    ) -> MiddleInsertion? {
+        guard photos.count >= 4 else { return nil }
+        let datesByID = Dictionary(uniqueKeysWithValues: trip.assets.compactMap { asset in
+            asset.creationDate.map { (asset.id, $0) }
+        })
+        let midpoint = Double(photos.count - 1) / 2
+        let dayBoundaries = photos.indices.dropFirst().compactMap { index -> Int? in
+            guard index >= 2, index <= photos.count - 2,
+                  let previous = datesByID[photos[index - 1].id],
+                  let current = datesByID[photos[index].id],
+                  !calendar.isDate(previous, inSameDayAs: current) else { return nil }
+            return index
+        }
+        if let boundary = dayBoundaries.min(by: {
+            abs(Double($0) - midpoint) < abs(Double($1) - midpoint)
+        }) {
+            let dayStarts = Set(photos.prefix(boundary + 1).compactMap { photo in
+                datesByID[photo.id].map { calendar.startOfDay(for: $0) }
+            })
+            return MiddleInsertion(
+                afterPhotoID: photos[boundary - 1].id,
+                theme: dominantTheme(
+                    for: Array(photos[boundary...]),
+                    insights: insights
+                ),
+                dayNumber: max(2, dayStarts.count),
+                totalDays: inclusiveDayCount(for: trip, calendar: calendar)
+            )
+        }
+
+        let validRange = 2...(photos.count - 2)
+        let transitions = validRange.filter { index in
+            guard let left = insights[photos[index - 1].id],
+                  let right = insights[photos[index].id] else { return false }
+            return left.contentKind != right.contentKind
+        }
+        let boundary = transitions.min(by: {
+            abs(Double($0) - midpoint) < abs(Double($1) - midpoint)
+        }) ?? max(2, min(photos.count - 2, photos.count / 2))
+        return MiddleInsertion(
+            afterPhotoID: photos[boundary - 1].id,
+            theme: dominantTheme(for: Array(photos[boundary...]), insights: insights),
+            dayNumber: nil,
+            totalDays: inclusiveDayCount(for: trip, calendar: calendar)
+        )
+    }
+
+    private static func dominantTheme(
+        for photos: [ReelPhoto],
+        insights: [String: MontagePhotoInsight]
+    ) -> Theme {
+        var evidence: [Theme: Double] = [:]
+        var observed = 0
+        for photo in photos {
+            guard let insight = insights[photo.id] else { continue }
+            observed += 1
+            switch insight.contentKind {
+            case .people:
+                evidence[.people, default: 0] += 1 + min(0.35, Double(insight.peopleCount) * 0.08)
+            case .food:
+                evidence[.food, default: 0] += 1
+            case .scenery:
+                evidence[.nature, default: 0] += 0.62
+            case .moment:
+                break
+            }
+
+            for classification in insight.classifications {
+                let label = normalized(classification.identifier)
+                if let (theme, _) = classificationTerms.first(where: { _, terms in
+                    terms.contains(where: label.contains)
+                }) {
+                    let confidence = min(max(Double(classification.confidence), 0), 1)
+                    let multiplier = theme == .event ? 1.45 : 1.25
+                    evidence[theme, default: 0] += confidence * multiplier
+                }
+            }
+        }
+
+        let ranked = evidence.sorted { lhs, rhs in
+            if lhs.value != rhs.value { return lhs.value > rhs.value }
+            return themeOrder(lhs.key) < themeOrder(rhs.key)
+        }
+        guard observed >= 2,
+              let strongest = ranked.first,
+              strongest.value >= max(1.15, Double(observed) * 0.24) else {
+            return .mixed
+        }
+        return strongest.key
+    }
+
+    private static func openingHeadline(
+        theme: Theme,
+        trip: Trip,
+        place: String?,
+        isNearby: Bool,
+        calendar: Calendar
+    ) -> String {
+        switch theme {
+        case .people:
+            return place.map { "Together in \($0)" } ?? "Better together"
+        case .event:
+            return "The day came alive"
+        case .food:
+            return place.map { "A taste of \($0)" } ?? "A taste of the day"
+        case .water:
+            return "By the water"
+        case .nature:
+            return "Out in the open"
+        case .city:
+            return place.map { "Around \($0)" } ?? "Around the city"
+        case .mixed:
+            return collectionTitle(for: trip, isNearby: isNearby, calendar: calendar)
+        }
+    }
+
+    private static func middleHeadline(for theme: Theme) -> String {
+        switch theme {
+        case .people: "The people in the story"
+        case .event: "The day came alive"
+        case .food: "A taste of the place"
+        case .water: "Toward the water"
+        case .nature: "Into the landscape"
+        case .city: "Into the streets"
+        case .mixed: "A new chapter"
+        }
+    }
+
+    private static func inclusiveDayCount(for trip: Trip, calendar: Calendar) -> Int {
+        let start = calendar.startOfDay(for: trip.startDate)
+        let end = calendar.startOfDay(for: trip.endDate)
+        return max(1, (calendar.dateComponents([.day], from: start, to: end).day ?? 0) + 1)
+    }
+
+    private static func nearbyMoment(for trip: Trip, calendar: Calendar) -> String {
+        let dates = trip.assets.compactMap(\.creationDate).sorted()
+        let representative = dates.isEmpty ? trip.startDate : dates[dates.count / 2]
+        switch calendar.component(.hour, from: representative) {
+        case 5..<12: return "A morning"
+        case 12..<17: return "An afternoon"
+        case 17..<24: return "An evening"
+        default: return "A day"
+        }
+    }
+
+    private static func monthYear(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.setLocalizedDateFormatFromTemplate("MMMMyyyy")
+        return formatter.string(from: date)
+    }
+
+    private static func dayWord(_ day: Int) -> String {
+        switch day {
+        case 2: "Two"
+        case 3: "Three"
+        case 4: "Four"
+        case 5: "Five"
+        default: String(day)
+        }
+    }
+
+    private static func isPlaceholderPlace(_ place: String) -> Bool {
+        let normalized = place.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.isEmpty
+            || normalized == "photo trip"
+            || normalized == "nearby outing"
+            || normalized.hasPrefix("travel ·")
+    }
+
+    private static func removingPrefix(_ prefix: String, from value: String) -> String {
+        guard value.range(of: prefix, options: [.anchored, .caseInsensitive]) != nil else {
+            return value
+        }
+        return String(value.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func removingSuffix(_ suffix: String, from value: String) -> String {
+        guard value.range(of: suffix, options: [.anchored, .backwards, .caseInsensitive]) != nil else {
+            return value
+        }
+        return String(value.dropLast(suffix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value.lowercased().map { character in
+            character.isLetter || character.isNumber ? character : " "
+        }.reduce(into: "") { result, character in
+            if character != " " || result.last != " " { result.append(character) }
+        }
+    }
+
+    private static func themeOrder(_ theme: Theme) -> Int {
+        switch theme {
+        case .people: 0
+        case .event: 1
+        case .food: 2
+        case .water: 3
+        case .nature: 4
+        case .city: 5
+        case .mixed: 6
+        }
+    }
+
+    /// Ordered from specific story signals to broad scene labels so a label
+    /// such as “beach sunset” becomes water, rather than being counted twice
+    /// as both a coast and generic nature.
+    private static let classificationTerms: [(Theme, [String])] = [
+        (.event, ["award", "ceremony", "concert", "festival", "performance", "stage", "wedding", "classroom", "student", "school", "sports", "party"]),
+        (.water, ["beach", "coast", "harbor", "lake", "marina", "ocean", "river", "sea", "waterfront", "waterfall", "boat"]),
+        (.food, ["beverage", "cafe", "coffee", "cuisine", "dessert", "dish", "drink", "food", "meal", "restaurant"]),
+        (.city, ["architecture", "building", "city", "cityscape", "landmark", "market", "street", "urban", "skyscraper"]),
+        (.nature, ["forest", "garden", "landscape", "mountain", "nature", "park", "sunset", "trail", "tree"]),
+        (.people, ["crowd", "family", "group", "people", "person", "portrait"])
+    ]
+}
+
 enum TitleCardKind: String, CaseIterable, Identifiable, Hashable, Sendable {
     case opening
     case place
@@ -685,16 +1065,16 @@ enum TitleCardKind: String, CaseIterable, Identifiable, Hashable, Sendable {
 
     var name: String {
         switch self {
-        case .opening: "Opening title"
-        case .place: "Place card"
-        case .ending: "End card"
+        case .opening: "Intro"
+        case .place: "Story beat"
+        case .ending: "Ending"
         }
     }
 
     var placement: String {
         switch self {
         case .opening: "Before the first photo"
-        case .place: "When the location changes"
+        case .place: "At a natural chapter break"
         case .ending: "After the last photo"
         }
     }
@@ -729,6 +1109,10 @@ struct TitleCardDraft: Hashable, Sendable {
     var subtitle: String
     var style: MontageTitleStyle
     var duration: Double
+    /// The photo after which a middle title appears. Opening and ending cards
+    /// leave this nil. Keeping the anchor as an asset ID makes the placement
+    /// survive editorial reordering and remain reversible.
+    var afterPhotoID: String? = nil
 }
 
 struct MontageTitleCard: Identifiable, Hashable, Sendable {
@@ -737,6 +1121,23 @@ struct MontageTitleCard: Identifiable, Hashable, Sendable {
     let subtitle: String
     let style: MontageTitleStyle
     let duration: Double
+    let afterPhotoID: String?
+
+    init(
+        kind: TitleCardKind,
+        title: String,
+        subtitle: String,
+        style: MontageTitleStyle,
+        duration: Double,
+        afterPhotoID: String? = nil
+    ) {
+        self.kind = kind
+        self.title = title
+        self.subtitle = subtitle
+        self.style = style
+        self.duration = duration
+        self.afterPhotoID = afterPhotoID
+    }
 
     var id: String { "title-\(kind.rawValue)" }
 }
@@ -766,6 +1167,22 @@ enum MontageTimelineBuilder {
         titleCards: [MontageTitleCard]
     ) -> [MontageTimelineItem] {
         let titleByKind = Dictionary(uniqueKeysWithValues: titleCards.map { ($0.kind, $0) })
+        let middleCard = titleByKind[.place]
+        let requestedMiddleIndex = middleCard?.afterPhotoID.flatMap { anchorID in
+            photos.firstIndex(where: { $0.id == anchorID })
+        }
+        // Older saved/default cards have no anchor and retain their original
+        // placement after photo one. If a locally suggested anchor was later
+        // removed, fall back to the nearest useful midpoint instead of silently
+        // dropping the title from the film.
+        let middleIndex: Int? = {
+            guard middleCard != nil, !photos.isEmpty else { return nil }
+            if let requestedMiddleIndex { return requestedMiddleIndex }
+            if middleCard?.afterPhotoID != nil {
+                return max(0, min(photos.count - 1, (photos.count / 2) - 1))
+            }
+            return 0
+        }()
         var result: [MontageTimelineItem] = []
         if let opening = titleByKind[.opening] {
             result.append(.title(opening))
@@ -773,7 +1190,7 @@ enum MontageTimelineBuilder {
 
         for (index, photo) in photos.enumerated() {
             result.append(.photo(photo))
-            if index == 0, let place = titleByKind[.place] {
+            if index == middleIndex, let place = middleCard {
                 result.append(.title(place))
             }
         }
@@ -867,7 +1284,8 @@ struct TripEditSnapshot: Hashable, Sendable {
                 title: draft.title,
                 subtitle: draft.subtitle,
                 style: draft.style,
-                duration: draft.duration
+                duration: draft.duration,
+                afterPhotoID: draft.afterPhotoID
             )
         }
     }
@@ -899,6 +1317,13 @@ struct AICutRecommendation: Identifiable, Hashable, Sendable {
 private struct AICutCandidatePhoto: Sendable {
     let photo: ReelPhoto
     let localSelection: CloudPhotoLocalSelection
+}
+
+struct AICutPhotoOption: Identifiable, Hashable, Sendable {
+    let photo: ReelPhoto
+    let localSelection: CloudPhotoLocalSelection
+
+    var id: String { photo.id }
 }
 
 private struct AICutCandidate: Sendable {
@@ -944,6 +1369,7 @@ final class TripReelModel: ObservableObject {
     @Published var isCloudAnalysisConsentPresented = false
     @Published private(set) var cloudConsentIsSettings = false
     @Published private(set) var selectedAICutDirection: AICutDirection?
+    @Published private(set) var selectedAICutPhotoIDs: Set<String> = []
     @Published private(set) var firstCutSnapshot: TripEditSnapshot?
     @Published private(set) var aiCutSnapshot: TripEditSnapshot?
     @Published private(set) var selectedCutSource: TripCutSource = .firstCut
@@ -1010,6 +1436,7 @@ final class TripReelModel: ObservableObject {
     private var activeAnalysisTrip: Trip?
     private var activePhotoInsights: [String: MontagePhotoInsight] = [:]
     private var cloudBlockedPhotoIDs: Set<String> = []
+    private var aiCutConsentGranted = false
     private var manuallyIncludedPhotoIDs: Set<String> = []
     private var photoEditOverrides: [String: PhotoEditOverride] = [:]
     private let videoExporter: any TripReelVideoExporting
@@ -1086,6 +1513,10 @@ final class TripReelModel: ObservableObject {
             firstCutSnapshot = makeCurrentEditSnapshot()
             if screen == .aiComparison {
                 installDemoAICut()
+            } else if screen == .aiDirection {
+                aiCutConsentGranted = true
+                selectedAICutDirection = recommendedAICutDirection
+                resetAICutPhotoSelection()
             }
         }
     }
@@ -1325,7 +1756,8 @@ final class TripReelModel: ObservableObject {
             title: draft.title,
             subtitle: draft.subtitle,
             style: draft.style,
-            duration: draft.duration
+            duration: draft.duration,
+            afterPhotoID: draft.afterPhotoID
         )
     }
 
@@ -1334,15 +1766,20 @@ final class TripReelModel: ObservableObject {
         switch kind {
         case .opening:
             return TitleCardDraft(
-                title: tripShortPlace,
+                title: selectedTrip.map { trip in
+                    LocalStoryIntelligence.collectionTitle(
+                        for: trip,
+                        isNearby: nearbyEvents.contains(where: { $0.id == trip.id })
+                    )
+                } ?? tripShortPlace,
                 subtitle: tripDates,
                 style: .editorial,
                 duration: kind.defaultDuration
             )
         case .place:
             return TitleCardDraft(
-                title: tripShortPlace,
-                subtitle: tripDates,
+                title: "A new chapter",
+                subtitle: "",
                 style: .clean,
                 duration: kind.defaultDuration
             )
@@ -1485,6 +1922,21 @@ final class TripReelModel: ObservableObject {
         return photos[index.modulo(photos.count)].source
     }
 
+    func previewSource(forTitle kind: TitleCardKind) -> PhotoSource {
+        if let anchorID = titleDraft(for: kind).afterPhotoID,
+           let anchored = photos.first(where: { $0.id == anchorID }) {
+            return anchored.source
+        }
+        switch kind {
+        case .opening:
+            return previewSource(at: 0)
+        case .place:
+            return previewSource(at: max(0, (photos.count / 2) - 1))
+        case .ending:
+            return previewSource(at: max(0, photos.count - 1))
+        }
+    }
+
     func go(
         _ next: AppScreen,
         direction explicitDirection: TRNavigationDirection? = nil
@@ -1572,6 +2024,26 @@ final class TripReelModel: ObservableObject {
         cloudPhotoAnalysis.isConfigured
     }
 
+    var aiCutPhotoOptions: [AICutPhotoOption] {
+        availableAICutCandidatePhotos().map {
+            AICutPhotoOption(photo: $0.photo, localSelection: $0.localSelection)
+        }
+    }
+
+    var aiCutPhotoSelectionLimit: Int {
+        CloudPhotoAnalysisClient.maximumBatchSize
+    }
+
+    var aiCutSelectedPhotoCount: Int {
+        selectedAICutPhotoIDs.count
+    }
+
+    var aiCutCanCreate: Bool {
+        aiCutConsentGranted
+            && selectedAICutDirection != nil
+            && !selectedAICutPhotoIDs.isEmpty
+    }
+
     /// Photos omitted from the cut currently on screen. An AI cut can restore
     /// a locally omitted moment without mutating the saved First Cut; filtering
     /// here keeps More Photos truthful and makes reverting fully reversible.
@@ -1605,23 +2077,28 @@ final class TripReelModel: ObservableObject {
     }
 
     func useCloudEnhancement() {
+        guard cloudPhotoAnalysis.isConfigured else { return }
         setCloudAnalysisPreference(.enabled)
+        aiCutConsentGranted = true
         isCloudAnalysisConsentPresented = false
         guard !cloudConsentIsSettings else { return }
-        beginAICut()
+        go(.aiDirection, direction: .forward)
     }
 
     func keepAnalysisOnDevice() {
         setCloudAnalysisPreference(.onDeviceOnly)
+        aiCutConsentGranted = false
         isCloudAnalysisConsentPresented = false
         guard !cloudConsentIsSettings else { return }
-        go(.firstCutOptions, direction: .backward)
     }
 
     func openAICutDirections() {
         aiCutFailureMessage = nil
         selectedAICutDirection = recommendedAICutDirection
-        go(.aiDirection, direction: .forward)
+        resetAICutPhotoSelection()
+        aiCutConsentGranted = false
+        cloudConsentIsSettings = false
+        isCloudAnalysisConsentPresented = true
     }
 
     func selectAICutDirection(_ direction: AICutDirection) {
@@ -1629,12 +2106,30 @@ final class TripReelModel: ObservableObject {
     }
 
     func continueWithAICutDirection() {
-        guard selectedAICutDirection != nil else { return }
-        cloudConsentIsSettings = false
-        isCloudAnalysisConsentPresented = true
+        guard aiCutCanCreate else { return }
+        beginAICut()
+    }
+
+    func toggleAICutPhotoSelection(_ photoID: String) {
+        let validIDs = Set(aiCutPhotoOptions.map(\.id))
+        guard validIDs.contains(photoID) else { return }
+        if selectedAICutPhotoIDs.contains(photoID) {
+            selectedAICutPhotoIDs.remove(photoID)
+        } else if selectedAICutPhotoIDs.count < aiCutPhotoSelectionLimit {
+            selectedAICutPhotoIDs.insert(photoID)
+        }
+    }
+
+    func selectSuggestedAICutPhotos() {
+        resetAICutPhotoSelection()
+    }
+
+    func clearAICutPhotoSelection() {
+        selectedAICutPhotoIDs = []
     }
 
     func beginAICut() {
+        guard aiCutConsentGranted else { return }
         aiCutTask?.cancel()
         let generation = UUID()
         aiCutGeneration = generation
@@ -1676,17 +2171,10 @@ final class TripReelModel: ObservableObject {
             to: Self.makeReelPhotos(from: sourceTrip, insights: activePhotoInsights)
         )
         let allPhotosByID = Dictionary(uniqueKeysWithValues: allPhotos.map { ($0.id, $0) })
-        let recoverableIDs = Set(excludedPhotos.compactMap { excluded in
-            excluded.reason.isEligibleForCloudReconsideration ? excluded.id : nil
-        })
-        let recoverablePhotos = allPhotos.filter { recoverableIDs.contains($0.id) }
-        let candidatePhotos = Self.balancedAICandidatePhotos(
-            firstCut: firstCutSnapshot.keptPhotos,
-            morePhotos: recoverablePhotos,
-            blockedIDs: cloudBlockedPhotoIDs,
-            limit: CloudPhotoAnalysisClient.maximumBatchSize
-        )
-        let candidates = candidatePhotos.compactMap { candidate -> AICutCandidate? in
+        let selectedOptions = availableAICutCandidatePhotos().filter {
+            selectedAICutPhotoIDs.contains($0.photo.id)
+        }
+        let candidates = selectedOptions.compactMap { candidate -> AICutCandidate? in
             guard let asset = assetsByID[candidate.photo.id], !asset.isScreenshot else { return nil }
             return AICutCandidate(
                 photo: candidate.photo,
@@ -1785,6 +2273,7 @@ final class TripReelModel: ObservableObject {
         aiCutTask = nil
         aiCutFailureMessage = nil
         aiCutProgress = 0
+        aiCutConsentGranted = false
         go(.firstCutOptions, direction: .backward)
     }
 
@@ -1922,6 +2411,50 @@ final class TripReelModel: ObservableObject {
                 detail: plan.treatment.reason
             )
         ]
+    }
+
+    private func availableAICutCandidatePhotos() -> [AICutCandidatePhoto] {
+        guard let firstCutSnapshot,
+              let sourceTrip = activeAnalysisTrip ?? selectedTrip else { return [] }
+
+        let firstCutIDs = Set(firstCutSnapshot.keptPhotos.map(\.id))
+        let recoverableIDs = Set(excludedPhotos.compactMap { excluded in
+            excluded.reason.isEligibleForCloudReconsideration ? excluded.id : nil
+        })
+        let eligibleIDs = firstCutIDs.union(recoverableIDs).subtracting(cloudBlockedPhotoIDs)
+        let allPhotos = applyingPhotoEdits(
+            to: Self.makeReelPhotos(from: sourceTrip, insights: activePhotoInsights)
+        )
+
+        return allPhotos.compactMap { photo in
+            guard eligibleIDs.contains(photo.id) else { return nil }
+            return AICutCandidatePhoto(
+                photo: photo,
+                localSelection: firstCutIDs.contains(photo.id) ? .firstCut : .morePhotos
+            )
+        }
+    }
+
+    private func resetAICutPhotoSelection() {
+        guard let firstCutSnapshot else {
+            selectedAICutPhotoIDs = []
+            return
+        }
+        let options = availableAICutCandidatePhotos()
+        let eligibleFirstCutIDs = Set(
+            options.filter { $0.localSelection == .firstCut }.map { $0.photo.id }
+        )
+        let morePhotos = options.filter { $0.localSelection == .morePhotos }.map(\.photo)
+        selectedAICutPhotoIDs = Set(
+            Self.balancedAICandidatePhotos(
+                firstCut: firstCutSnapshot.keptPhotos.filter { photo in
+                    eligibleFirstCutIDs.contains(photo.id)
+                },
+                morePhotos: morePhotos,
+                blockedIDs: cloudBlockedPhotoIDs,
+                limit: aiCutPhotoSelectionLimit
+            ).map { $0.photo.id }
+        )
     }
 
     /// Gives the AI a balanced view of the local First Cut and safe, locally
@@ -2678,12 +3211,18 @@ final class TripReelModel: ObservableObject {
 
     func startBuild(trip: Trip) {
         guard !trip.assets.isEmpty else { return }
+        let isNearbyTrip = nearbyEvents.contains(where: { $0.id == trip.id })
         selectedTrip = trip
         photoEditOverrides = [:]
         photos = Self.makeReelPhotos(from: trip, insights: activePhotoInsights)
-        titleDrafts = [:]
-        resetTitleDrafts()
-        titleCards = [.opening]
+        let localTitlePlan = LocalStoryIntelligence.makeTitlePlan(
+            for: trip,
+            photos: photos,
+            insights: activePhotoInsights,
+            isNearby: isNearbyTrip
+        )
+        titleDrafts = localTitlePlan.drafts
+        titleCards = localTitlePlan.enabledCards
         exportHandoff = .normal
         exportedVideoURL = nil
         exportErrorMessage = nil
@@ -2695,6 +3234,8 @@ final class TripReelModel: ObservableObject {
         history = []
         cleanupSelection = []
         selectedCutSource = .firstCut
+        selectedAICutPhotoIDs = []
+        aiCutConsentGranted = false
         aiCutSnapshot = nil
         aiCutSummary = nil
         aiCutRecommendations = []
@@ -3114,6 +3655,8 @@ final class TripReelModel: ObservableObject {
         aiCutRecommendations = []
         aiCutFailureMessage = nil
         aiCutProgress = 0
+        selectedAICutPhotoIDs = []
+        aiCutConsentGranted = false
         pendingBuildTrip = nil
         activeAnalysisTrip = nil
         photoAnalysisFollowUp = nil

@@ -53,7 +53,7 @@ struct TripsScreen: View {
                             emptyCollection
                         } else {
                             ForEach(Array(displayedTrips.enumerated()), id: \.element.id) { index, trip in
-                                TripRow(trip: trip) {
+                                TripRow(trip: trip, isNearby: collection == .nearby) {
                                     model.requestBuild(trip: trip)
                                 }
                                 .trEntrance(min(index, 4), distance: 8)
@@ -68,16 +68,6 @@ struct TripsScreen: View {
                                     .padding(.horizontal, 24)
                                     .padding(.top, 8)
                             }
-                        }
-
-                        if !model.usesDemoData {
-                            CloudAnalysisSettingsCard(
-                                isEnabled: model.cloudAnalysisIsEnabled,
-                                isAvailable: model.cloudAnalysisIsConfigured
-                            ) {
-                                model.presentCloudAnalysisSettings()
-                            }
-                            .padding(.top, 8)
                         }
 
                         if model.usesDemoData {
@@ -174,7 +164,16 @@ struct TripsScreen: View {
 
 private struct TripRow: View {
     let trip: Trip
+    let isNearby: Bool
     let action: () -> Void
+
+    private var storyTitle: String {
+        LocalStoryIntelligence.collectionTitle(for: trip, isNearby: isNearby)
+    }
+
+    private var locationContext: String? {
+        LocalStoryIntelligence.locationContext(for: trip)
+    }
 
     var body: some View {
         Button(action: action) {
@@ -183,17 +182,24 @@ private struct TripRow: View {
                     .frame(width: 76, height: 76)
                     .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(trip.place)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(storyTitle)
                         .font(TR.ui(17, weight: .semibold))
                         .foregroundStyle(TR.cream)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.82)
 
-                    Text(trip.dates)
-                        .font(TR.ui(13))
-                        .foregroundStyle(.white.opacity(0.61))
+                    if let locationContext {
+                        Text(locationContext)
+                            .font(TR.ui(12))
+                            .foregroundStyle(.white.opacity(0.61))
+                            .lineLimit(1)
+                    }
 
-                    Text("\(trip.photoCount) PHOTOS")
-                        .font(TR.mono(11))
+                    Text("\(trip.dates) · \(trip.photoCount) PHOTOS")
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                        .font(TR.mono(10))
                         .tracking(0.8)
                         .foregroundStyle(.white.opacity(0.42))
                 }
@@ -208,7 +214,12 @@ private struct TripRow: View {
             .glassCard(cornerRadius: 18)
         }
         .buttonStyle(TactileButtonStyle())
-        .accessibilityLabel("\(trip.place), \(trip.photoCount) photos")
+        .accessibilityLabel(
+            [storyTitle, locationContext, trip.dates, "\(trip.photoCount) photos"]
+                .compactMap { $0 }
+                .joined(separator: ", ")
+        )
+        .accessibilityIdentifier("trip-row-\(trip.id)")
     }
 }
 

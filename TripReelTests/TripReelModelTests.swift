@@ -118,7 +118,8 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(model.screen, .firstCutOptions)
 
         model.openAICutDirections()
-        model.navigateBack()
+        XCTAssertTrue(model.isCloudAnalysisConsentPresented)
+        model.keepAnalysisOnDevice()
         XCTAssertEqual(model.screen, .firstCutOptions)
 
         model.navigateBack()
@@ -175,6 +176,82 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(
             TripPlaceLabelFormatter.displayName(for: placemark, style: .nearby),
             "Tiong Bahru, Singapore"
+        )
+    }
+
+    func testDestinationPlaceLabelUsesRecognizableCityInsteadOfAdministrativeDistrict() {
+        let vietnam = TripPlacemarkComponents(
+            subLocality: "An Hải",
+            locality: "An Hải",
+            administrativeArea: "Da Nang",
+            country: "Vietnam",
+            isoCountryCode: "VN"
+        )
+        let thailand = TripPlacemarkComponents(
+            locality: "Mueang Chiang Mai District",
+            administrativeArea: "Chiang Mai",
+            country: "Thailand",
+            isoCountryCode: "TH"
+        )
+
+        XCTAssertEqual(
+            TripPlaceLabelFormatter.displayName(for: vietnam, style: .destination),
+            "Da Nang, Vietnam"
+        )
+        XCTAssertEqual(
+            TripPlaceLabelFormatter.displayName(for: thailand, style: .destination),
+            "Chiang Mai, Thailand"
+        )
+    }
+
+    func testLocalStoryNamesCollectionsWithTimeAndFriendlyPlaceContext() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let start = try XCTUnwrap(
+            calendar.date(from: DateComponents(year: 2026, month: 8, day: 28, hour: 9))
+        )
+        let tripAssets = (0..<3).map {
+            makeAsset("trip-\($0)", start: start, minutes: $0 * 24 * 60)
+        }
+        let trip = Trip(
+            id: "chiang-mai",
+            place: "Mueang Chiang Mai District, Thailand",
+            dates: "28–30 Aug 2026",
+            startDate: start,
+            endDate: start.addingTimeInterval(2 * 24 * 60 * 60),
+            assets: tripAssets,
+            coverID: tripAssets[0].id
+        )
+        let nearbyAsset = makeAsset("nearby", start: start, minutes: 6 * 60)
+        let nearby = Trip(
+            id: "gardens",
+            place: "Gardens by the Bay, Marina South",
+            dates: "28 Aug 2026",
+            startDate: nearbyAsset.creationDate ?? start,
+            endDate: nearbyAsset.creationDate ?? start,
+            assets: [nearbyAsset],
+            coverID: nearbyAsset.id
+        )
+
+        XCTAssertEqual(
+            LocalStoryIntelligence.collectionTitle(
+                for: trip,
+                isNearby: false,
+                calendar: calendar
+            ),
+            "Three days in Chiang Mai"
+        )
+        XCTAssertEqual(
+            LocalStoryIntelligence.collectionTitle(
+                for: nearby,
+                isNearby: true,
+                calendar: calendar
+            ),
+            "An afternoon around Gardens by the Bay"
+        )
+        XCTAssertEqual(
+            LocalStoryIntelligence.locationContext(for: trip),
+            "Mueang Chiang Mai District, Thailand"
         )
     }
 
@@ -429,19 +506,20 @@ final class TripReelModelTests: XCTestCase {
 
     func testChangingDecisionAndUndoRestoresPreviousCutState() {
         let model = makeModel()
-        model.currentPhotoIndex = model.photos.count - 1
-        let lastPhotoID = model.currentPhoto.id
+        model.currentPhotoIndex = model.photos.count - 2
+        let photoID = model.currentPhoto.id
 
         model.decideCurrentPhoto(cut: true)
-        XCTAssertTrue(model.cutPhotoIDs.contains(lastPhotoID))
+        XCTAssertTrue(model.cutPhotoIDs.contains(photoID))
 
         model.go(.cut)
+        model.currentPhotoIndex = model.photos.count - 2
         model.decideCurrentPhoto(cut: false)
-        XCTAssertFalse(model.cutPhotoIDs.contains(lastPhotoID))
+        XCTAssertFalse(model.cutPhotoIDs.contains(photoID))
 
         model.undoLastDecision()
-        XCTAssertTrue(model.cutPhotoIDs.contains(lastPhotoID))
-        XCTAssertEqual(model.currentPhotoIndex, 83)
+        XCTAssertTrue(model.cutPhotoIDs.contains(photoID))
+        XCTAssertEqual(model.currentPhotoIndex, 82)
     }
 
     func testExportQualityControlsWatermark() {
@@ -492,6 +570,123 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(place.duration, 3.2, accuracy: 0.001)
         XCTAssertEqual(ending.title, "Until next time")
         XCTAssertEqual(ending.subtitle, "Made with TripReel")
+    }
+
+    func testLocalTitlePlanUsesVisionThemesAndPlacesStoryBeatAtDayChange() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let start = try XCTUnwrap(
+            calendar.date(from: DateComponents(year: 2026, month: 8, day: 28, hour: 9))
+        )
+        let assets = (0..<8).map { index in
+            makeAsset(
+                "moment-\(index)",
+                start: start,
+                minutes: index < 4 ? index * 30 : (24 * 60) + ((index - 4) * 30)
+            )
+        }
+        let trip = Trip(
+            id: "people-trip",
+            place: "Mueang Chiang Mai District, Thailand",
+            dates: "28–29 Aug 2026",
+            startDate: start,
+            endDate: start.addingTimeInterval(25.5 * 60 * 60),
+            assets: assets,
+            coverID: assets[0].id
+        )
+        let photos = assets.map(makeReelPhoto)
+        let insights = Dictionary(uniqueKeysWithValues: assets.enumerated().map { index, asset in
+            let isPeopleChapter = index >= 4
+            return (
+                asset.id,
+                MontagePhotoInsight(
+                    memoryScore: 0.86,
+                    aestheticScore: 0.82,
+                    contentKind: isPeopleChapter ? .people : .scenery,
+                    peopleCount: isPeopleChapter ? 3 : 0,
+                    classifications: [
+                        NativePhotoClassification(
+                            identifier: isPeopleChapter ? "group portrait" : "outdoor landscape",
+                            confidence: 0.86
+                        )
+                    ]
+                )
+            )
+        })
+
+        let plan = LocalStoryIntelligence.makeTitlePlan(
+            for: trip,
+            photos: photos,
+            insights: insights,
+            isNearby: false,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(plan.drafts[.opening]?.title, "Together in Chiang Mai")
+        XCTAssertEqual(plan.drafts[.place]?.title, "The people in the story")
+        XCTAssertEqual(plan.drafts[.place]?.subtitle, "Day 2 of 2")
+        XCTAssertEqual(plan.drafts[.place]?.afterPhotoID, "moment-3")
+        XCTAssertEqual(plan.enabledCards, [.opening, .place])
+
+        let cards = TitleCardKind.allCases.compactMap { kind -> MontageTitleCard? in
+            guard plan.enabledCards.contains(kind), let draft = plan.drafts[kind] else { return nil }
+            return MontageTitleCard(
+                kind: kind,
+                title: draft.title,
+                subtitle: draft.subtitle,
+                style: draft.style,
+                duration: draft.duration,
+                afterPhotoID: draft.afterPhotoID
+            )
+        }
+        let timeline = MontageTimelineBuilder.make(photos: photos, titleCards: cards)
+        guard case let .title(storyBeat) = timeline[5] else {
+            return XCTFail("Expected the local story beat after the final photo from day one")
+        }
+        XCTAssertEqual(storyBeat.kind, .place)
+    }
+
+    func testLocalTitlePlanUsesAppleVisionSceneLabelsWithoutInventingALandmark() throws {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let assets = (0..<6).map {
+            makeAsset("coast-\($0)", start: start, minutes: $0 * 20)
+        }
+        let trip = Trip(
+            id: "coast",
+            place: "Da Nang, Vietnam",
+            dates: "2 Aug 2026",
+            startDate: start,
+            endDate: start.addingTimeInterval(100 * 60),
+            assets: assets,
+            coverID: assets[0].id
+        )
+        let photos = assets.map(makeReelPhoto)
+        let insights = Dictionary(uniqueKeysWithValues: assets.map { asset in
+            (
+                asset.id,
+                MontagePhotoInsight(
+                    memoryScore: 0.9,
+                    aestheticScore: 0.86,
+                    contentKind: .scenery,
+                    classifications: [
+                        NativePhotoClassification(identifier: "beach sunset", confidence: 0.91)
+                    ]
+                )
+            )
+        })
+
+        let plan = LocalStoryIntelligence.makeTitlePlan(
+            for: trip,
+            photos: photos,
+            insights: insights,
+            isNearby: false
+        )
+
+        XCTAssertEqual(plan.drafts[.opening]?.title, "By the water")
+        XCTAssertEqual(plan.drafts[.opening]?.subtitle, "Da Nang, Vietnam · 2 Aug 2026")
+        XCTAssertEqual(plan.drafts[.place]?.title, "Toward the water")
+        XCTAssertTrue(plan.enabledCards.contains(.place))
+        XCTAssertFalse(plan.enabledCards.contains(.ending))
     }
 
     func testTitleDraftsRemainIndependentAndDurationsAreClamped() {
@@ -1091,6 +1286,20 @@ final class TripReelModelTests: XCTestCase {
             filename: "\(id).HEIC",
             pixelWidth: width,
             pixelHeight: height
+        )
+    }
+
+    private func makeReelPhoto(from asset: TripAsset) -> ReelPhoto {
+        ReelPhoto(
+            id: asset.id,
+            source: asset.source,
+            label: asset.filename,
+            time: "12:00",
+            isSimilar: false,
+            pixelWidth: asset.pixelWidth,
+            pixelHeight: asset.pixelHeight,
+            frameStyle: .fullBleed,
+            motionStyle: .zoomIn
         )
     }
 

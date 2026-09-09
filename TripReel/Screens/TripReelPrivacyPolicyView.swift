@@ -20,7 +20,7 @@ struct TripReelPrivacyPolicyView: View {
                             "Apple Vision analyzes small thumbnails on your iPhone for screenshots, document-like images, people, scenery, food, and visual quality. Recognized text itself is not retained. Photos left out of an automatic cut remain available under More Photos and can be restored."
                         )
                         section(
-                            "Optional AI Remix",
+                            "AI Director",
                             "Your complete First Cut is created on-device without cloud AI. Only after you choose Improve with AI, select a creative direction, and explicitly continue may selected reduced-resolution JPEG previews pass through TripReel's secure backend to an OpenAI image-capable model. TripReel re-encodes them without EXIF, GPS, filenames, capture dates, or stable Apple Photos identifiers. Known screenshots and sensitive or document-like images are blocked. OpenAI returns a structured editing plan; TripReel validates and applies it locally without changing your originals."
                         )
                         section(
@@ -33,7 +33,7 @@ struct TripReelPrivacyPolicyView: View {
                         )
                         section(
                             "Your choices",
-                            "You can finish, export, and manually edit using only the on-device First Cut. Every AI Remix starts with a creative direction and an explicit sharing decision. Declining or closing that decision sends nothing and returns to First Cut. Revoking Photos access in iOS Settings stops further library access."
+                            "You can finish, export, and manually edit using only the on-device First Cut. Every AI edit starts with an explicit OpenAI sharing decision, followed by photo and creative-direction choices. Nothing is prepared until you tap Create AI cut. Declining or closing sends nothing and returns to First Cut. Revoking Photos access in iOS Settings stops further library access."
                         )
 
                         VStack(alignment: .leading, spacing: 10) {
@@ -79,7 +79,7 @@ struct TripReelPrivacyPolicyView: View {
             MetadataText(text: "TripReel")
             Text("Your memories stay yours.")
                 .font(TR.display(34))
-            Text("This policy explains the private on-device First Cut and what happens only if you explicitly request an AI Remix.")
+            Text("This policy explains the private on-device First Cut and what happens only if you explicitly request an AI edit.")
                 .font(TR.ui(14))
                 .foregroundStyle(.white.opacity(0.66))
                 .lineSpacing(4)

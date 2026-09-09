@@ -30,6 +30,7 @@ struct ExportScreen: View {
                 .padding(.leading, 48)
                 .padding(.top, 4)
                 .trEntrance(0, distance: 10)
+                .accessibilityIdentifier("export-screen")
 
                 Spacer(minLength: 20)
 
@@ -130,7 +131,6 @@ struct ExportScreen: View {
         } message: {
             Text(model.exportErrorMessage ?? "Please try again.")
         }
-        .accessibilityIdentifier("export-screen")
     }
 }
 
@@ -781,13 +781,13 @@ struct CleanupScreen: View {
                 cleanupOffer
             }
         }
-        .accessibilityIdentifier("cleanup-screen")
     }
 
     private var cleanupOffer: some View {
         VStack(spacing: 18) {
             Spacer()
             MetadataText(text: "Saved to camera roll", color: .white.opacity(0.53))
+                .accessibilityIdentifier("cleanup-screen")
 
             Text(cleanupQuestion)
                 .font(TR.display(32))
@@ -858,6 +858,7 @@ private struct CleanupGrid: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Cut photos")
                     .font(TR.display(29))
+                    .accessibilityIdentifier("cleanup-screen")
                 Text(subtitle)
                     .font(TR.ui(13))
                     .foregroundStyle(.white.opacity(0.57))

@@ -307,14 +307,28 @@ enum TripPlaceLabelFormatter {
     }
 
     private static func destinationName(for placemark: TripPlacemarkComponents) -> String? {
-        let locality = firstNonempty(
+        let localName = firstNonempty(
             placemark.locality,
             placemark.subLocality,
             placemark.subAdministrativeArea
         )
+        let administrativeName = firstNonempty(placemark.administrativeArea)
+        let countryCode = placemark.isoCountryCode?.uppercased()
+        // Apple commonly returns a ward in Vietnam and an administrative
+        // district (for example “Mueang Chiang Mai District”) in Thailand.
+        // For a trip-level label, the province/city is the name people expect.
+        let locality: String? = {
+            switch countryCode {
+            case "TH", "VN":
+                return simplifiedAdministrativeName(administrativeName)
+                    ?? simplifiedAdministrativeName(localName)
+            default:
+                return simplifiedAdministrativeName(localName)
+            }
+        }()
 
         let region: String?
-        switch placemark.isoCountryCode?.uppercased() {
+        switch countryCode {
         case "US", "CA", "AU":
             region = firstNonempty(placemark.administrativeArea, placemark.country)
         default:
@@ -378,6 +392,19 @@ enum TripPlaceLabelFormatter {
     private static func cleaned(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed?.isEmpty == false ? trimmed : nil
+    }
+
+    private static func simplifiedAdministrativeName(_ value: String?) -> String? {
+        guard var result = cleaned(value) else { return nil }
+        if result.range(of: "Mueang ", options: [.anchored, .caseInsensitive]) != nil {
+            result = String(result.dropFirst("Mueang ".count))
+        }
+        for suffix in [" Metropolitan District", " Municipality", " Province", " District"] {
+            if result.range(of: suffix, options: [.anchored, .backwards, .caseInsensitive]) != nil {
+                result = String(result.dropLast(suffix.count))
+            }
+        }
+        return cleaned(result)
     }
 
     private static func samePlace(_ lhs: String?, _ rhs: String?) -> Bool {

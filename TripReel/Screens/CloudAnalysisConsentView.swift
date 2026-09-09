@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Explicit opt-in shown only after the user chooses an AI creative direction.
-/// Entering or dismissing this view never starts thumbnail preparation or a request.
+/// Explicit opt-in shown before the user chooses an AI direction or selects
+/// upload candidates. Opening or dismissing this view never prepares a photo.
 struct CloudAnalysisConsentView: View {
     enum Context: Equatable {
         case aiRemix(AICutDirection)
@@ -16,9 +16,9 @@ struct CloudAnalysisConsentView: View {
     @State private var showsDataDetails = false
     @State private var showsPrivacyPolicy = false
 
-    private var direction: AICutDirection? {
-        guard case let .aiRemix(direction) = context else { return nil }
-        return direction
+    private var isSettings: Bool {
+        if case .settings = context { return true }
+        return false
     }
 
     var body: some View {
@@ -26,17 +26,16 @@ struct CloudAnalysisConsentView: View {
             WarmBackground(variant: .access)
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 20) {
                     header
                     introduction
-                    permissions
-                    privacySummary
+                    essentials
                     dataDetails
                     actions
                 }
                 .padding(.horizontal, 24)
-                .padding(.top, 18)
-                .padding(.bottom, 34)
+                .padding(.top, 16)
+                .padding(.bottom, 32)
             }
         }
         .foregroundStyle(TR.cream)
@@ -52,7 +51,7 @@ struct CloudAnalysisConsentView: View {
 
     private var header: some View {
         HStack {
-            MetadataText(text: "AI Remix · your choice", color: TR.accent)
+            MetadataText(text: "AI Director · no upload yet", color: TR.accent)
             Spacer()
             Button(action: onKeepOnDevice) {
                 Image(systemName: "xmark")
@@ -63,47 +62,38 @@ struct CloudAnalysisConsentView: View {
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Close and keep First Cut")
-            .accessibilityHint("No photo preview will be uploaded")
+            .accessibilityLabel("Not now")
+            .accessibilityHint("Closes without sharing any photo preview")
             .accessibilityIdentifier("cloud-analysis-close")
         }
     }
 
     private var introduction: some View {
-        VStack(alignment: .leading, spacing: 13) {
+        VStack(alignment: .leading, spacing: 12) {
             ZStack {
                 Circle()
                     .fill(TR.accent.opacity(0.15))
-                    .frame(width: 54, height: 54)
-                Image(systemName: direction?.symbol ?? "sparkles.rectangle.stack")
-                    .font(.system(size: 23, weight: .medium))
+                    .frame(width: 52, height: 52)
+                Image(systemName: "sparkles.rectangle.stack")
+                    .font(.system(size: 22, weight: .medium))
                     .foregroundStyle(TR.accent)
             }
             .accessibilityHidden(true)
 
-            Text(direction.map { "Create “\($0.title)”" } ?? "Optional AI Remix")
+            Text("Before AI sees your photos")
                 .font(TR.display(36))
                 .tracking(-0.4)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("To direct another version, TripReel will send selected reduced photo previews through TripReel's secure service to OpenAI’s GPT-5.6 Luna. Nothing leaves this iPhone until you continue.")
+            Text("With your permission, TripReel sends small previews of the photos you choose to OpenAI’s GPT-5.6 Luna to create another cut.")
                 .font(TR.ui(15))
                 .foregroundStyle(.white.opacity(0.76))
-                .lineSpacing(5)
+                .lineSpacing(4)
                 .fixedSize(horizontal: false, vertical: true)
-
-            Label("Your First Cut always stays available", systemImage: "checkmark.shield")
-                .font(TR.ui(13, weight: .semibold))
-                .foregroundStyle(TR.keep)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(TR.keep.opacity(0.10))
-                .overlay(Capsule().stroke(TR.keep.opacity(0.28), lineWidth: 1))
-                .clipShape(Capsule())
 
             if !cloudServiceAvailable {
                 Label(
-                    "AI Remix isn't available in this build. Your on-device First Cut is ready.",
+                    "AI Director isn’t available in this build. Your First Cut is still ready.",
                     systemImage: "iphone.slash"
                 )
                 .font(TR.ui(12, weight: .medium))
@@ -113,84 +103,31 @@ struct CloudAnalysisConsentView: View {
         }
     }
 
-    private var permissions: some View {
-        HStack(alignment: .top, spacing: 12) {
-            consentColumn(
-                title: "AI can",
-                symbol: "checkmark",
-                tint: TR.keep,
-                items: [
-                    "Shape the story and moments",
-                    "Write editable title hooks",
-                    "Pick bundled music and a look"
-                ]
-            )
-
-            consentColumn(
-                title: "AI can't",
-                symbol: "xmark",
-                tint: TR.cut,
-                items: [
-                    "Change originals",
-                    "Identify people or places",
-                    "Invent photos or external music"
-                ]
-            )
-        }
-    }
-
-    private func consentColumn(
-        title: String,
-        symbol: String,
-        tint: Color,
-        items: [String]
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 11) {
-            Text(title)
-                .font(TR.ui(14, weight: .semibold))
-            ForEach(items, id: \.self) { item in
-                HStack(alignment: .top, spacing: 7) {
-                    Image(systemName: symbol)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(tint)
-                        .frame(width: 15, height: 15)
-                    Text(item)
-                        .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.65))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(15)
-        .glassCard(cornerRadius: 18)
-    }
-
-    private var privacySummary: some View {
+    private var essentials: some View {
         VStack(spacing: 0) {
-            summaryRow(
-                symbol: "photo.stack",
-                title: "Reduced previews only",
-                detail: "No originals, filenames, dates, locations or Photos identifiers."
+            essentialRow(
+                symbol: "checkmark.circle",
+                title: "Choose the photos next",
+                detail: "Nothing is selected or sent on this screen."
             )
             Divider().overlay(.white.opacity(0.10)).padding(.leading, 56)
-            summaryRow(
-                symbol: "wand.and.stars",
-                title: "Editable recommendations return",
-                detail: "Story, titles, bundled music, look and photo decisions are applied locally."
+            essentialRow(
+                symbol: "photo.on.rectangle",
+                title: "Previews, not originals",
+                detail: "No filenames, dates, locations or Photos IDs."
             )
             Divider().overlay(.white.opacity(0.10)).padding(.leading, 56)
-            summaryRow(
-                symbol: "externaldrive.badge.xmark",
-                title: "No intentional storage by TripReel",
-                detail: "The service processes the request without saving your previews."
+            essentialRow(
+                symbol: "checkmark.shield",
+                title: "Your First Cut stays safe",
+                detail: "You can keep it instead of the AI version."
             )
         }
         .padding(.horizontal, 15)
         .glassCard(cornerRadius: 20)
     }
 
-    private func summaryRow(symbol: String, title: String, detail: String) -> some View {
+    private func essentialRow(symbol: String, title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             RoundedIcon(symbol: symbol, tint: TR.accent, size: 40)
                 .accessibilityHidden(true)
@@ -209,19 +146,13 @@ struct CloudAnalysisConsentView: View {
 
     private var dataDetails: some View {
         DisclosureGroup(isExpanded: $showsDataDetails) {
-            VStack(alignment: .leading, spacing: 12) {
-                detailPoint(
-                    title: "External processor",
-                    body: "Selected previews are sent to OpenAI’s GPT-5.6 Luna through TripReel's Cloudflare service."
-                )
-                detailPoint(
-                    title: "OpenAI retention",
-                    body: "OpenAI may retain API content for abuse monitoring for up to 30 days, or longer when legally or safety-required. Approved Zero Data Retention accounts can remove default storage; child-safety review exceptions may still apply."
-                )
-                detailPoint(
-                    title: "Model training",
-                    body: "OpenAI API data is not used to train its models by default."
-                )
+            VStack(alignment: .leading, spacing: 10) {
+                Text("TripReel’s Cloudflare service passes the selected previews to OpenAI and does not intentionally store them. OpenAI API data is not used for training by default and may be retained for abuse monitoring for up to 30 days, or longer when legally or safety-required. Child-safety review exceptions may apply.")
+                    .font(TR.ui(11))
+                    .foregroundStyle(.white.opacity(0.60))
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Link(
                     "OpenAI API data controls",
                     destination: URL(string: "https://developers.openai.com/api/docs/guides/your-data")!
@@ -229,9 +160,9 @@ struct CloudAnalysisConsentView: View {
                 .font(TR.ui(12, weight: .semibold))
                 .foregroundStyle(TR.accent)
             }
-            .padding(.top, 12)
+            .padding(.top, 11)
         } label: {
-            Label("How the selected previews are handled", systemImage: "lock.shield")
+            Label("Privacy details", systemImage: "lock.shield")
                 .font(TR.ui(14, weight: .semibold))
                 .foregroundStyle(TR.cream)
         }
@@ -243,81 +174,35 @@ struct CloudAnalysisConsentView: View {
         .accessibilityIdentifier("cloud-analysis-data-details")
     }
 
-    private func detailPoint(title: String, body: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(TR.ui(12, weight: .semibold))
-            Text(body)
-                .font(TR.ui(11))
-                .foregroundStyle(.white.opacity(0.60))
-                .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
     private var actions: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             Button(
-                cloudServiceAvailable ? "Continue with AI" : "AI Remix unavailable",
+                cloudServiceAvailable
+                    ? (isSettings ? "Allow cloud enhancement" : "Allow & choose photos")
+                    : "AI Director unavailable",
                 action: onUseCloudEnhancement
             )
             .buttonStyle(CreamButtonStyle())
             .disabled(!cloudServiceAvailable)
             .opacity(cloudServiceAvailable ? 1 : 0.55)
-            .accessibilityHint("Consents to preparing and sending selected reduced previews")
+            .accessibilityHint("Gives permission, then lets you choose which previews may be sent")
             .accessibilityIdentifier("cloud-analysis-accept")
 
-            Button("Keep it on-device", action: onKeepOnDevice)
+            Button("Not now", action: onKeepOnDevice)
                 .font(TR.ui(15, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.74))
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+                .padding(.vertical, 10)
                 .buttonStyle(.plain)
-                .accessibilityHint("Returns to First Cut without uploading any preview")
+                .accessibilityHint("Closes without sharing any photo preview")
                 .accessibilityIdentifier("cloud-analysis-decline")
 
-            Button("Read TripReel privacy policy") { showsPrivacyPolicy = true }
+            Button("TripReel privacy policy") { showsPrivacyPolicy = true }
                 .font(TR.ui(12, weight: .medium))
                 .foregroundStyle(TR.accent)
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("tripreel-privacy-policy-link")
         }
-    }
-}
-
-struct CloudAnalysisSettingsCard: View {
-    let isEnabled: Bool
-    var isAvailable = true
-    let onReviewChoice: () -> Void
-
-    var body: some View {
-        Button(action: onReviewChoice) {
-            HStack(spacing: 13) {
-                RoundedIcon(symbol: "sparkles.rectangle.stack", tint: TR.accent, size: 42)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Optional AI Remix")
-                        .font(TR.ui(15, weight: .semibold))
-                    Text(isAvailable ? "First Cut stays on-device · review privacy" : "Unavailable · First Cut still works")
-                        .font(TR.ui(12))
-                        .foregroundStyle(.white.opacity(0.58))
-                }
-                Spacer()
-                Text("Review")
-                    .font(TR.ui(13, weight: .semibold))
-                    .foregroundStyle(TR.accent)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(TR.accent.opacity(0.75))
-                    .accessibilityHidden(true)
-            }
-            .foregroundStyle(TR.cream)
-            .padding(15)
-            .glassCard(cornerRadius: 18)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Optional AI Remix privacy")
-        .accessibilityHint("Reviews how selected previews are handled")
-        .accessibilityIdentifier("cloud-analysis-settings-card")
     }
 }
 
