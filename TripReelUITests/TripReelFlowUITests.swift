@@ -137,6 +137,8 @@ final class TripReelFlowUITests: XCTestCase {
         launchApp(at: "firstWatch")
         XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("first-cut-continue-button").exists)
+        XCTAssertTrue(screen("first-watch-audio").exists)
+        XCTAssertTrue(app.buttons["Pause soundtrack"].waitForExistence(timeout: 2))
         XCTAssertFalse(screen("improve-with-ai-button").exists)
         XCTAssertFalse(screen("edit-film-button").exists)
 
@@ -145,7 +147,19 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("improve-with-ai-button").exists)
         XCTAssertTrue(screen("edit-film-button").exists)
+        XCTAssertTrue(screen("export-first-cut-button").exists)
         XCTAssertTrue(app.staticTexts["Created privately on your iPhone"].exists)
+    }
+
+    func testSatisfiedUserCanExportFirstCutDirectlyAndReturn() {
+        launchApp(at: "firstCutOptions")
+        XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
+
+        screen("export-first-cut-button").tap()
+
+        XCTAssertTrue(screen("export-screen").waitForExistence(timeout: 3))
+        screen("app-back-button").tap()
+        XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
     }
 
     func testAIConsentComesBeforeDirectionAndDeclineReturnsSafely() {
@@ -199,6 +213,21 @@ final class TripReelFlowUITests: XCTestCase {
         screen("compare-firstCut").tap()
         XCTAssertTrue(screen("edit-compared-cut-button").exists)
         XCTAssertTrue(screen("use-ai-cut-button").exists)
+    }
+
+    func testAIProcessingShowsSecureTransferAndCanCancel() {
+        launchApp(at: "aiProcessing")
+        XCTAssertTrue(screen("ai-processing-screen").waitForExistence(timeout: 3))
+        let transfer = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS[c] %@", "reduced preview copies"))
+            .firstMatch
+        XCTAssertTrue(transfer.waitForExistence(timeout: 2))
+
+        let cancel = app.buttons["Cancel AI edit"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 2))
+        cancel.tap()
+
+        XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
     }
 
     func testEveryTitleIsAvailableInTheVisualTimelineEditor() {

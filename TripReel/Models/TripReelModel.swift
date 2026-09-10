@@ -1507,6 +1507,12 @@ final class TripReelModel: ObservableObject {
             photoAnalysisRecentAssets = Array(trip.assets.prefix(5))
             photoAnalysisCurrentAsset = trip.assets.dropFirst(5).first
         }
+        if arguments.contains("-qaAISending"), screen == .aiProcessing {
+            selectedAICutDirection = .surpriseMe
+            aiCutProgress = 0.58
+            aiCutStatus = "Directing a different cut…"
+            resetAICutPhotoSelection()
+        }
 #endif
         if demoMode {
             resetTitleDrafts()
@@ -2297,7 +2303,7 @@ final class TripReelModel: ObservableObject {
     func keepFirstCutForExport() {
         guard let firstCutSnapshot else { return }
         applyEditSnapshot(firstCutSnapshot, source: .firstCut)
-        exportReturnScreen = .firstWatch
+        exportReturnScreen = .firstCutOptions
         go(.export, direction: .forward)
     }
 

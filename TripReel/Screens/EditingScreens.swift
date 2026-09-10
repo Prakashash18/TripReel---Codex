@@ -2,9 +2,14 @@ import SwiftUI
 
 struct FirstWatchScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @StateObject private var soundtrack = LocalSoundtrackPlayer()
 
     private var firstCut: TripEditSnapshot? {
         model.firstCutSnapshot
+    }
+
+    private var firstCutTrack: MusicTrack? {
+        model.musicTrack(withID: firstCut?.selectedTrackID)
     }
 
     var body: some View {
@@ -67,6 +72,34 @@ struct FirstWatchScreen: View {
                 .trEntrance(1, distance: 12)
             }
         }
+        .overlay(alignment: .topTrailing) {
+            Button {
+                soundtrack.toggle(track: firstCutTrack)
+            } label: {
+                Image(systemName: soundtrack.isPlaying ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(TR.cream)
+                    .frame(width: 42, height: 42)
+                    .background(.black.opacity(0.58))
+                    .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
+                    .clipShape(Circle())
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(TactileButtonStyle(pressedScale: 0.92))
+            .padding(.trailing, 16)
+            .safeAreaPadding(.top, 7)
+            .disabled(firstCutTrack == nil)
+            .opacity(firstCutTrack == nil ? 0.42 : 1)
+            .accessibilityLabel(soundtrack.isPlaying ? "Pause soundtrack" : "Play soundtrack")
+            .accessibilityHint(firstCutTrack.map { "Soundtrack: \($0.name)" } ?? "No soundtrack selected")
+            .accessibilityIdentifier("first-watch-audio")
+        }
+        .task(id: firstCutTrack?.id) {
+            soundtrack.play(track: firstCutTrack)
+        }
+        .onDisappear {
+            soundtrack.stop()
+        }
     }
 }
 
@@ -117,13 +150,29 @@ struct FirstCutOptionsScreen: View {
                     } label: {
                         VStack(spacing: 3) {
                             Text("Edit Myself")
-                            Text("Change the film—or export it as it is")
+                            Text("Change photos, framing, titles, music and pace")
                                 .font(TR.ui(10))
                                 .foregroundStyle(.white.opacity(0.52))
                         }
                     }
                     .buttonStyle(GlassButtonStyle())
                     .accessibilityIdentifier("edit-film-button")
+
+                    Button {
+                        model.keepFirstCutForExport()
+                    } label: {
+                        Label("Export This", systemImage: "checkmark.circle.fill")
+                            .font(TR.ui(14, weight: .semibold))
+                            .foregroundStyle(TR.cream.opacity(0.84))
+                            .frame(maxWidth: .infinity)
+                            .frame(minHeight: 46)
+                            .background(.white.opacity(0.055))
+                            .overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 1))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(TactileButtonStyle(pressedScale: 0.97))
+                    .accessibilityHint("Skips editing and opens export with the First Cut")
+                    .accessibilityIdentifier("export-first-cut-button")
                 }
                 .trEntrance(2, distance: 12)
 
@@ -525,7 +574,6 @@ private struct DirectionMiniTimeline: View {
 struct AICutProcessingScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var fansOut = false
 
     var body: some View {
         ZStack {
@@ -582,12 +630,18 @@ struct AICutProcessingScreen: View {
                             .multilineTextAlignment(.center)
                             .lineSpacing(3)
 
-                        Button("Cancel · Keep First Cut") { model.cancelAICut() }
-                            .font(TR.ui(14, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.72))
-                            .padding(.top, 8)
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("ai-cut-cancel")
+                        Button {
+                            model.cancelAICut()
+                        } label: {
+                            Label("Cancel AI edit", systemImage: "xmark")
+                        }
+                        .buttonStyle(GlassButtonStyle())
+                        .padding(.top, 8)
+                        .accessibilityIdentifier("ai-cut-cancel")
+
+                        Text("Your First Cut stays unchanged")
+                            .font(TR.ui(11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.42))
                     }
                 }
 
@@ -595,37 +649,207 @@ struct AICutProcessingScreen: View {
             }
             .padding(.horizontal, 28)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.7).repeatForever(autoreverses: true)) {
-                fansOut = true
-            }
-        }
         .accessibilityIdentifier("ai-processing-screen")
     }
 
     private var processingArtwork: some View {
-        ZStack {
-            ForEach(Array((model.firstCutSnapshot?.keptPhotos.prefix(3) ?? []).enumerated()), id: \.element.id) { index, photo in
-                PhotoAssetView(source: photo.source)
-                    .frame(width: 126, height: 166)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.16), lineWidth: 1))
-                    .rotationEffect(.degrees(fansOut ? Double(index - 1) * 8 : Double(index - 1) * 3))
-                    .offset(x: fansOut ? CGFloat(index - 1) * 43 : CGFloat(index - 1) * 20)
-                    .zIndex(Double(index))
-            }
-
-            Image(systemName: "sparkles")
-                .font(.system(size: 25, weight: .semibold))
-                .foregroundStyle(TR.accent)
-                .padding(16)
-                .background(.black.opacity(0.68))
-                .clipShape(Circle())
-                .offset(y: 78)
-        }
+        AIPhotoTransferArtwork(
+            photos: transferPhotos,
+            isSending: model.aiCutProgress >= 0.54,
+            isActive: model.aiCutFailureMessage == nil,
+            reduceMotion: reduceMotion
+        )
         .frame(height: 205)
-        .accessibilityHidden(true)
+    }
+
+    private var transferPhotos: [ReelPhoto] {
+        let selected = model.aiCutPhotoOptions
+            .filter { model.selectedAICutPhotoIDs.contains($0.id) }
+            .map(\.photo)
+        if !selected.isEmpty {
+            return Array(selected.prefix(6))
+        }
+        return Array((model.firstCutSnapshot?.keptPhotos ?? []).prefix(6))
+    }
+}
+
+private struct AIPhotoTransferArtwork: View {
+    let photos: [ReelPhoto]
+    let isSending: Bool
+    let isActive: Bool
+    let reduceMotion: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            let routeY = proxy.size.height * 0.62
+            let startX: CGFloat = 48
+            let destinationX = isSending ? proxy.size.width - 48 : proxy.size.width * 0.5
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .fill(.black.opacity(0.24))
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .stroke(.white.opacity(0.12), lineWidth: 1)
+                    }
+
+                VStack(spacing: 3) {
+                    MetadataText(
+                        text: isSending ? "Reduced previews · encrypted in transit" : "Preparing reduced previews",
+                        color: isSending ? TR.keep : TR.accent
+                    )
+                    Text(isSending ? "Sending copies securely to OpenAI" : "Original photos remain on this iPhone")
+                        .font(TR.ui(11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.48))
+                }
+                .position(x: proxy.size.width / 2, y: 27)
+
+                Capsule()
+                    .fill(.white.opacity(0.09))
+                    .frame(width: max(1, proxy.size.width - 100), height: 3)
+                    .position(x: proxy.size.width / 2, y: routeY)
+
+                SecureRouteDash()
+                    .stroke(
+                        isSending ? TR.keep.opacity(0.72) : TR.accent.opacity(0.62),
+                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [3, 7])
+                    )
+                    .frame(width: max(1, destinationX - startX), height: 28)
+                    .position(x: (startX + destinationX) / 2, y: routeY)
+
+                AITransferEndpoint(
+                    symbol: "iphone.gen3",
+                    title: "This iPhone",
+                    detail: "Originals stay here",
+                    tint: TR.accent
+                )
+                .position(x: startX, y: routeY)
+
+                AITransferEndpoint(
+                    symbol: "sparkles",
+                    title: "OpenAI",
+                    detail: "GPT-5.6 Luna",
+                    tint: TR.keep
+                )
+                .opacity(isSending ? 1 : 0.34)
+                .position(x: proxy.size.width - 48, y: routeY)
+
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(TR.ink)
+                    .frame(width: 26, height: 26)
+                    .background(isSending ? TR.keep : TR.accent)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(.black.opacity(0.20), lineWidth: 1))
+                    .position(x: proxy.size.width / 2, y: routeY)
+                    .shadow(color: (isSending ? TR.keep : TR.accent).opacity(0.24), radius: 12)
+
+                if photos.isEmpty {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.46))
+                        .position(x: (startX + destinationX) / 2, y: routeY - 24)
+                } else if reduceMotion || !isActive {
+                    transferCard(photos[0], index: 0)
+                        .position(x: (startX + destinationX) / 2, y: routeY - 24)
+                } else {
+                    TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                        ZStack {
+                            ForEach(Array(photos.prefix(3).enumerated()), id: \.element.id) { index, photo in
+                                let progress = transferProgress(at: timeline.date, index: index)
+                                let eased = progress * progress * (3 - (2 * progress))
+                                let x = startX + ((destinationX - startX) * eased)
+                                let arc = sin(progress * .pi) * -18
+
+                                transferCard(photo, index: index)
+                                    .scaleEffect(0.82 + (sin(progress * .pi) * 0.18))
+                                    .rotationEffect(.degrees(Double(index - 1) * 2.5))
+                                    .opacity(edgeOpacity(for: progress))
+                                    .position(x: x, y: routeY - 25 + arc)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            isSending
+                ? "Sending selected reduced preview copies securely to OpenAI GPT-5.6 Luna. Original photos stay on this iPhone."
+                : "Preparing reduced preview copies on this iPhone. Original photos stay on this iPhone."
+        )
+        .accessibilityIdentifier("ai-transfer-artwork")
+    }
+
+    private func transferCard(_ photo: ReelPhoto, index: Int) -> some View {
+        PhotoAssetView(source: photo.source)
+            .frame(width: 48, height: 62)
+            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(.white.opacity(0.30), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.46), radius: 8, y: 5)
+            .zIndex(Double(10 + index))
+    }
+
+    private func transferProgress(at date: Date, index: Int) -> CGFloat {
+        let cycleDuration = 2.25
+        let stagger = Double(index) * (cycleDuration / 3)
+        let raw = (date.timeIntervalSinceReferenceDate + stagger)
+            .truncatingRemainder(dividingBy: cycleDuration) / cycleDuration
+        return CGFloat(raw < 0 ? raw + 1 : raw)
+    }
+
+    private func edgeOpacity(for progress: CGFloat) -> Double {
+        let fadeIn = min(1, progress / 0.10)
+        let fadeOut = min(1, (1 - progress) / 0.14)
+        return Double(max(0, min(fadeIn, fadeOut)))
+    }
+}
+
+private struct AITransferEndpoint: View {
+    let symbol: String
+    let title: String
+    let detail: String
+    let tint: Color
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: symbol)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 48, height: 48)
+                .background(.black.opacity(0.62))
+                .overlay(Circle().stroke(.white.opacity(0.16), lineWidth: 1))
+                .clipShape(Circle())
+
+            VStack(spacing: 1) {
+                Text(title)
+                    .font(TR.ui(10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.78))
+                Text(detail)
+                    .font(TR.ui(8, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.40))
+            }
+            .fixedSize()
+        }
+    }
+}
+
+private struct SecureRouteDash: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: 0, y: rect.midY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.midY),
+            control: CGPoint(x: rect.midX, y: rect.minY)
+        )
+        return path
     }
 }
 
