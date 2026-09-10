@@ -1,6 +1,8 @@
 import SwiftUI
 
 enum TR {
+    static let appName = "Memories"
+    static let tagline = "Turn the photos that matter into a story."
     static let cream = Color(red: 0.992, green: 0.980, blue: 0.961)
     static let ink = Color(red: 0.090, green: 0.067, blue: 0.047)
     static let accent = Color(red: 0.941, green: 0.706, blue: 0.369)

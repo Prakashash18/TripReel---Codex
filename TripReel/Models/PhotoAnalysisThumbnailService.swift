@@ -23,10 +23,10 @@ enum PhotoAnalysisThumbnailError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable: "The photo is not available right now."
-        case .inaccessible: "The photo is no longer available to TripReel."
-        case .decodeFailed: "TripReel couldn't read the photo."
-        case .encodeFailed: "TripReel couldn't prepare a private thumbnail."
-        case .tooLarge: "The reduced thumbnail exceeded TripReel's upload limit."
+        case .inaccessible: "The photo is no longer available to Memories."
+        case .decodeFailed: "Memories couldn't read the photo."
+        case .encodeFailed: "Memories couldn't prepare a private thumbnail."
+        case .tooLarge: "The reduced thumbnail exceeded Memories' upload limit."
         }
     }
 }

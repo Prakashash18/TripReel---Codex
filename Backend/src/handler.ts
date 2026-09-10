@@ -16,10 +16,12 @@ import {
   LIMITS,
   RETENTION,
   configuredModel,
+  type PublicAIEditPlan,
   type PublicAnalysisResponse,
   type ValidatedPayload,
 } from "./contract.ts";
 import { analyzeWithOpenAI, ServiceProblem } from "./openai.ts";
+import { compareAICut } from "./comparison.ts";
 import { RequestProblem, validatePayload } from "./validation.ts";
 
 interface AppAttestShardStub {
@@ -657,9 +659,21 @@ async function performAnalysis(
     }
     throw error;
   }
+  let publicPlan: PublicAIEditPlan;
+  if (analysis.version === 3) {
+    if (payload.baseline === undefined) {
+      throw new ServiceProblem(502, "invalid_upstream_response", "The analysis provider returned an invalid response.");
+    }
+    publicPlan = {
+      ...analysis,
+      comparison: compareAICut(payload.baseline, payload.photos, analysis),
+    };
+  } else {
+    publicPlan = analysis;
+  }
   const body: PublicAnalysisResponse = {
     model: configuration.model,
-    plan: analysis,
+    plan: publicPlan,
     retention: RETENTION,
   };
   return jsonResponse(body, 200, origin);

@@ -61,17 +61,17 @@ enum TripReelVideoExportError: LocalizedError, Sendable {
         case .noPhotos:
             "Keep at least one photo before exporting."
         case let .photoUnavailable(label):
-            "\(label) needs a little longer in Photos. TripReel tried again automatically and kept every edit safe. Check your connection, then retry the download."
+            "\(label) needs a little longer in Photos. Memories tried again automatically and kept every edit safe. Check your connection, then retry the download."
         case .cannotCreateWriter:
-            "TripReel couldn't start the video encoder on this device."
+            "Memories couldn't start the video encoder on this device."
         case .cannotCreateFrame:
-            "TripReel ran out of room while drawing a video frame."
+            "Memories ran out of room while drawing a video frame."
         case let .encodingFailed(message):
             "The video encoder stopped: \(message)"
         case .soundtrackFailed:
             "The film was rendered, but the selected soundtrack couldn't be added. Pick another track or No music and try again."
         case .photosPermissionDenied:
-            "Allow TripReel to add videos in Settings to save this film to Photos."
+            "Allow Memories to add videos in Settings to save this film to Photos."
         case let .saveFailed(message):
             "Photos couldn't save this film: \(message)"
         }
@@ -106,7 +106,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             .appendingPathComponent("TripReel-Exports", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let silentURL = directory.appendingPathComponent("silent-\(UUID().uuidString).mp4")
-        let finalURL = directory.appendingPathComponent("TripReel-\(UUID().uuidString).mp4")
+        let finalURL = directory.appendingPathComponent("Memories-\(UUID().uuidString).mp4")
         let stagingDirectory = directory.appendingPathComponent(
             "staging-\(UUID().uuidString)",
             isDirectory: true
@@ -1096,7 +1096,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
     }
 
     private static func drawWatermark(in bounds: CGRect) {
-        let text = "Made with TripReel"
+        let text = "Made with Memories"
         let fontSize = max(24, bounds.width * 0.038)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: UIFont.systemFont(ofSize: fontSize, weight: .bold),

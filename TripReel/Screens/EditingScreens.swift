@@ -235,7 +235,7 @@ struct AICutDirectionScreen: View {
                     .buttonStyle(CreamButtonStyle())
                     .disabled(!model.aiCutCanCreate)
                     .opacity(model.aiCutCanCreate ? 1 : 0.48)
-                    .accessibilityHint("Sends only the selected reduced previews to OpenAI and creates another cut")
+                    .accessibilityHint("Sends the selected reduced previews and current edit recipe to OpenAI, then creates a comparison cut")
                     .accessibilityIdentifier("ai-direction-continue")
 
                     Text(sharingSummary)
@@ -332,8 +332,8 @@ struct AICutDirectionScreen: View {
     private var sharingSummary: String {
         let context = model.aiCutStoryContext.trimmingCharacters(in: .whitespacesAndNewlines)
         return context.isEmpty
-            ? "\(model.aiCutSelectedPhotoCount) small previews will be sent to OpenAI’s GPT-5.6 Luna."
-            : "\(model.aiCutSelectedPhotoCount) small previews and your story hint will be sent to OpenAI’s GPT-5.6 Luna."
+            ? "OpenAI’s GPT-5.6 Luna receives \(model.aiCutSelectedPhotoCount) small previews and your current edit recipe."
+            : "OpenAI’s GPT-5.6 Luna receives \(model.aiCutSelectedPhotoCount) small previews, your edit recipe and story hint."
     }
 }
 
@@ -703,7 +703,7 @@ struct AICutProcessingScreen: View {
                         .frame(height: 3)
                         .animation(reduceMotion ? nil : TRMotion.progress, value: model.aiCutProgress)
 
-                        Text("Selected reduced previews are used only to direct this alternative edit. Rendering stays on your iPhone.")
+                        Text("AI is comparing these previews with your First Cut’s order, pace, titles, music and motion. Rendering stays on your iPhone.")
                             .font(TR.ui(12))
                             .foregroundStyle(.white.opacity(0.50))
                             .multilineTextAlignment(.center)
@@ -1049,6 +1049,13 @@ struct AICutComparisonScreen: View {
                             .transition(.opacity)
                     }
 
+                    if previewSource == .aiCut,
+                       let diagnosis = model.aiCutDiagnosis,
+                       let comparison = model.aiCutComparison {
+                        AICutDifferenceCard(diagnosis: diagnosis, comparison: comparison)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+
                     if previewSource == .aiCut, !model.aiCutRecommendations.isEmpty {
                         AICutRecommendationsCard(recommendations: model.aiCutRecommendations)
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -1103,6 +1110,111 @@ struct AICutComparisonScreen: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("compare-\(source.rawValue)")
+    }
+}
+
+private struct AICutDifferenceCard: View {
+    let diagnosis: AICutDiagnosis
+    let comparison: AICutComparison
+
+    private var changes: [(String, String)] {
+        var values: [(String, String)] = []
+        if comparison.restoredCount > 0 {
+            values.append(("arrow.uturn.backward", "+\(comparison.restoredCount) restored"))
+        }
+        if comparison.removedCount > 0 {
+            values.append(("minus.circle", "\(comparison.removedCount) removed"))
+        }
+        if comparison.reorderedCount > 0 {
+            values.append(("arrow.up.arrow.down", "\(comparison.reorderedCount) reordered"))
+        }
+        if comparison.retimedCount > 0 {
+            values.append(("metronome", "\(comparison.retimedCount) re-timed"))
+        }
+        if comparison.motionChangedCount > 0 {
+            values.append(("move.3d", "\(comparison.motionChangedCount) new moves"))
+        }
+        if comparison.titleChangedCount > 0 {
+            values.append(("textformat", "\(comparison.titleChangedCount) title edits"))
+        }
+        if comparison.soundtrackChanged { values.append(("music.note", "New soundtrack")) }
+        if comparison.treatmentChanged { values.append(("wand.and.stars", "New treatment")) }
+        return Array(values.prefix(6))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack {
+                MetadataText(
+                    text: comparison.materiallyDifferent ? "What AI changed" : "Focused refinement",
+                    color: comparison.materiallyDifferent ? TR.keep : TR.accent
+                )
+                Spacer()
+                Text("Change score \(comparison.score)")
+                    .font(TR.mono(9))
+                    .foregroundStyle(.white.opacity(0.42))
+            }
+
+            Text(diagnosis.verdict)
+                .font(TR.ui(14, weight: .semibold))
+                .foregroundStyle(TR.cream)
+                .lineSpacing(2)
+
+            if !changes.isEmpty {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    ForEach(Array(changes.enumerated()), id: \.offset) { _, change in
+                        HStack(spacing: 7) {
+                            Image(systemName: change.0)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(TR.accent)
+                            Text(change.1)
+                                .font(TR.ui(10, weight: .semibold))
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundStyle(.white.opacity(0.72))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(.white.opacity(0.055))
+                        .clipShape(Capsule())
+                    }
+                }
+            }
+
+            if let issue = diagnosis.issues.first {
+                HStack(alignment: .top, spacing: 9) {
+                    Image(systemName: issue.kind.symbol)
+                        .foregroundStyle(TR.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(issue.title)
+                            .font(TR.ui(11, weight: .semibold))
+                            .foregroundStyle(TR.cream)
+                        Text(issue.detail)
+                            .font(TR.ui(10))
+                            .foregroundStyle(.white.opacity(0.50))
+                            .lineSpacing(2)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .padding(16)
+        .glassCard(cornerRadius: 20)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("ai-cut-difference-card")
+    }
+}
+
+private extension AICutDiagnosisKind {
+    var symbol: String {
+        switch self {
+        case .weakHook: "sparkles.rectangle.stack"
+        case .flatPacing: "metronome"
+        case .repetition: "rectangle.on.rectangle"
+        case .missingContext: "point.3.connected.trianglepath.dotted"
+        case .weakEnding: "flag.checkered"
+        case .limitedVariety: "square.grid.2x2"
+        }
     }
 }
 
@@ -2156,7 +2268,7 @@ private struct PhotoEditorSheet: View {
             VStack(alignment: .leading, spacing: 17) {
                 SheetHeader(title: "Framing & motion") { dismiss() }
 
-                Text("TripReel starts with an on-device face and subject-aware crop. Pinch to zoom, drag to reframe, then fine-tune only the shots that need it.")
+                Text("Memories starts with an on-device face and subject-aware crop. Pinch to zoom, drag to reframe, then fine-tune only the shots that need it.")
                     .font(TR.ui(12))
                     .foregroundStyle(.white.opacity(0.56))
                     .lineSpacing(4)
@@ -2419,7 +2531,7 @@ private struct FilmStyleSheet: View {
                 SheetHeader(title: "Film style") { dismiss() }
                     .accessibilityIdentifier("film-style-sheet")
 
-                Text("Choose the mood, not every tiny transition. TripReel still adapts portrait and landscape photos automatically.")
+                Text("Choose the mood, not every tiny transition. Memories still adapts portrait and landscape photos automatically.")
                     .font(TR.ui(13))
                     .foregroundStyle(.white.opacity(0.57))
                     .lineSpacing(4)
@@ -2905,7 +3017,7 @@ private struct MusicSheet: View {
                     }
                 }
 
-                Text("Music previews are 90-second excerpts, trimmed, loudness-normalized, faded, and transcoded to AAC for TripReel.")
+                Text("Music previews are 90-second excerpts, trimmed, loudness-normalized, faded, and transcoded to AAC for Memories.")
                     .font(TR.ui(10))
                     .foregroundStyle(.white.opacity(0.38))
                     .lineSpacing(3)

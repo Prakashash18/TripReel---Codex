@@ -1,11 +1,29 @@
 import {
   AI_DIRECTIONS,
+  FIRST_CUT_FRAME_STYLES,
+  FIRST_CUT_TITLE_KINDS,
   LIMITS,
   LOCAL_SELECTIONS,
+  MONTAGE_LOOKS,
+  MOTIONS,
+  MOTION_INTENSITIES,
+  PHOTO_CONTENT_KINDS,
+  PHOTO_ORIENTATIONS,
+  PHOTO_SCORE_BANDS,
+  PHOTO_TIME_GAPS,
   REQUEST_VERSIONS,
+  SOUNDTRACK_IDS,
+  TITLE_STYLES,
   type AICutDirection,
+  type FirstCutInput,
+  type FirstCutTitleKind,
   type LocalSelection,
   type PhotoInput,
+  type PhotoEditorialContext,
+  type PhotoContentKind,
+  type PhotoOrientation,
+  type PhotoScoreBand,
+  type PhotoTimeGap,
   type RequestVersion,
   type ValidatedPayload,
 } from "./contract.ts";
@@ -25,6 +43,8 @@ export class RequestProblem extends Error {
 const ID_PATTERN = /^p(?:0|[1-9][0-9]?)$/u;
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const SOF_MARKERS = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+const SCENE_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,47}$/u;
+const SIMILARITY_GROUP_PATTERN = /^(?:|g(?:0|[1-9][0-9]?))$/u;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -33,6 +53,131 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const actual = Object.keys(value);
   return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function cleanPlainText(value: unknown, maximum: number, allowEmpty = false): string | null {
+  if (typeof value !== "string" || /[\u0000-\u001f\u007f]/u.test(value)) return null;
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if ((!allowEmpty && normalized.length === 0) || normalized.length > maximum) return null;
+  return normalized;
+}
+
+function validatePhotoContext(value: unknown, photoIndex: number): PhotoEditorialContext {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "captureIndex", "dayIndex", "timeGap", "orientation", "contentKind",
+      "peopleCount", "memory", "aesthetic", "similarityGroup", "sceneLabels",
+    ]) ||
+    !Number.isInteger(value.captureIndex) || Number(value.captureIndex) < 0 || Number(value.captureIndex) > 100_000 ||
+    !Number.isInteger(value.dayIndex) || Number(value.dayIndex) < 0 || Number(value.dayIndex) > 365 ||
+    !PHOTO_TIME_GAPS.includes(value.timeGap as PhotoTimeGap) ||
+    !PHOTO_ORIENTATIONS.includes(value.orientation as PhotoOrientation) ||
+    !PHOTO_CONTENT_KINDS.includes(value.contentKind as PhotoContentKind) ||
+    !Number.isInteger(value.peopleCount) || Number(value.peopleCount) < 0 || Number(value.peopleCount) > 20 ||
+    !PHOTO_SCORE_BANDS.includes(value.memory as PhotoScoreBand) ||
+    !PHOTO_SCORE_BANDS.includes(value.aesthetic as PhotoScoreBand) ||
+    typeof value.similarityGroup !== "string" || !SIMILARITY_GROUP_PATTERN.test(value.similarityGroup) ||
+    !Array.isArray(value.sceneLabels) || value.sceneLabels.length > LIMITS.maxSceneLabels ||
+    !value.sceneLabels.every((label) => typeof label === "string" && SCENE_LABEL_PATTERN.test(label))
+  ) {
+    throw new RequestProblem(400, "invalid_photo_context", `photos[${photoIndex}].context is invalid.`);
+  }
+  return {
+    captureIndex: Number(value.captureIndex),
+    dayIndex: Number(value.dayIndex),
+    timeGap: value.timeGap as PhotoTimeGap,
+    orientation: value.orientation as PhotoOrientation,
+    contentKind: value.contentKind as PhotoContentKind,
+    peopleCount: Number(value.peopleCount),
+    memory: value.memory as PhotoScoreBand,
+    aesthetic: value.aesthetic as PhotoScoreBand,
+    similarityGroup: value.similarityGroup,
+    sceneLabels: value.sceneLabels as string[],
+  };
+}
+
+function validateBaseline(value: unknown, requestedIds: ReadonlySet<string>): FirstCutInput {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "photoCount", "durationSeconds", "omittedPhotoCount", "sequence", "titles",
+      "soundtrackId", "look", "motionIntensity",
+    ]) ||
+    !Number.isInteger(value.photoCount) || Number(value.photoCount) < 1 || Number(value.photoCount) > 10_000 ||
+    typeof value.durationSeconds !== "number" || !Number.isFinite(value.durationSeconds) || value.durationSeconds < 0 || value.durationSeconds > 40_000 ||
+    !Number.isInteger(value.omittedPhotoCount) || Number(value.omittedPhotoCount) < 0 ||
+    !Array.isArray(value.sequence) || value.sequence.length < 1 || value.sequence.length > LIMITS.maxPhotos ||
+    Number(value.omittedPhotoCount) !== Number(value.photoCount) - value.sequence.length ||
+    !Array.isArray(value.titles) || value.titles.length > 3 ||
+    typeof value.soundtrackId !== "string" || ![...SOUNDTRACK_IDS, "none"].includes(value.soundtrackId) ||
+    !MONTAGE_LOOKS.includes(value.look as never) ||
+    !MOTION_INTENSITIES.includes(value.motionIntensity as never)
+  ) {
+    throw new RequestProblem(400, "invalid_baseline", "baseline is invalid.");
+  }
+
+  const sequence = value.sequence.map((item, index) => {
+    if (
+      !isRecord(item) ||
+      !hasExactKeys(item, ["photoId", "order", "durationSeconds", "motion", "frameStyle"]) ||
+      typeof item.photoId !== "string" || !requestedIds.has(item.photoId) ||
+      item.order !== index ||
+      typeof item.durationSeconds !== "number" || !Number.isFinite(item.durationSeconds) ||
+      item.durationSeconds < 0.6 || item.durationSeconds > 4 ||
+      !MOTIONS.includes(item.motion as never) ||
+      !FIRST_CUT_FRAME_STYLES.includes(item.frameStyle as never)
+    ) {
+      throw new RequestProblem(400, "invalid_baseline", "baseline.sequence is invalid.");
+    }
+    return {
+      photoId: item.photoId,
+      order: index,
+      durationSeconds: item.durationSeconds,
+      motion: item.motion as FirstCutInput["sequence"][number]["motion"],
+      frameStyle: item.frameStyle as FirstCutInput["sequence"][number]["frameStyle"],
+    };
+  });
+  if (new Set(sequence.map((item) => item.photoId)).size !== sequence.length) {
+    throw new RequestProblem(400, "invalid_baseline", "baseline.sequence IDs must be unique.");
+  }
+
+  const titleKinds = new Set<FirstCutTitleKind>();
+  const titles = value.titles.map((item) => {
+    if (!isRecord(item) || !hasExactKeys(item, ["kind", "title", "subtitle", "style", "durationSeconds"])) {
+      throw new RequestProblem(400, "invalid_baseline", "baseline.titles is invalid.");
+    }
+    const title = cleanPlainText(item.title, LIMITS.maxShortTitleCharacters);
+    const subtitle = cleanPlainText(item.subtitle, LIMITS.maxSubtitleCharacters, true);
+    if (
+      !FIRST_CUT_TITLE_KINDS.includes(item.kind as FirstCutTitleKind) ||
+      titleKinds.has(item.kind as FirstCutTitleKind) || title === null || subtitle === null ||
+      !TITLE_STYLES.includes(item.style as never) ||
+      typeof item.durationSeconds !== "number" || !Number.isFinite(item.durationSeconds) ||
+      item.durationSeconds < 1 || item.durationSeconds > 4
+    ) {
+      throw new RequestProblem(400, "invalid_baseline", "baseline.titles is invalid.");
+    }
+    titleKinds.add(item.kind as FirstCutTitleKind);
+    return {
+      kind: item.kind as FirstCutTitleKind,
+      title,
+      subtitle,
+      style: item.style as FirstCutInput["titles"][number]["style"],
+      durationSeconds: item.durationSeconds,
+    };
+  });
+
+  return {
+    photoCount: Number(value.photoCount),
+    durationSeconds: value.durationSeconds,
+    omittedPhotoCount: Number(value.omittedPhotoCount),
+    sequence,
+    titles,
+    soundtrackId: value.soundtrackId,
+    look: value.look as FirstCutInput["look"],
+    motionIntensity: value.motionIntensity as FirstCutInput["motionIntensity"],
+  };
 }
 
 function decodedBase64Length(value: string): number {
@@ -261,9 +406,17 @@ export function validatePayload(value: unknown): ValidatedPayload {
     value,
     ["version", "direction", "storyContext", "photos"],
   );
+  const hasDirectorRequestShape = isRecord(value) && hasExactKeys(
+    value,
+    ["version", "direction", "baseline", "photos"],
+  );
+  const hasDirectorContextRequestShape = isRecord(value) && hasExactKeys(
+    value,
+    ["version", "direction", "storyContext", "baseline", "photos"],
+  );
   if (
     !isRecord(value) ||
-    (!hasLegacyRequestShape && !hasContextRequestShape) ||
+    (!hasLegacyRequestShape && !hasContextRequestShape && !hasDirectorRequestShape && !hasDirectorContextRequestShape) ||
     typeof value.version !== "number" ||
     !REQUEST_VERSIONS.includes(value.version as RequestVersion) ||
     typeof value.direction !== "string" ||
@@ -273,12 +426,19 @@ export function validatePayload(value: unknown): ValidatedPayload {
     throw new RequestProblem(
       400,
       "invalid_request",
-      "Body must contain only version, direction, optional storyContext, and photos using supported values.",
+      "Body must contain only the supported version, direction, optional storyContext, baseline, and photos fields.",
     );
   }
 
+  if (
+    (value.version === 3 && !hasDirectorRequestShape && !hasDirectorContextRequestShape) ||
+    (value.version !== 3 && (hasDirectorRequestShape || hasDirectorContextRequestShape))
+  ) {
+    throw new RequestProblem(400, "invalid_request", "Version 3 requires a First Cut baseline.");
+  }
+
   let storyContext: string | undefined;
-  if (hasContextRequestShape) {
+  if (hasContextRequestShape || hasDirectorContextRequestShape) {
     if (
       typeof value.storyContext !== "string" ||
       /[\u0000-\u001f\u007f]/u.test(value.storyContext)
@@ -320,19 +480,26 @@ export function validatePayload(value: unknown): ValidatedPayload {
     // request while new clients add the local editorial hint.
     const hasLegacyShape = hasExactKeys(photo, ["id", "imageBase64"]);
     const hasCurrentShape = hasExactKeys(photo, ["id", "imageBase64", "localSelection"]);
-    if (!hasLegacyShape && !hasCurrentShape) {
+    const hasDirectorShape = hasExactKeys(photo, ["id", "imageBase64", "localSelection", "context"]);
+    if (!hasLegacyShape && !hasCurrentShape && !hasDirectorShape) {
       throw new RequestProblem(
         400,
         "invalid_photo",
         `photos[${index}] contains unsupported fields.`,
       );
     }
-    const localSelection: LocalSelection = hasCurrentShape &&
+    if (value.version === 3 && !hasDirectorShape) {
+      throw new RequestProblem(400, "invalid_photo_context", `photos[${index}].context is required.`);
+    }
+    if (value.version !== 3 && hasDirectorShape) {
+      throw new RequestProblem(400, "invalid_photo_context", "Photo context requires request version 3.");
+    }
+    const localSelection: LocalSelection = (hasCurrentShape || hasDirectorShape) &&
       typeof photo.localSelection === "string" &&
       LOCAL_SELECTIONS.includes(photo.localSelection as LocalSelection)
       ? photo.localSelection as LocalSelection
       : "first_cut";
-    if (hasCurrentShape && localSelection !== photo.localSelection) {
+    if ((hasCurrentShape || hasDirectorShape) && localSelection !== photo.localSelection) {
       throw new RequestProblem(
         400,
         "invalid_local_selection",
@@ -375,13 +542,29 @@ export function validatePayload(value: unknown): ValidatedPayload {
       id: photo.id,
       imageBase64: photo.imageBase64 as string,
       localSelection,
+      ...(hasDirectorShape ? { context: validatePhotoContext(photo.context, index) } : {}),
     });
+  }
+
+  const baseline = value.version === 3
+    ? validateBaseline(value.baseline, ids)
+    : undefined;
+  if (baseline !== undefined) {
+    const selectionByID = new Map(photos.map((photo) => [photo.id, photo.localSelection]));
+    if (baseline.sequence.some((item) => selectionByID.get(item.photoId) !== "first_cut")) {
+      throw new RequestProblem(
+        400,
+        "invalid_baseline",
+        "baseline.sequence may reference only submitted First Cut previews.",
+      );
+    }
   }
 
   return {
     version: value.version as RequestVersion,
     direction: value.direction as AICutDirection,
     ...(storyContext === undefined ? {} : { storyContext }),
+    ...(baseline === undefined ? {} : { baseline }),
     photos,
   };
 }

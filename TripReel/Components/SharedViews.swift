@@ -318,7 +318,7 @@ struct MontageView: View {
                     Text("Made with")
                         .font(TR.ui(10, weight: .medium))
                         .foregroundStyle(.white.opacity(0.78))
-                    Text("TripReel")
+                    Text(TR.appName)
                         .font(TR.ui(13, weight: .bold))
                         .foregroundStyle(TR.cream)
                 }
@@ -521,7 +521,7 @@ private struct MontagePhotoWaitingArtwork: View {
     }
 
     private var detail: String {
-        guard let progress else { return "TripReel will skip it for now if it needs longer." }
+        guard let progress else { return "Memories will skip it for now if it needs longer." }
         return "Downloading from iCloud · \(Int(progress * 100))%"
     }
 }

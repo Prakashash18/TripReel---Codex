@@ -1,14 +1,14 @@
-# TripReel Privacy Policy
+# Memories Privacy Policy
 
-Effective September 6, 2026
+Effective September 10, 2026
 
-TripReel turns photos you choose or make accessible into travel films. This policy explains what the app processes and what happens when you optionally enable cloud photo intelligence.
+Memories turns the photos that matter into a story. This policy explains what the app processes and what happens when you optionally enable cloud photo intelligence.
 
 ## Photos and trip detection
 
-With Photos permission, TripReel reads accessible images, capture dates, and embedded locations to find trips, nearby outings, and build a film. Trip detection and grouping happen on your device. TripReel uses Apple's system geocoder to turn one representative coordinate into a place name. Originals remain in Apple Photos unless you explicitly select cut photos in Cleanup, accept TripReel's destructive warning, and approve Apple's system deletion prompt. With iCloud Photos, a confirmed deletion can affect other synced devices.
+With Photos permission, Memories reads accessible images, capture dates, and embedded locations to find meaningful moments, nearby outings, and build a film. Detection and grouping happen on your device. Memories uses Apple's system geocoder to turn one representative coordinate into a place name. Originals remain in Apple Photos unless you explicitly select cut photos in Cleanup, accept Memories' destructive warning, and approve Apple's system deletion prompt. With iCloud Photos, a confirmed deletion can affect other synced devices.
 
-Photos selected without broad library permission are copied temporarily into TripReel's private on-device cache for the editing session.
+Photos selected without broad library permission are copied temporarily into Memories' private on-device cache for the editing session.
 
 ## On-device visual intelligence
 
@@ -16,19 +16,19 @@ Apple Vision analyzes reduced images on the iPhone for screenshots, document-lik
 
 ## Optional OpenAI analysis
 
-TripReel creates a complete First Cut on-device without cloud AI. Only after the user chooses Improve with AI, selects a creative direction, and explicitly continues may selected reduced-resolution JPEG previews pass through TripReel's secure backend to a configurable OpenAI image-capable model. If the user writes or chooses an optional story hint, that short text is sent with the selected previews so titles and story structure can reflect the intended occasion. TripReel re-encodes the copies without EXIF, GPS, filenames, capture dates, or stable Apple Photos identifiers. Known screenshots and sensitive or document-like images are blocked. OpenAI returns only a structured editorial plan, which TripReel validates and applies locally without modifying original photos.
+Memories creates a complete First Cut on-device without cloud AI. Only after the user chooses Improve with AI, selects a creative direction, and explicitly continues may selected reduced-resolution JPEG previews pass through Memories' secure backend to a configurable OpenAI image-capable model. If the user writes or chooses an optional story hint, that short text is sent with the selected previews so titles and story structure can reflect the intended occasion. To compare its proposal with the existing film, Memories also sends a privacy-safe description of the First Cut and coarse on-device editorial cues: temporary sequence IDs, relative order and duration, frame and motion choices, title text, bundled soundtrack and style choices, relative day/time-gap bands, orientation, broad Vision scene categories, people counts, score bands, and temporary similarity groups. Memories does not send exact timestamps, GPS, filenames, recognized OCR text, faces, or stable Apple Photos identifiers. The thumbnail copies are re-encoded without EXIF or other embedded metadata. Known screenshots and sensitive or document-like images are blocked. OpenAI returns only a structured editorial plan and diagnosis, which Memories validates and applies locally without modifying original photos. Memories' backend independently calculates the change counts shown in the comparison screen.
 
 ## Storage and deletion
 
-TripReel's backend does not intentionally persist cloud previews or edit plans and discards its in-memory copies after each request. OpenAI is called with `store: false`.
+Memories' backend does not intentionally persist cloud previews or edit plans and discards its in-memory copies after each request. OpenAI is called with `store: false`.
 
-Leaving a photo out of a film never deletes the original. Cleanup can request deletion only for cut Apple Photos assets the user individually selects. The request is batched atomically, requires a clear in-app warning and Apple's system confirmation, and is not made if any selected photo is unavailable. Imported picker copies and bundled demo images cannot be deleted from Apple Photos by TripReel.
+Leaving a photo out of a film never deletes the original. Cleanup can request deletion only for cut Apple Photos assets the user individually selects. The request is batched atomically, requires a clear in-app warning and Apple's system confirmation, and is not made if any selected photo is unavailable. Imported picker copies and bundled demo images cannot be deleted from Apple Photos by Memories.
 
 Under OpenAI's default API controls, OpenAI may retain API content for abuse monitoring for up to 30 days, or longer when legally or safety-required. Zero Data Retention removes default storage for eligible accounts, but images flagged by OpenAI's child-safety classifier may still be retained for manual review. OpenAI states that API data is not used to train its models by default unless the API organization opts in. See [OpenAI's API data controls](https://developers.openai.com/api/docs/guides/your-data).
 
 ## Identity, advertising, and tracking
 
-TripReel sends per-request placeholder IDs instead of Apple Photos identifiers. Cloud thumbnails are not used for advertising or cross-app tracking. The cloud photo request is not linked to a TripReel user profile.
+Memories sends per-request placeholder IDs instead of Apple Photos identifiers. Cloud thumbnails are not used for advertising or cross-app tracking. The cloud photo request is not linked to a Memories user profile.
 
 ## Your choices
 
@@ -36,4 +36,4 @@ Users can keep all photo analysis on-device or change the cloud choice from the 
 
 ## Changes and contact
 
-Material changes to this policy will be reflected here and in the app. Privacy questions can be submitted through [TripReel support](https://github.com/Prakashash18/TripReel---Codex/issues).
+Material changes to this policy will be reflected here and in the app. Privacy questions can be submitted through [Memories support](https://github.com/Prakashash18/TripReel---Codex/issues).

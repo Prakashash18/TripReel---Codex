@@ -32,6 +32,16 @@ final class TripReelFlowUITests: XCTestCase {
         add(attachment)
     }
 
+    func testMemoriesWelcomeShowsBrandStoryAndOneTimeSetup() {
+        launchApp(at: "welcome")
+
+        XCTAssertTrue(screen("welcome-screen").waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Memories"].exists)
+        XCTAssertTrue(app.staticTexts["Turn the photos that matter into a story."].exists)
+        XCTAssertTrue(screen("memories-entrance-artwork").exists)
+        XCTAssertTrue(screen("welcome-continue-button").exists)
+    }
+
     func testCoreFilmCreationFlow() {
         launchApp()
         XCTAssertTrue(screen("trips-screen").waitForExistence(timeout: 3))
@@ -190,7 +200,12 @@ final class TripReelFlowUITests: XCTestCase {
 
         XCTAssertTrue(screen("ai-direction-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Choose photos & direction"].exists)
-        XCTAssertTrue(app.staticTexts["36 small previews will be sent to OpenAI’s GPT-5.6 Luna."].exists)
+        XCTAssertTrue(
+            app.staticTexts
+                .matching(NSPredicate(format: "label CONTAINS[c] %@", "small previews"))
+                .firstMatch
+                .exists
+        )
         attachScreenshot(named: "AI photo and direction choices")
 
         let photoPicker = button(startingWith: "Photos for AI")

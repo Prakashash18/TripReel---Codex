@@ -1,4 +1,5 @@
 import CoreVideo
+import Photos
 import UIKit
 import XCTest
 @testable import TripReel
@@ -86,6 +87,67 @@ final class TripReelModelTests: XCTestCase {
 
         model.go(.welcome)
         XCTAssertEqual(model.navigationDirection, .replace)
+    }
+
+    func testBrandWelcomeAppearsOnceThenRoutesToPhotoSetup() {
+        let suiteName = "MemoriesTests.Welcome.\(UUID().uuidString)"
+        let preferences = UserDefaults(suiteName: suiteName)!
+        defer { preferences.removePersistentDomain(forName: suiteName) }
+        let photoLibrary = StubPhotoLibrary(photos: [], authorizationStatus: .notDetermined)
+
+        let firstLaunch = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: photoLibrary,
+            preferenceStore: preferences
+        )
+        XCTAssertEqual(firstLaunch.screen, .welcome)
+
+        firstLaunch.continueFromWelcome()
+        XCTAssertEqual(firstLaunch.screen, .access)
+
+        photoLibrary.authorizationStatus = .denied
+        let returningLaunch = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: photoLibrary,
+            preferenceStore: preferences
+        )
+        XCTAssertEqual(returningLaunch.screen, .access)
+    }
+
+    func testReturningUserWithPhotoAccessSkipsOneTimeSetup() {
+        let suiteName = "MemoriesTests.Returning.\(UUID().uuidString)"
+        let preferences = UserDefaults(suiteName: suiteName)!
+        defer { preferences.removePersistentDomain(forName: suiteName) }
+        preferences.set(true, forKey: "memories.welcome-completed.v1")
+        let photoLibrary = StubPhotoLibrary(photos: [], authorizationStatus: .authorized)
+
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: photoLibrary,
+            preferenceStore: preferences
+        )
+
+        XCTAssertEqual(model.screen, .trips)
+    }
+
+    func testFirstWelcomeSkipsPhotoPromptWhenIOSAlreadyGrantedAccess() {
+        let suiteName = "MemoriesTests.ExistingAccess.\(UUID().uuidString)"
+        let preferences = UserDefaults(suiteName: suiteName)!
+        defer { preferences.removePersistentDomain(forName: suiteName) }
+        let photoLibrary = StubPhotoLibrary(photos: [], authorizationStatus: .limited)
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: photoLibrary,
+            preferenceStore: preferences
+        )
+
+        model.continueFromWelcome()
+
+        XCTAssertEqual(model.screen, .trips)
     }
 
     func testBackNavigationReturnsToTheScreenThatOpenedExport() {
@@ -569,7 +631,7 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(place.style, .bold)
         XCTAssertEqual(place.duration, 3.2, accuracy: 0.001)
         XCTAssertEqual(ending.title, "Until next time")
-        XCTAssertEqual(ending.subtitle, "Made with TripReel")
+        XCTAssertEqual(ending.subtitle, "Made with Memories")
     }
 
     func testLocalTitlePlanUsesVisionThemesAndPlacesStoryBeatAtDayChange() throws {
@@ -1355,9 +1417,18 @@ final class TripReelModelTests: XCTestCase {
 private final class StubPhotoLibrary: PhotoLibraryServing, @unchecked Sendable {
     var onLibraryChange: (@Sendable () -> Void)?
     let photos: [PhotoMetadata]
+    var authorizationStatus: PHAuthorizationStatus
 
-    init(photos: [PhotoMetadata]) {
+    init(
+        photos: [PhotoMetadata],
+        authorizationStatus: PHAuthorizationStatus = .authorized
+    ) {
         self.photos = photos
+        self.authorizationStatus = authorizationStatus
+    }
+
+    func requestAuthorization() async -> PHAuthorizationStatus {
+        authorizationStatus
     }
 
     func fetchAllPhotos() async -> [PhotoMetadata] {

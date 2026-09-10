@@ -7,6 +7,7 @@ import {
   minimumSequenceCount,
   parseAIEditPlan,
 } from "../src/contract.ts";
+import { compareAICut } from "../src/comparison.ts";
 import { handleRequest } from "../src/handler.ts";
 import { RequestProblem, validatePayload } from "../src/validation.ts";
 
@@ -118,6 +119,76 @@ function directorPlan(ids = ["p0"], direction = "better_story") {
       look: "journal",
       motionIntensity: "gentle",
       reason: "Tactile framing and restrained movement make repeated settings feel intentional.",
+    },
+  };
+}
+
+function photoContext(index) {
+  return {
+    captureIndex: index,
+    dayIndex: Math.floor(index / 3),
+    timeGap: index === 0 ? "start" : index % 3 === 0 ? "next_day" : "same_session",
+    orientation: index % 2 === 0 ? "landscape" : "portrait",
+    contentKind: index % 3 === 0 ? "people" : "scenery",
+    peopleCount: index % 3 === 0 ? 2 : 0,
+    memory: index % 2 === 0 ? "high" : "medium",
+    aesthetic: "high",
+    similarityGroup: "",
+    sceneLabels: index % 3 === 0 ? ["People", "Event"] : ["Landscape"],
+  };
+}
+
+function firstCutBaseline(ids) {
+  return {
+    photoCount: ids.length,
+    durationSeconds: ids.length * 1.5 + 2.2,
+    omittedPhotoCount: 0,
+    sequence: ids.map((photoId, order) => ({
+      photoId,
+      order,
+      durationSeconds: 1.5,
+      motion: order % 2 === 0 ? "zoom_in" : "pan_left",
+      frameStyle: order % 2 === 0 ? "full_bleed" : "portrait_matte",
+    })),
+    titles: [{
+      kind: "opening",
+      title: "The day begins",
+      subtitle: "",
+      style: "clean",
+      durationSeconds: 2.2,
+    }],
+    soundtrackId: "wanderlust",
+    look: "clean",
+    motionIntensity: "gentle",
+  };
+}
+
+function comparativePayload(ids, direction = "better_story", selections = []) {
+  return {
+    version: 3,
+    direction,
+    baseline: firstCutBaseline(ids.filter((_id, index) => (selections[index] ?? "first_cut") === "first_cut")),
+    photos: ids.map((id, index) => ({
+      id,
+      imageBase64: jpegBase64(),
+      localSelection: selections[index] ?? "first_cut",
+      context: photoContext(index),
+    })),
+  };
+}
+
+function comparativePlan(ids, direction = "better_story") {
+  return {
+    ...directorPlan(ids, direction),
+    version: 3,
+    diagnosis: {
+      verdict: "The First Cut has a steady rhythm but needs a clearer emotional build.",
+      issues: [{
+        kind: "flat_pacing",
+        title: "One steady tempo",
+        detail: "Hero moments and connective frames currently receive nearly the same amount of time.",
+        evidencePhotoIds: ids.slice(0, 2),
+      }],
     },
   };
 }
@@ -327,6 +398,112 @@ test("version 2 asks for an editable reel direction and returns it without chang
   assert.deepEqual(body.plan, expected);
   assert.equal(body.retention.proxyStored, false);
   assert.equal(body.retention.openAIStore, false);
+});
+
+test("version 3 critiques the submitted First Cut and returns Worker-measured changes", async () => {
+  const ids = ["p0", "p1", "p2", "p3", "p4", "p5"];
+  const requestPayload = comparativePayload(ids, "people", [
+    "first_cut", "first_cut", "first_cut", "first_cut", "more_photos", "more_photos",
+  ]);
+  const expected = comparativePlan([...ids].reverse(), "people");
+  let upstream;
+  const response = await handleRequest(
+    analyzeRequest({ ...requestPayload, storyContext: "A shared achievement" }),
+    ENV,
+    async (_url, init) => {
+      upstream = JSON.parse(init.body);
+      return openAISuccess(expected);
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(upstream.reasoning, { effort: "low" });
+  assert.match(upstream.instructions, /improve the submitted First Cut/u);
+  assert.match(upstream.instructions, /Privately draft, critique, and revise/u);
+  assert.match(upstream.input[0].content[2].text, /Current First Cut timeline/u);
+  assert.match(upstream.input[0].content[3].text, /coarse on-device context/u);
+  assert.equal(upstream.text.format.schema.properties.version.const, 3);
+  assert.ok(upstream.text.format.schema.properties.diagnosis);
+
+  const body = await response.json();
+  assert.equal(body.plan.version, 3);
+  assert.equal(body.plan.diagnosis.issues[0].kind, "flat_pacing");
+  assert.equal(body.plan.comparison.firstCutPhotoCount, 4);
+  assert.equal(body.plan.comparison.restoredCount, 2);
+  assert.ok(body.plan.comparison.reorderedCount > 0);
+  assert.equal(body.plan.comparison.materiallyDifferent, true);
+  assert.equal(body.retention.openAIStore, false);
+});
+
+test("version 3 rejects metadata-like context and computes comparison independently", () => {
+  const requestPayload = comparativePayload(["p0", "p1"]);
+  const validated = validatePayload(requestPayload);
+  assert.equal(validated.baseline.photoCount, 2);
+  assert.equal(validated.photos[0].context.dayIndex, 0);
+
+  const withFilename = structuredClone(requestPayload);
+  withFilename.photos[0].context.filename = "IMG_0001.JPG";
+  assert.throws(
+    () => validatePayload(withFilename),
+    (error) => error instanceof RequestProblem && error.code === "invalid_photo_context",
+  );
+
+  const candidate = comparativePlan(["p1", "p0"]);
+  const parsed = parseAIEditPlan(candidate, ["p0", "p1"], "better_story", 3);
+  assert.equal(parsed.version, 3);
+  const comparison = compareAICut(validated.baseline, validated.photos, parsed);
+  assert.equal(comparison.aiCutPhotoCount, 2);
+  assert.equal(comparison.reorderedCount, 1);
+  assert.equal(Object.hasOwn(candidate, "comparison"), false);
+});
+
+test("version 3 runs one critic revision when the first draft is only cosmetic", async () => {
+  const ids = ["p0", "p1", "p2", "p3", "p4", "p5"];
+  const requestPayload = comparativePayload(ids);
+  const weak = comparativePlan(ids);
+  weak.story.title = "The day begins";
+  weak.hook = {
+    title: "The day begins",
+    subtitle: "",
+    style: "clean",
+    durationSeconds: 2.2,
+  };
+  weak.ending = { enabled: false, title: "", subtitle: "", style: "clean", durationSeconds: 2 };
+  weak.soundtrack = { trackId: "wanderlust", reason: "Keep the familiar acoustic bed." };
+  weak.treatment = {
+    look: "clean",
+    motionIntensity: "gentle",
+    reason: "Keep the current restrained visual language.",
+  };
+  weak.sequence = requestPayload.baseline.sequence.map((item) => ({
+    photoId: item.photoId,
+    order: item.order,
+    durationSeconds: item.durationSeconds,
+    role: item.order === 0 ? "opening" : item.order === ids.length - 1 ? "closing" : "bridge",
+    emphasis: item.order === 0 ? "highlight" : "normal",
+    motion: item.motion,
+  }));
+  const stronger = comparativePlan([...ids].reverse());
+
+  const upstreamBodies = [];
+  const response = await handleRequest(
+    analyzeRequest(requestPayload),
+    ENV,
+    async (_url, init) => {
+      upstreamBodies.push(JSON.parse(init.body));
+      return openAISuccess(upstreamBodies.length === 1 ? weak : stronger);
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(upstreamBodies.length, 2);
+  assert.match(
+    upstreamBodies[1].input[0].content.find((item) => item.type === "input_text" && /quality check/u.test(item.text)).text,
+    /too similar/u,
+  );
+  const body = await response.json();
+  assert.deepEqual(body.plan.sequence.map((item) => item.photoId), [...ids].reverse());
+  assert.equal(body.plan.comparison.materiallyDifferent, true);
 });
 
 test("allows a validated server-side model override", async () => {

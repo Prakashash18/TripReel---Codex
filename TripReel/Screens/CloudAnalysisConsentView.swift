@@ -85,7 +85,7 @@ struct CloudAnalysisConsentView: View {
                 .tracking(-0.4)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("With your permission, TripReel sends small previews of the photos you choose to OpenAI’s GPT-5.6 Luna to create another cut.")
+            Text("With your permission, Memories sends small previews of the photos you choose to OpenAI’s GPT-5.6 Luna to create another cut.")
                 .font(TR.ui(15))
                 .foregroundStyle(.white.opacity(0.76))
                 .lineSpacing(4)
@@ -118,6 +118,12 @@ struct CloudAnalysisConsentView: View {
             )
             Divider().overlay(.white.opacity(0.10)).padding(.leading, 56)
             essentialRow(
+                symbol: "timeline.selection",
+                title: "AI compares your First Cut",
+                detail: "It receives your order, titles and broad on-device scene and timing cues."
+            )
+            Divider().overlay(.white.opacity(0.10)).padding(.leading, 56)
+            essentialRow(
                 symbol: "checkmark.shield",
                 title: "Your First Cut stays safe",
                 detail: "You can keep it instead of the AI version."
@@ -147,7 +153,7 @@ struct CloudAnalysisConsentView: View {
     private var dataDetails: some View {
         DisclosureGroup(isExpanded: $showsDataDetails) {
             VStack(alignment: .leading, spacing: 10) {
-                Text("TripReel’s Cloudflare service passes the selected previews to OpenAI and does not intentionally store them. OpenAI API data is not used for training by default and may be retained for abuse monitoring for up to 30 days, or longer when legally or safety-required. Child-safety review exceptions may apply.")
+                Text("Memories also sends First Cut title text, order, pacing, motion, music and style, plus broad on-device cues such as relative day, orientation, scene category and score bands. It does not send GPS, exact dates, filenames, OCR text or stable Photos IDs. Memories’ Cloudflare service passes this request to OpenAI and does not intentionally store it. OpenAI API data is not used for training by default and may be retained for abuse monitoring for up to 30 days, or longer when legally or safety-required. Child-safety review exceptions may apply.")
                     .font(TR.ui(11))
                     .foregroundStyle(.white.opacity(0.60))
                     .lineSpacing(3)
@@ -197,7 +203,7 @@ struct CloudAnalysisConsentView: View {
                 .accessibilityHint("Closes without sharing any photo preview")
                 .accessibilityIdentifier("cloud-analysis-decline")
 
-            Button("TripReel privacy policy") { showsPrivacyPolicy = true }
+            Button("Memories privacy policy") { showsPrivacyPolicy = true }
                 .font(TR.ui(12, weight: .medium))
                 .foregroundStyle(TR.accent)
                 .buttonStyle(.plain)

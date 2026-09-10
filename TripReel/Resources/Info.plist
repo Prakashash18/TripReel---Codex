@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>TripReel</string>
+	<string>Memories</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -13,7 +13,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
+	<string>Memories</string>
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
@@ -25,9 +25,9 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>TripReel saves the travel films you create to your photo library.</string>
+	<string>Memories saves the photo stories you create to your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>TripReel uses photos, dates, and locations on your device to find trips and build films, and deletes originals only when you explicitly confirm Cleanup.</string>
+	<string>Memories uses accessible photos, dates, and locations on your device to find meaningful moments and build stories. Originals are deleted only when you explicitly confirm Cleanup.</string>
 	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
 	<true/>
 	<key>TRIPREEL_PHOTO_ANALYSIS_ENDPOINT</key>

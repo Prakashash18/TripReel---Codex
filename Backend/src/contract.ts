@@ -13,6 +13,8 @@ export const LIMITS = Object.freeze({
   maxSubtitleCharacters: 100,
   maxReasonCharacters: 180,
   maxStoryContextCharacters: 160,
+  maxSceneLabels: 3,
+  maxSceneLabelCharacters: 48,
   bodyReadTimeoutMs: 15_000,
   defaultOpenAITimeoutMs: 30_000,
   minOpenAITimeoutMs: 5_000,
@@ -20,7 +22,7 @@ export const LIMITS = Object.freeze({
   maxOpenAIResponseBytes: 128 * 1024,
 });
 
-export const REQUEST_VERSIONS = [1, 2] as const;
+export const REQUEST_VERSIONS = [1, 2, 3] as const;
 export type RequestVersion = (typeof REQUEST_VERSIONS)[number];
 
 export const AI_DIRECTIONS = [
@@ -61,6 +63,24 @@ export type Motion = (typeof MOTIONS)[number];
 export const LOCAL_SELECTIONS = ["first_cut", "more_photos"] as const;
 export type LocalSelection = (typeof LOCAL_SELECTIONS)[number];
 
+export const PHOTO_ORIENTATIONS = ["portrait", "landscape", "square"] as const;
+export type PhotoOrientation = (typeof PHOTO_ORIENTATIONS)[number];
+
+export const PHOTO_TIME_GAPS = ["start", "burst", "same_session", "same_day", "next_day", "later"] as const;
+export type PhotoTimeGap = (typeof PHOTO_TIME_GAPS)[number];
+
+export const PHOTO_SCORE_BANDS = ["low", "medium", "high"] as const;
+export type PhotoScoreBand = (typeof PHOTO_SCORE_BANDS)[number];
+
+export const PHOTO_CONTENT_KINDS = ["scenery", "people", "food", "moment"] as const;
+export type PhotoContentKind = (typeof PHOTO_CONTENT_KINDS)[number];
+
+export const FIRST_CUT_FRAME_STYLES = ["full_bleed", "portrait_matte", "cinematic", "postcard"] as const;
+export type FirstCutFrameStyle = (typeof FIRST_CUT_FRAME_STYLES)[number];
+
+export const FIRST_CUT_TITLE_KINDS = ["opening", "chapter", "ending"] as const;
+export type FirstCutTitleKind = (typeof FIRST_CUT_TITLE_KINDS)[number];
+
 export const TITLE_STYLES = ["editorial", "clean", "bold"] as const;
 export type TitleStyle = (typeof TITLE_STYLES)[number];
 
@@ -82,6 +102,47 @@ export interface PhotoInput {
   id: string;
   imageBase64: string;
   localSelection: LocalSelection;
+  context?: PhotoEditorialContext;
+}
+
+export interface PhotoEditorialContext {
+  captureIndex: number;
+  dayIndex: number;
+  timeGap: PhotoTimeGap;
+  orientation: PhotoOrientation;
+  contentKind: PhotoContentKind;
+  peopleCount: number;
+  memory: PhotoScoreBand;
+  aesthetic: PhotoScoreBand;
+  similarityGroup: string;
+  sceneLabels: string[];
+}
+
+export interface FirstCutSequenceItem {
+  photoId: string;
+  order: number;
+  durationSeconds: number;
+  motion: Motion;
+  frameStyle: FirstCutFrameStyle;
+}
+
+export interface FirstCutTitle {
+  kind: FirstCutTitleKind;
+  title: string;
+  subtitle: string;
+  style: TitleStyle;
+  durationSeconds: number;
+}
+
+export interface FirstCutInput {
+  photoCount: number;
+  durationSeconds: number;
+  omittedPhotoCount: number;
+  sequence: FirstCutSequenceItem[];
+  titles: FirstCutTitle[];
+  soundtrackId: string;
+  look: MontageLook;
+  motionIntensity: MotionIntensity;
 }
 
 export interface AIEditPlanItem {
@@ -139,18 +200,65 @@ export interface AIEditPlanV2 {
   sequence: AIEditPlanItem[];
 }
 
-export type AIEditPlan = AIEditPlanV1 | AIEditPlanV2;
+export const DIAGNOSIS_KINDS = [
+  "weak_hook",
+  "flat_pacing",
+  "repetition",
+  "missing_context",
+  "weak_ending",
+  "limited_variety",
+] as const;
+export type DiagnosisKind = (typeof DIAGNOSIS_KINDS)[number];
+
+export interface AIEditDiagnosisIssue {
+  kind: DiagnosisKind;
+  title: string;
+  detail: string;
+  evidencePhotoIds: string[];
+}
+
+export interface AIEditDiagnosis {
+  verdict: string;
+  issues: AIEditDiagnosisIssue[];
+}
+
+export interface AIEditPlanV3 extends Omit<AIEditPlanV2, "version"> {
+  version: 3;
+  diagnosis: AIEditDiagnosis;
+}
+
+export interface AIEditComparison {
+  firstCutPhotoCount: number;
+  aiCutPhotoCount: number;
+  restoredCount: number;
+  removedCount: number;
+  reorderedCount: number;
+  retimedCount: number;
+  motionChangedCount: number;
+  titleChangedCount: number;
+  soundtrackChanged: boolean;
+  treatmentChanged: boolean;
+  score: number;
+  materiallyDifferent: boolean;
+}
+
+export type PublicAIEditPlan = AIEditPlanV1 | AIEditPlanV2 | (AIEditPlanV3 & {
+  comparison: AIEditComparison;
+});
+
+export type AIEditPlan = AIEditPlanV1 | AIEditPlanV2 | AIEditPlanV3;
 
 export interface ValidatedPayload {
   version: RequestVersion;
   direction: AICutDirection;
   storyContext?: string;
+  baseline?: FirstCutInput;
   photos: PhotoInput[];
 }
 
 export interface PublicAnalysisResponse {
   model: string;
-  plan: AIEditPlan;
+  plan: PublicAIEditPlan;
   retention: {
     proxyStored: false;
     openAIStore: false;
@@ -176,12 +284,15 @@ const PLAN_V2_KEYS = [
   "treatment",
   "sequence",
 ] as const;
+const PLAN_V3_KEYS = [...PLAN_V2_KEYS, "diagnosis"] as const;
 const ITEM_KEYS = ["photoId", "order", "durationSeconds", "role", "emphasis", "motion"] as const;
 const STORY_KEYS = ["title", "arc"] as const;
 const TITLE_CARD_KEYS = ["title", "subtitle", "style", "durationSeconds"] as const;
 const ENDING_KEYS = ["enabled", ...TITLE_CARD_KEYS] as const;
 const SOUNDTRACK_KEYS = ["trackId", "reason"] as const;
 const TREATMENT_KEYS = ["look", "motionIntensity", "reason"] as const;
+const DIAGNOSIS_KEYS = ["verdict", "issues"] as const;
+const DIAGNOSIS_ISSUE_KEYS = ["kind", "title", "detail", "evidencePhotoIds"] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -287,8 +398,9 @@ export function parseAIEditPlan(
     return { version: 1, direction, summary, sequence };
   }
 
+  const expectedPlanKeys = requestVersion === 3 ? PLAN_V3_KEYS : PLAN_V2_KEYS;
   if (
-    !hasExactKeys(value, PLAN_V2_KEYS) ||
+    !hasExactKeys(value, expectedPlanKeys) ||
     !isRecord(value.story) || !hasExactKeys(value.story, STORY_KEYS) ||
     !isRecord(value.hook) || !hasExactKeys(value.hook, TITLE_CARD_KEYS) ||
     !isRecord(value.ending) || !hasExactKeys(value.ending, ENDING_KEYS) ||
@@ -327,8 +439,8 @@ export function parseAIEditPlan(
     return null;
   }
 
-  return {
-    version: 2,
+  const directorPlan = {
+    version: requestVersion,
     direction,
     summary,
     story: { title: storyTitle, arc: storyArc },
@@ -355,6 +467,51 @@ export function parseAIEditPlan(
       reason: treatmentReason,
     },
     sequence,
+  };
+
+  if (requestVersion === 2) {
+    return directorPlan as AIEditPlanV2;
+  }
+
+  if (!isRecord(value.diagnosis) || !hasExactKeys(value.diagnosis, DIAGNOSIS_KEYS)) {
+    return null;
+  }
+  const verdict = cleanText(value.diagnosis.verdict, 1, LIMITS.maxReasonCharacters);
+  if (
+    verdict === null ||
+    !Array.isArray(value.diagnosis.issues) ||
+    value.diagnosis.issues.length < 1 ||
+    value.diagnosis.issues.length > 3
+  ) {
+    return null;
+  }
+  const requested = new Set(expectedIds);
+  const issues: AIEditDiagnosisIssue[] = [];
+  for (const issue of value.diagnosis.issues) {
+    if (!isRecord(issue) || !hasExactKeys(issue, DIAGNOSIS_ISSUE_KEYS)) return null;
+    const title = cleanText(issue.title, 1, LIMITS.maxShortTitleCharacters);
+    const detail = cleanText(issue.detail, 1, LIMITS.maxReasonCharacters);
+    if (
+      !DIAGNOSIS_KINDS.includes(issue.kind as DiagnosisKind) ||
+      title === null ||
+      detail === null ||
+      !Array.isArray(issue.evidencePhotoIds) ||
+      issue.evidencePhotoIds.length > 3 ||
+      !issue.evidencePhotoIds.every((id) => typeof id === "string" && requested.has(id))
+    ) {
+      return null;
+    }
+    issues.push({
+      kind: issue.kind as DiagnosisKind,
+      title,
+      detail,
+      evidencePhotoIds: [...new Set(issue.evidencePhotoIds as string[])],
+    });
+  }
+  return {
+    ...(directorPlan as Omit<AIEditPlanV3, "diagnosis">),
+    version: 3,
+    diagnosis: { verdict, issues },
   };
 }
 
@@ -420,44 +577,77 @@ export function buildAIEditPlanSchema(
     };
   }
 
+  const properties: Record<string, unknown> = {
+    ...commonProperties,
+    story: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        title: { type: "string", minLength: 1, maxLength: LIMITS.maxShortTitleCharacters },
+        arc: { type: "string", minLength: 1, maxLength: LIMITS.maxSummaryCharacters },
+      },
+      required: [...STORY_KEYS],
+    },
+    hook: titleCardSchema(false),
+    ending: titleCardSchema(true),
+    soundtrack: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        trackId: { type: "string", enum: [...SOUNDTRACK_IDS] },
+        reason: { type: "string", minLength: 1, maxLength: LIMITS.maxReasonCharacters },
+      },
+      required: [...SOUNDTRACK_KEYS],
+    },
+    treatment: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        look: { type: "string", enum: [...MONTAGE_LOOKS] },
+        motionIntensity: { type: "string", enum: [...MOTION_INTENSITIES] },
+        reason: { type: "string", minLength: 1, maxLength: LIMITS.maxReasonCharacters },
+      },
+      required: [...TREATMENT_KEYS],
+    },
+    sequence: sequenceSchema(expectedIds, direction),
+  };
+  if (requestVersion === 3) {
+    properties.diagnosis = {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        verdict: { type: "string", minLength: 1, maxLength: LIMITS.maxReasonCharacters },
+        issues: {
+          type: "array",
+          minItems: 1,
+          maxItems: 3,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              kind: { type: "string", enum: [...DIAGNOSIS_KINDS] },
+              title: { type: "string", minLength: 1, maxLength: LIMITS.maxShortTitleCharacters },
+              detail: { type: "string", minLength: 1, maxLength: LIMITS.maxReasonCharacters },
+              evidencePhotoIds: {
+                type: "array",
+                minItems: 0,
+                maxItems: 3,
+                items: { type: "string", enum: [...expectedIds] },
+              },
+            },
+            required: [...DIAGNOSIS_ISSUE_KEYS],
+          },
+        },
+      },
+      required: [...DIAGNOSIS_KEYS],
+    };
+  }
+
   return {
     type: "object",
     additionalProperties: false,
-    properties: {
-      ...commonProperties,
-      story: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          title: { type: "string", minLength: 1, maxLength: LIMITS.maxShortTitleCharacters },
-          arc: { type: "string", minLength: 1, maxLength: LIMITS.maxSummaryCharacters },
-        },
-        required: [...STORY_KEYS],
-      },
-      hook: titleCardSchema(false),
-      ending: titleCardSchema(true),
-      soundtrack: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          trackId: { type: "string", enum: [...SOUNDTRACK_IDS] },
-          reason: { type: "string", minLength: 1, maxLength: LIMITS.maxReasonCharacters },
-        },
-        required: [...SOUNDTRACK_KEYS],
-      },
-      treatment: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          look: { type: "string", enum: [...MONTAGE_LOOKS] },
-          motionIntensity: { type: "string", enum: [...MOTION_INTENSITIES] },
-          reason: { type: "string", minLength: 1, maxLength: LIMITS.maxReasonCharacters },
-        },
-        required: [...TREATMENT_KEYS],
-      },
-      sequence: sequenceSchema(expectedIds, direction),
-    },
-    required: [...PLAN_V2_KEYS],
+    properties,
+    required: requestVersion === 3 ? [...PLAN_V3_KEYS] : [...PLAN_V2_KEYS],
   };
 }
 

@@ -349,7 +349,7 @@ struct SmartSelectionReviewView: View {
                     .padding(.horizontal, 22)
                     .padding(.top, 20)
 
-                Text("TripReel kept these photos out of the automatic cut. Nothing was deleted. Add back anything that matters to you.")
+                Text("Memories kept these photos out of the automatic cut. Nothing was deleted. Add back anything that matters to you.")
                     .font(TR.ui(13))
                     .foregroundStyle(.white.opacity(0.62))
                     .lineSpacing(4)
@@ -408,7 +408,7 @@ struct SmartSelectionReviewView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Your preview is ready")
                         .font(TR.ui(15, weight: .semibold))
-                    Text("Enjoy it now. TripReel can check a few more moments whenever you choose.")
+                    Text("Enjoy it now. Memories can check a few more moments whenever you choose.")
                         .font(TR.ui(12))
                         .foregroundStyle(.white.opacity(0.58))
                         .lineSpacing(3)

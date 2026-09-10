@@ -1376,6 +1376,8 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var selectedCutSource: TripCutSource = .firstCut
     @Published private(set) var aiCutSummary: String?
     @Published private(set) var aiCutRecommendations: [AICutRecommendation] = []
+    @Published private(set) var aiCutDiagnosis: AICutDiagnosis?
+    @Published private(set) var aiCutComparison: AICutComparison?
     @Published private(set) var aiCutProgress = 0.0
     @Published private(set) var aiCutStatus = "Finding the strongest moments…"
     @Published private(set) var aiCutFailureMessage: String?
@@ -1443,6 +1445,7 @@ final class TripReelModel: ObservableObject {
     private let videoExporter: any TripReelVideoExporting
 
     private static let cloudPreferenceKey = "tripreel.cloud-photo-analysis-preference.v1"
+    private static let welcomeCompletedKey = "memories.welcome-completed.v1"
 
     init(
         arguments: [String] = ProcessInfo.processInfo.arguments,
@@ -1465,6 +1468,17 @@ final class TripReelModel: ObservableObject {
         cloudAnalysisPreference = CloudAnalysisPreference(
             rawValue: preferenceStore.string(forKey: Self.cloudPreferenceKey) ?? ""
         ) ?? .undecided
+
+        if !demoMode, preferenceStore.bool(forKey: Self.welcomeCompletedKey) {
+            switch self.photoLibrary.authorizationStatus {
+            case .authorized, .limited:
+                screen = .trips
+            case .notDetermined, .denied, .restricted:
+                screen = .access
+            @unknown default:
+                screen = .access
+            }
+        }
 
         if demoMode {
             let fixtures = Self.makeDemoTrips()
@@ -1793,7 +1807,7 @@ final class TripReelModel: ObservableObject {
         case .ending:
             return TitleCardDraft(
                 title: tripMonthYear,
-                subtitle: "Made with TripReel",
+                subtitle: "Made with Memories",
                 style: .editorial,
                 duration: kind.defaultDuration
             )
@@ -1972,6 +1986,32 @@ final class TripReelModel: ObservableObject {
             to: next
         )
         screen = next
+    }
+
+    /// The brand welcome appears once. Photos permission remains Apple's
+    /// persisted choice, so returning users with access go straight to their
+    /// stories instead of seeing the permission screen again.
+    func continueFromWelcome() {
+        preferenceStore.set(true, forKey: Self.welcomeCompletedKey)
+        switch photoLibrary.authorizationStatus {
+        case .authorized, .limited:
+            if hasScannedLibrary {
+                showTripResults()
+            } else {
+                go(.trips, direction: .forward)
+                Task { [weak self] in
+                    await self?.scanPhotoLibrary(navigateToResults: true)
+                }
+            }
+        case .notDetermined, .denied, .restricted:
+            go(.access, direction: .forward)
+        @unknown default:
+            go(.access, direction: .forward)
+        }
+    }
+
+    func requestPhotoLibraryAuthorization() async -> PHAuthorizationStatus {
+        await photoLibrary.requestAuthorization()
     }
 
     /// Back is navigation chrome, not another decision in the film-making
@@ -2162,6 +2202,8 @@ final class TripReelModel: ObservableObject {
         aiCutSnapshot = nil
         aiCutSummary = nil
         aiCutRecommendations = []
+        aiCutDiagnosis = nil
+        aiCutComparison = nil
         aiCutProgress = 0
         aiCutStatus = "Finding the strongest moments…"
         go(.aiProcessing, direction: .forward)
@@ -2213,6 +2255,13 @@ final class TripReelModel: ObservableObject {
             return
         }
 
+        let editorialContexts = Self.aiEditorialContexts(
+            for: candidates,
+            sourceAssets: sourceAssets,
+            tripStartDate: sourceTrip.startDate,
+            insights: activePhotoInsights
+        )
+
         aiCutTask = Task { [weak self] in
             guard let self else { return }
             var wireInputs: [CloudPhotoAnalysisInput] = []
@@ -2226,7 +2275,8 @@ final class TripReelModel: ObservableObject {
                     wireInputs.append(CloudPhotoAnalysisInput(
                         id: wireID,
                         jpegData: prepared.jpegData,
-                        localSelection: candidate.localSelection
+                        localSelection: candidate.localSelection,
+                        context: editorialContexts[candidate.photo.id]
                     ))
                     localIDsByWireID[wireID] = candidate.photo.id
                 } catch is CancellationError {
@@ -2257,9 +2307,16 @@ final class TripReelModel: ObservableObject {
             self.aiCutProgress = 0.58
             self.aiCutStatus = "Directing a different cut…"
             do {
+                guard let baseline = Self.cloudFirstCutBaseline(
+                    firstCutSnapshot,
+                    localIDsByWireID: localIDsByWireID
+                ) else {
+                    throw CloudPhotoAnalysisError.invalidBaseline
+                }
                 let plan = try await self.cloudPhotoAnalysis.createEditPlan(
                     direction: direction,
                     storyContext: self.aiCutStoryContext,
+                    baseline: baseline,
                     photos: wireInputs
                 )
                 guard self.aiCutGeneration == generation, !Task.isCancelled else { return }
@@ -2276,6 +2333,8 @@ final class TripReelModel: ObservableObject {
                 self.aiCutSnapshot = snapshot
                 self.aiCutSummary = plan.summary
                 self.aiCutRecommendations = Self.recommendations(for: plan)
+                self.aiCutDiagnosis = plan.diagnosis
+                self.aiCutComparison = plan.comparison
                 self.aiCutProgress = 1
                 self.aiCutTask = nil
                 self.go(.aiComparison, direction: .forward)
@@ -2471,6 +2530,252 @@ final class TripReelModel: ObservableObject {
         ]
     }
 
+    private static func cloudFirstCutBaseline(
+        _ firstCut: TripEditSnapshot,
+        localIDsByWireID: [String: String]
+    ) -> CloudFirstCutInput? {
+        let wireIDsByLocalID = Dictionary(
+            uniqueKeysWithValues: localIDsByWireID.map { ($0.value, $0.key) }
+        )
+        let defaultDuration = 1.85 - (firstCut.pace * 1.25)
+        let submittedPhotos = firstCut.keptPhotos.compactMap { photo -> (String, ReelPhoto)? in
+            guard let wireID = wireIDsByLocalID[photo.id] else { return nil }
+            return (wireID, photo)
+        }
+        guard !submittedPhotos.isEmpty else { return nil }
+
+        let sequence = submittedPhotos.enumerated().map { index, value in
+            CloudFirstCutSequenceItem(
+                photoID: value.0,
+                order: index,
+                durationSeconds: min(max(value.1.durationSeconds ?? defaultDuration, 0.6), 4),
+                motion: cloudMotion(value.1.motionStyle),
+                frameStyle: cloudFrameStyle(value.1.frameStyle)
+            )
+        }
+        let titles = firstCut.montageTitleCards.compactMap { card -> CloudFirstCutTitle? in
+            let title = boundedCloudText(
+                cloudPlainText(card.title),
+                maximumUTF16Units: 60
+            )
+            guard !title.isEmpty else { return nil }
+            return CloudFirstCutTitle(
+                kind: cloudTitleKind(card.kind),
+                title: title,
+                subtitle: boundedCloudText(
+                    cloudPlainText(card.subtitle),
+                    maximumUTF16Units: 100
+                ),
+                style: cloudTitleStyle(card.style),
+                durationSeconds: min(max(card.duration, 1), 4)
+            )
+        }
+        return CloudFirstCutInput(
+            photoCount: firstCut.keptPhotos.count,
+            durationSeconds: firstCut.durationSeconds,
+            omittedPhotoCount: firstCut.keptPhotos.count - sequence.count,
+            sequence: sequence,
+            titles: titles,
+            soundtrackID: firstCut.selectedTrackID ?? "none",
+            look: AICutLook(rawValue: firstCut.montageLook.rawValue) ?? .story,
+            motionIntensity: AICutMotionIntensity(rawValue: firstCut.motionIntensity.rawValue) ?? .gentle
+        )
+    }
+
+    private static func aiEditorialContexts(
+        for candidates: [AICutCandidate],
+        sourceAssets: [TripAsset],
+        tripStartDate: Date,
+        insights: [String: MontagePhotoInsight],
+        calendar: Calendar = .current
+    ) -> [String: CloudPhotoEditorialContext] {
+        let chronological = sourceAssets.sorted { left, right in
+            switch (left.creationDate, right.creationDate) {
+            case let (leftDate?, rightDate?) where leftDate != rightDate: return leftDate < rightDate
+            case (_?, nil): return true
+            case (nil, _?): return false
+            default: return left.id < right.id
+            }
+        }
+        let positions = Dictionary(uniqueKeysWithValues: chronological.enumerated().map { ($0.element.id, $0.offset) })
+        let similarityGroups = aiSimilarityGroups(candidates: candidates, insights: insights)
+        let startDay = calendar.startOfDay(for: tripStartDate)
+
+        return Dictionary(uniqueKeysWithValues: candidates.map { candidate in
+            let asset = candidate.asset
+            let position = positions[asset.id] ?? 0
+            let previous = position > 0 ? chronological[position - 1] : nil
+            let insight = insights[asset.id] ?? MontagePhotoInsight()
+            let assetDay = calendar.startOfDay(for: asset.creationDate ?? tripStartDate)
+            let dayIndex = max(0, min(365, calendar.dateComponents([.day], from: startDay, to: assetDay).day ?? 0))
+            return (asset.id, CloudPhotoEditorialContext(
+                captureIndex: min(100_000, position),
+                dayIndex: dayIndex,
+                timeGap: cloudTimeGap(from: previous?.creationDate, to: asset.creationDate, calendar: calendar),
+                orientation: cloudOrientation(width: asset.pixelWidth, height: asset.pixelHeight),
+                contentKind: CloudPhotoContentKind(rawValue: insight.contentKind.rawValue) ?? .moment,
+                peopleCount: min(20, insight.peopleCount),
+                memory: cloudScoreBand(insight.memoryScore),
+                aesthetic: cloudScoreBand(insight.aestheticScore),
+                similarityGroup: similarityGroups[asset.id] ?? "",
+                sceneLabels: cloudSceneLabels(insight.classifications)
+            ))
+        })
+    }
+
+    private static func aiSimilarityGroups(
+        candidates: [AICutCandidate],
+        insights: [String: MontagePhotoInsight]
+    ) -> [String: String] {
+        guard candidates.count > 1 else { return [:] }
+        var parent = Array(0..<candidates.count)
+        func root(_ value: Int) -> Int {
+            var current = value
+            while parent[current] != current { current = parent[current] }
+            return current
+        }
+        for left in 0..<(candidates.count - 1) {
+            guard let leftInsight = insights[candidates[left].asset.id],
+                  let leftPrint = leftInsight.featurePrint else { continue }
+            for right in (left + 1)..<candidates.count {
+                guard let rightInsight = insights[candidates[right].asset.id],
+                      let rightPrint = rightInsight.featurePrint,
+                      NativePhotoSimilarity.areSimilar(
+                          candidates[left].asset,
+                          firstPrint: leftPrint,
+                          candidates[right].asset,
+                          secondPrint: rightPrint,
+                          firstProtectsPeople: leftInsight.peopleCount > 0,
+                          secondProtectsPeople: rightInsight.peopleCount > 0
+                      ) else { continue }
+                let leftRoot = root(left)
+                let rightRoot = root(right)
+                if leftRoot != rightRoot { parent[rightRoot] = leftRoot }
+            }
+        }
+
+        var membersByRoot: [Int: [Int]] = [:]
+        for index in candidates.indices { membersByRoot[root(index), default: []].append(index) }
+        var result: [String: String] = [:]
+        var groupIndex = 0
+        for members in membersByRoot.values.sorted(by: { ($0.first ?? 0) < ($1.first ?? 0) }) where members.count > 1 {
+            let group = "g\(groupIndex)"
+            groupIndex += 1
+            for index in members { result[candidates[index].asset.id] = group }
+        }
+        return result
+    }
+
+    private static func cloudSceneLabels(
+        _ classifications: [NativePhotoClassification]
+    ) -> [String] {
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 _-")
+        var seen: Set<String> = []
+        var result: [String] = []
+        for classification in classifications {
+            var scalars = String.UnicodeScalarView()
+            for scalar in classification.identifier.unicodeScalars {
+                scalars.append(allowed.contains(scalar) ? scalar : " ")
+            }
+            let normalized = String(String(scalars).prefix(48))
+                .components(separatedBy: .whitespacesAndNewlines)
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+            guard !normalized.isEmpty, seen.insert(normalized.lowercased()).inserted else { continue }
+            result.append(normalized)
+            if result.count == 3 { break }
+        }
+        return result
+    }
+
+    private static func boundedCloudText(
+        _ value: String,
+        maximumUTF16Units: Int
+    ) -> String {
+        var result = ""
+        for character in value {
+            let addition = String(character)
+            guard result.utf16.count + addition.utf16.count <= maximumUTF16Units else { break }
+            result.append(character)
+        }
+        return result
+    }
+
+    private static func cloudPlainText(_ value: String) -> String {
+        value.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private static func cloudTimeGap(
+        from previous: Date?,
+        to current: Date?,
+        calendar: Calendar
+    ) -> CloudPhotoTimeGap {
+        guard let current else { return .later }
+        guard let previous else { return .start }
+        let interval = max(0, current.timeIntervalSince(previous))
+        if interval <= 2 * 60 { return .burst }
+        if interval <= 30 * 60 { return .sameSession }
+        if calendar.isDate(previous, inSameDayAs: current) { return .sameDay }
+        let days = calendar.dateComponents(
+            [.day],
+            from: calendar.startOfDay(for: previous),
+            to: calendar.startOfDay(for: current)
+        ).day ?? 2
+        return days <= 1 ? .nextDay : .later
+    }
+
+    private static func cloudOrientation(width: Int, height: Int) -> CloudPhotoOrientation {
+        guard width > 0, height > 0 else { return .landscape }
+        let ratio = Double(width) / Double(height)
+        if ratio < 0.9 { return .portrait }
+        if ratio > 1.1 { return .landscape }
+        return .square
+    }
+
+    private static func cloudScoreBand(_ value: Double) -> CloudPhotoScoreBand {
+        if value < 0.36 { return .low }
+        if value >= 0.7 { return .high }
+        return .medium
+    }
+
+    private static func cloudMotion(_ style: MontageMotionStyle) -> AICutMotion {
+        switch style {
+        case .zoomIn: .zoomIn
+        case .zoomOut: .zoomOut
+        case .panLeft: .panLeft
+        case .panRight: .panRight
+        case .rise: .rise
+        case .settle: .settle
+        }
+    }
+
+    private static func cloudFrameStyle(_ style: MontageFrameStyle) -> CloudFirstCutFrameStyle {
+        switch style {
+        case .fullBleed: .fullBleed
+        case .portraitMatte: .portraitMatte
+        case .cinematic: .cinematic
+        case .postcard: .postcard
+        }
+    }
+
+    private static func cloudTitleKind(_ kind: TitleCardKind) -> CloudFirstCutTitleKind {
+        switch kind {
+        case .opening: .opening
+        case .place: .chapter
+        case .ending: .ending
+        }
+    }
+
+    private static func cloudTitleStyle(_ style: MontageTitleStyle) -> AICutTitleStyle {
+        switch style {
+        case .editorial: .editorial
+        case .clean: .clean
+        case .bold: .bold
+        }
+    }
+
     private func availableAICutCandidatePhotos() -> [AICutCandidatePhoto] {
         guard let firstCutSnapshot,
               let sourceTrip = activeAnalysisTrip ?? selectedTrip else { return [] }
@@ -2658,7 +2963,7 @@ final class TripReelModel: ObservableObject {
                 ),
                 .ending: TitleCardDraft(
                     title: "Until the next road",
-                    subtitle: "Made with TripReel",
+                    subtitle: "Made with Memories",
                     style: .clean,
                     duration: 2.0
                 )
@@ -2673,6 +2978,31 @@ final class TripReelModel: ObservableObject {
             AICutRecommendation(kind: .music, title: "Simplicity", detail: "A light acoustic rhythm supports the warmer, quicker edit."),
             AICutRecommendation(kind: .treatment, title: "Story · Expressive", detail: "Varied framing and movement give each moment a distinct role.")
         ]
+        aiCutDiagnosis = AICutDiagnosis(
+            verdict: "The First Cut needs a clearer build and a more intentional finish.",
+            issues: [
+                AICutDiagnosisIssue(
+                    kind: .flatPacing,
+                    title: "One steady rhythm",
+                    detail: "Hero moments need longer holds while connective moments can move faster.",
+                    evidencePhotoIDs: []
+                )
+            ]
+        )
+        aiCutComparison = AICutComparison(
+            firstCutPhotoCount: firstCutSnapshot.keptPhotos.count,
+            aiCutPhotoCount: included.count,
+            restoredCount: 0,
+            removedCount: remaining.count,
+            reorderedCount: max(0, included.count / 4),
+            retimedCount: included.count,
+            motionChangedCount: included.count,
+            titleChangedCount: 2,
+            soundtrackChanged: true,
+            treatmentChanged: true,
+            score: 68,
+            materiallyDifferent: true
+        )
     }
 
     func cancelPhotoAnalysis() {
@@ -2883,7 +3213,7 @@ final class TripReelModel: ObservableObject {
                 photoAnalysisTask = nil
                 activePhotoInsights = montageInsights
                 photoAnalysisFollowUp = followUp.hasAnythingToCheck ? followUp : nil
-                libraryErrorMessage = "Your trip is safe in Photos. These moments are still syncing from iCloud, so TripReel held back the preview instead of showing empty frames. Check your connection and try this trip again shortly."
+                libraryErrorMessage = "Your trip is safe in Photos. These moments are still syncing from iCloud, so Memories held back the preview instead of showing empty frames. Check your connection and try this trip again shortly."
                 return
             }
         }
@@ -2947,7 +3277,7 @@ final class TripReelModel: ObservableObject {
         case .syncingFromPhotos:
             "Still syncing from iCloud. Check again when Photos has finished."
         case .anotherLook:
-            "TripReel couldn't read this copy yet. Check it again later."
+            "Memories couldn't read this copy yet. Check it again later."
         case .accessNeeded:
             "Photos access changed. Review access, then check this moment again."
         }
@@ -3033,7 +3363,7 @@ final class TripReelModel: ObservableObject {
         detectorTask?.cancel()
         isScanningLibrary = true
         libraryErrorMessage = nil
-        lastAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        lastAuthorizationStatus = photoLibrary.authorizationStatus
         defer {
             if scanGeneration == generation {
                 isScanningLibrary = false
@@ -3086,7 +3416,11 @@ final class TripReelModel: ObservableObject {
 
     func refreshPhotoLibraryIfAuthorized(force: Bool = false) async {
         guard !usesDemoData else { return }
-        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        // Keep the one-time brand entrance fluid and predictable. Existing
+        // users who already granted Photos access begin scanning after they
+        // continue, rather than competing with the welcome animation.
+        guard screen != .welcome else { return }
+        let status = photoLibrary.authorizationStatus
         let previousStatus = lastAuthorizationStatus
 
         guard status == .authorized || status == .limited else {
@@ -3103,7 +3437,7 @@ final class TripReelModel: ObservableObject {
         }
 
         let upgradedFromLimited = status == .authorized && previousStatus == .limited
-        let shouldNavigate = upgradedFromLimited && screen == .limited
+        let shouldNavigate = (upgradedFromLimited && screen == .limited) || screen == .access
         guard force || shouldNavigate || !hasScannedLibrary || previousStatus != status else { return }
         await scanPhotoLibrary(navigateToResults: shouldNavigate)
     }
@@ -3121,7 +3455,7 @@ final class TripReelModel: ObservableObject {
         guard manualSelectionGeneration == generation, !Task.isCancelled else { return false }
         guard !metadata.isEmpty, Set(metadata.map(\.id)) == Set(identifiers) else {
             isManualSelectionInProgress = false
-            libraryErrorMessage = "Some selected photos are outside TripReel's current Photo Library access. Allow Full Access or add them to Limited Access, then try again."
+            libraryErrorMessage = "Some selected photos are outside Memories' current Photo Library access. Allow Full Access or add them to Limited Access, then try again."
             return false
         }
 
@@ -3210,7 +3544,7 @@ final class TripReelModel: ObservableObject {
         let imported = result.photos.filter { seen.insert($0.id).inserted }
         guard !imported.isEmpty else {
             isManualSelectionInProgress = false
-            libraryErrorMessage = "TripReel couldn't import the selected photos. Check your iCloud connection and try again."
+            libraryErrorMessage = "Memories couldn't import the selected photos. Check your iCloud connection and try again."
             return false
         }
 
@@ -3329,6 +3663,8 @@ final class TripReelModel: ObservableObject {
         aiCutSnapshot = nil
         aiCutSummary = nil
         aiCutRecommendations = []
+        aiCutDiagnosis = nil
+        aiCutComparison = nil
         aiCutFailureMessage = nil
         aiCutProgress = 0
         firstCutSnapshot = makeCurrentEditSnapshot()
@@ -3582,7 +3918,7 @@ final class TripReelModel: ObservableObject {
                     self.exportCanRetryPhotoDownload = false
                 }
                 self.exportErrorMessage = (error as? LocalizedError)?.errorDescription
-                    ?? "TripReel couldn't finish this export. Please try again."
+                    ?? "Memories couldn't finish this export. Please try again."
                 self.go(.export)
             }
         }
@@ -3616,7 +3952,7 @@ final class TripReelModel: ObservableObject {
             return true
         } catch {
             exportErrorMessage = (error as? LocalizedError)?.errorDescription
-                ?? "TripReel couldn't save this film to Photos."
+                ?? "Memories couldn't save this film to Photos."
             return false
         }
     }
@@ -3763,6 +4099,8 @@ final class TripReelModel: ObservableObject {
         firstCutSnapshot = nil
         aiCutSummary = nil
         aiCutRecommendations = []
+        aiCutDiagnosis = nil
+        aiCutComparison = nil
         aiCutFailureMessage = nil
         aiCutProgress = 0
         selectedAICutPhotoIDs = []
@@ -3844,7 +4182,7 @@ final class TripReelModel: ObservableObject {
               !isManualSelectionInProgress,
               let manualTrip = trips.first else { return }
 
-        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        let status = photoLibrary.authorizationStatus
         guard status == .authorized || status == .limited else {
             clearLibraryState(afterAuthorizationChangedTo: status)
             return
@@ -3917,7 +4255,7 @@ final class TripReelModel: ObservableObject {
             return
         }
 
-        libraryErrorMessage = "Some photos in this film are no longer available, so TripReel removed those frames."
+        libraryErrorMessage = "Some photos in this film are no longer available, so Memories removed those frames."
     }
 
     private static func makeTrip(from detected: DetectedTrip) -> Trip {

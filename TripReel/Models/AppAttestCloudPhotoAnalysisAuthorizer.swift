@@ -53,13 +53,13 @@ enum TripReelAppAttestError: LocalizedError, Equatable, Sendable {
         case .unsupported:
             "Secure AI editing isn't supported on this iPhone. Your First Cut is still ready."
         case .invalidEndpoint:
-            "TripReel's secure AI service address isn't valid. Your First Cut is still ready."
+            "Memories' secure AI service address isn't valid. Your First Cut is still ready."
         case .invalidChallenge, .invalidServerResponse:
-            "TripReel couldn't complete the secure device check. Please try again shortly."
+            "Memories couldn't complete the secure device check. Please try again shortly."
         case .invalidKeyIdentifier, .keyStoreCorrupt:
             "This iPhone's secure AI access needs to be refreshed. Please try again."
         case .keyStore:
-            "TripReel couldn't access this iPhone's secure AI key. Please unlock your iPhone and try again."
+            "Memories couldn't access this iPhone's secure AI key. Please unlock your iPhone and try again."
         case let .server(statusCode, code):
             Self.serverMessage(statusCode: statusCode, code: code)
         }
@@ -68,7 +68,7 @@ enum TripReelAppAttestError: LocalizedError, Equatable, Sendable {
     private static func serverMessage(statusCode: Int, code: String?) -> String {
         switch code {
         case "internal_error", "server_misconfigured":
-            "TripReel's secure device check hit a temporary setup problem. Your First Cut is still ready."
+            "Memories' secure device check hit a temporary setup problem. Your First Cut is still ready."
         case "rate_limited":
             "Secure AI editing is busy right now. Please wait a minute and try again."
         case "authentication_unavailable":
@@ -77,7 +77,7 @@ enum TripReelAppAttestError: LocalizedError, Equatable, Sendable {
              "key_not_registered", "unknown_key", "invalid_key":
             "This iPhone couldn't be securely verified. Please try once more."
         default:
-            "TripReel's secure device check returned error \(statusCode). Your First Cut is still ready."
+            "Memories' secure device check returned error \(statusCode). Your First Cut is still ready."
         }
     }
 }

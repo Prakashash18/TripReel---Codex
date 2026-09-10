@@ -150,7 +150,7 @@ struct TripsScreen: View {
                 .foregroundStyle(TR.cream)
             Text(collection == .trips
                  ? "Try Nearby for one-day moments, or pull down to scan again."
-                 : "Nearby appears after TripReel recognizes a familiar area and a compact day with six or more photos.")
+                 : "Nearby appears after Memories recognizes a familiar area and a compact day with six or more photos.")
                 .font(TR.ui(12))
                 .foregroundStyle(.white.opacity(0.5))
                 .multilineTextAlignment(.center)

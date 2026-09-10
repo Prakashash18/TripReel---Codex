@@ -152,7 +152,7 @@ private struct ExportOptionCard: View {
                 ZStack(alignment: .topTrailing) {
                     PhotoAssetView(source: source)
                     if watermark {
-                        Text("TripReel")
+                        Text(TR.appName)
                             .font(TR.ui(6, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.9))
                             .padding(4)
@@ -221,7 +221,7 @@ private struct ProjectFormatSheet: View {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("CapCut Mobile")
                                 .font(TR.ui(15, weight: .semibold))
-                            Text("CapCut accepts TripReel's MP4 as one editable video clip. Its mobile app doesn't import CSV, EDL or Final Cut timelines.")
+                            Text("CapCut accepts Memories' MP4 as one editable video clip. Its mobile app doesn't import CSV, EDL or Final Cut timelines.")
                                 .font(TR.ui(12))
                                 .foregroundStyle(.white.opacity(0.66))
                                 .lineSpacing(3)
@@ -322,20 +322,20 @@ private struct ProjectFormatSheet: View {
         do {
             let format = model.selectedFormat
             let directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("TripReel-Projects", isDirectory: true)
+                .appendingPathComponent("Memories-Projects", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let safePlace = model.tripShortPlace
                 .replacingOccurrences(of: "[^A-Za-z0-9-]+", with: "-", options: .regularExpression)
                 .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
             let url = directory.appendingPathComponent(
-                "\(safePlace.isEmpty ? "TripReel" : safePlace).\(format.fileExtension.lowercased())"
+                "\(safePlace.isEmpty ? "Memories" : safePlace).\(format.fileExtension.lowercased())"
             )
             try projectText(formatID: format.id).write(to: url, atomically: true, encoding: .utf8)
             projectURL = url
             projectError = nil
         } catch {
             projectURL = nil
-            projectError = "TripReel couldn't prepare this timeline file."
+            projectError = "Memories couldn't prepare this timeline file."
         }
     }
 
@@ -355,7 +355,7 @@ private struct ProjectFormatSheet: View {
             return """
             <?xml version="1.0" encoding="UTF-8"?>
             <fcpxml version="1.11">
-              <library><event name="TripReel"><project name="\(xmlEscaped(model.tripShortPlace))"><sequence duration="\(timecode(cursor))s"><spine>
+              <library><event name="Memories"><project name="\(xmlEscaped(model.tripShortPlace))"><sequence duration="\(timecode(cursor))s"><spine>
             \(clips)
               </spine></sequence></project></event></library>
             </fcpxml>
@@ -437,7 +437,7 @@ struct PaywallScreen: View {
                 Spacer()
 
                 VStack(alignment: .leading, spacing: 12) {
-                    MetadataText(text: "TripReel Pro", color: .white.opacity(0.64))
+                    MetadataText(text: "Memories Pro", color: .white.opacity(0.64))
                     Text("Lose the watermark on this film")
                         .font(TR.display(36))
                         .tracking(-0.4)
@@ -556,7 +556,7 @@ struct RenderingScreen: View {
                 .animation(reduceMotion ? nil : TRMotion.progress, value: model.exportProgressDetail)
 
                 if case .preparingPhotos = model.exportProgressPhase {
-                    Text("TripReel retries iCloud automatically before it starts encoding.")
+                    Text("Memories retries iCloud automatically before it starts encoding.")
                         .font(TR.ui(11))
                         .foregroundStyle(.white.opacity(0.42))
                         .multilineTextAlignment(.center)
@@ -672,7 +672,7 @@ struct FilmReadyScreen: View {
                         if let url = model.exportedVideoURL {
                             ShareLink(
                                 item: TripReelMovieFile(url: url),
-                                preview: SharePreview("\(model.tripShortPlace) · TripReel film")
+                                preview: SharePreview("\(model.tripShortPlace) · Memories film")
                             ) {
                                 Text("Choose CapCut")
                                     .frame(maxWidth: .infinity)
@@ -724,7 +724,7 @@ struct FilmReadyScreen: View {
                         if let url = model.exportedVideoURL {
                             ShareLink(
                                 item: TripReelMovieFile(url: url),
-                                preview: SharePreview("\(model.tripShortPlace) · TripReel film")
+                                preview: SharePreview("\(model.tripShortPlace) · Memories film")
                             ) {
                                 Text("Share MP4")
                                     .frame(maxWidth: .infinity)
@@ -955,7 +955,7 @@ private struct CleanupGrid: View {
                     : ""
                 return Alert(
                     title: Text("Delete \(count) original photo\(count == 1 ? "" : "s")?"),
-                    message: Text(selectionWarning + "This removes the selected originals from Apple Photos and devices synced with iCloud Photos. TripReel cannot undo it. Apple Photos will ask you to confirm once more."),
+                    message: Text(selectionWarning + "This removes the selected originals from Apple Photos and devices synced with iCloud Photos. Memories cannot undo it. Apple Photos will ask you to confirm once more."),
                     primaryButton: .destructive(Text("Delete from Photos")) {
                         Task {
                             if let deletedCount = await model.deleteCleanupSelection() {

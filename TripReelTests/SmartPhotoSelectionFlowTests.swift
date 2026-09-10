@@ -81,6 +81,8 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
 
         let callsAfterConsent = await cloud.observedCallCount()
         let thumbnailsAfterConsent = await thumbnails.observedRequestedIDs()
+        let baselines = await cloud.observedBaselines()
+        let contexts = await cloud.observedEditorialContexts()
         XCTAssertEqual(callsAfterConsent, 1)
         XCTAssertEqual(thumbnailsAfterConsent, ["asset-0", "asset-1", "asset-0", "asset-1"])
         XCTAssertEqual(model.firstCutSnapshot?.keptPhotos.map(\.id), firstIDs)
@@ -91,6 +93,13 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         XCTAssertEqual(model.aiCutSnapshot?.titleDrafts[.opening]?.title, "A different angle")
         XCTAssertTrue(model.aiCutSnapshot?.titleCards.contains(.ending) == true)
         XCTAssertEqual(model.aiCutRecommendations.count, 4)
+        XCTAssertEqual(baselines.count, 1)
+        XCTAssertEqual(baselines[0]?.photoCount, 2)
+        XCTAssertEqual(baselines[0]?.sequence.map(\.photoID), ["p0", "p1"])
+        XCTAssertEqual(contexts.first?.compactMap { $0 }.count, 2)
+        XCTAssertEqual(contexts.first?.compactMap { $0 }.first?.captureIndex, 0)
+        XCTAssertEqual(model.aiCutDiagnosis?.issues.first?.kind, .flatPacing)
+        XCTAssertEqual(model.aiCutComparison?.materiallyDifferent, true)
 
         model.useAICut()
         XCTAssertEqual(model.selectedCutSource, .aiCut)
@@ -582,6 +591,8 @@ private actor CloudAnalysisSpy: CloudPhotoAnalysisServing {
     private(set) var wireIDs: [String] = []
     private(set) var localSelections: [CloudPhotoLocalSelection] = []
     private(set) var storyContexts: [String?] = []
+    private(set) var baselines: [CloudFirstCutInput?] = []
+    private(set) var editorialContexts: [[CloudPhotoEditorialContext?]] = []
     private let fails: Bool
 
     init(isConfigured: Bool = true, fails: Bool = false) {
@@ -594,13 +605,43 @@ private actor CloudAnalysisSpy: CloudPhotoAnalysisServing {
         storyContext: String?,
         photos: [CloudPhotoAnalysisInput]
     ) async throws -> AICutEditPlan {
+        try makePlan(
+            direction: direction,
+            storyContext: storyContext,
+            baseline: nil,
+            photos: photos
+        )
+    }
+
+    func createEditPlan(
+        direction: AICutDirection,
+        storyContext: String?,
+        baseline: CloudFirstCutInput?,
+        photos: [CloudPhotoAnalysisInput]
+    ) async throws -> AICutEditPlan {
+        try makePlan(
+            direction: direction,
+            storyContext: storyContext,
+            baseline: baseline,
+            photos: photos
+        )
+    }
+
+    private func makePlan(
+        direction: AICutDirection,
+        storyContext: String?,
+        baseline: CloudFirstCutInput?,
+        photos: [CloudPhotoAnalysisInput]
+    ) throws -> AICutEditPlan {
         callCount += 1
         wireIDs = photos.map(\.id)
         localSelections = photos.map(\.localSelection)
         storyContexts.append(storyContext)
+        baselines.append(baseline)
+        editorialContexts.append(photos.map(\.context))
         if fails { throw CloudPhotoAnalysisError.invalidResponse }
         return AICutEditPlan(
-            version: 2,
+            version: baseline == nil ? 2 : 3,
             direction: direction,
             summary: "A distinct alternative using only the selected previews.",
             story: AICutStory(
@@ -638,6 +679,33 @@ private actor CloudAnalysisSpy: CloudPhotoAnalysisServing {
                     emphasis: index == 0 ? .highlight : .normal,
                     motion: index.isMultiple(of: 2) ? .zoomIn : .panLeft
                 )
+            },
+            diagnosis: baseline.map { _ in
+                AICutDiagnosis(
+                    verdict: "The First Cut needs a clearer emotional build.",
+                    issues: [AICutDiagnosisIssue(
+                        kind: .flatPacing,
+                        title: "Vary the rhythm",
+                        detail: "Let strong reactions land and move faster through connective frames.",
+                        evidencePhotoIDs: photos.prefix(1).map(\.id)
+                    )]
+                )
+            },
+            comparison: baseline.map {
+                AICutComparison(
+                    firstCutPhotoCount: $0.photoCount,
+                    aiCutPhotoCount: photos.count,
+                    restoredCount: photos.filter { $0.localSelection == .morePhotos }.count,
+                    removedCount: 0,
+                    reorderedCount: photos.count > 1 ? 1 : 0,
+                    retimedCount: photos.count,
+                    motionChangedCount: photos.count,
+                    titleChangedCount: 2,
+                    soundtrackChanged: true,
+                    treatmentChanged: true,
+                    score: 62,
+                    materiallyDifferent: true
+                )
             }
         )
     }
@@ -646,6 +714,8 @@ private actor CloudAnalysisSpy: CloudPhotoAnalysisServing {
     func observedWireIDs() -> [String] { wireIDs }
     func observedLocalSelections() -> [CloudPhotoLocalSelection] { localSelections }
     func observedStoryContexts() -> [String?] { storyContexts }
+    func observedBaselines() -> [CloudFirstCutInput?] { baselines }
+    func observedEditorialContexts() -> [[CloudPhotoEditorialContext?]] { editorialContexts }
 }
 
 private actor ThumbnailStub: PhotoAnalysisThumbnailServing {

@@ -4,12 +4,26 @@ import Photos
 
 protocol PhotoLibraryServing: AnyObject, Sendable {
     var onLibraryChange: (@Sendable () -> Void)? { get set }
+    var authorizationStatus: PHAuthorizationStatus { get }
+    func requestAuthorization() async -> PHAuthorizationStatus
     func fetchAllPhotos() async -> [PhotoMetadata]
     func fetchPhotos(withLocalIdentifiers identifiers: [String]) async -> [PhotoMetadata]
     func deletePhotos(withLocalIdentifiers identifiers: [String]) async throws -> Int
 }
 
 extension PhotoLibraryServing {
+    var authorizationStatus: PHAuthorizationStatus {
+        PHPhotoLibrary.authorizationStatus(for: .readWrite)
+    }
+
+    func requestAuthorization() async -> PHAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
+                continuation.resume(returning: status)
+            }
+        }
+    }
+
     func deletePhotos(withLocalIdentifiers identifiers: [String]) async throws -> Int {
         throw PhotoLibraryDeletionError.unsupported
     }
@@ -23,7 +37,7 @@ enum PhotoLibraryDeletionError: LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .unsupported:
-            "These photos can't be deleted by TripReel."
+            "These photos can't be deleted by Memories."
         case let .photosUnavailable(expected, found):
             "Only \(found) of \(expected) selected photos are still available. Nothing was deleted."
         case let .rejected(message):

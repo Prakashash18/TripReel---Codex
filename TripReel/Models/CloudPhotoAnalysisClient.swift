@@ -5,19 +5,126 @@ enum CloudPhotoLocalSelection: String, Codable, Hashable, Sendable {
     case morePhotos = "more_photos"
 }
 
+enum CloudPhotoOrientation: String, Codable, Hashable, Sendable {
+    case portrait
+    case landscape
+    case square
+}
+
+enum CloudPhotoTimeGap: String, Codable, Hashable, Sendable {
+    case start
+    case burst
+    case sameSession = "same_session"
+    case sameDay = "same_day"
+    case nextDay = "next_day"
+    case later
+}
+
+enum CloudPhotoScoreBand: String, Codable, Hashable, Sendable {
+    case low
+    case medium
+    case high
+}
+
+enum CloudPhotoContentKind: String, Codable, Hashable, Sendable {
+    case scenery
+    case people
+    case food
+    case moment
+}
+
+/// Coarse editorial signals produced on-device. This deliberately contains no
+/// timestamps, coordinates, filenames, OCR text, faces, or stable Photos IDs.
+struct CloudPhotoEditorialContext: Codable, Hashable, Sendable {
+    let captureIndex: Int
+    let dayIndex: Int
+    let timeGap: CloudPhotoTimeGap
+    let orientation: CloudPhotoOrientation
+    let contentKind: CloudPhotoContentKind
+    let peopleCount: Int
+    let memory: CloudPhotoScoreBand
+    let aesthetic: CloudPhotoScoreBand
+    let similarityGroup: String
+    let sceneLabels: [String]
+}
+
 struct CloudPhotoAnalysisInput: Sendable {
     let id: String
     let jpegData: Data
     let localSelection: CloudPhotoLocalSelection
+    let context: CloudPhotoEditorialContext?
 
     init(
         id: String,
         jpegData: Data,
-        localSelection: CloudPhotoLocalSelection = .firstCut
+        localSelection: CloudPhotoLocalSelection = .firstCut,
+        context: CloudPhotoEditorialContext? = nil
     ) {
         self.id = id
         self.jpegData = jpegData
         self.localSelection = localSelection
+        self.context = context
+    }
+}
+
+enum CloudFirstCutFrameStyle: String, Codable, Hashable, Sendable {
+    case fullBleed = "full_bleed"
+    case portraitMatte = "portrait_matte"
+    case cinematic
+    case postcard
+}
+
+enum CloudFirstCutTitleKind: String, Codable, Hashable, Sendable {
+    case opening
+    case chapter
+    case ending
+}
+
+struct CloudFirstCutSequenceItem: Codable, Hashable, Sendable {
+    let photoID: String
+    let order: Int
+    let durationSeconds: Double
+    let motion: AICutMotion
+    let frameStyle: CloudFirstCutFrameStyle
+
+    enum CodingKeys: String, CodingKey {
+        case photoID = "photoId"
+        case order
+        case durationSeconds
+        case motion
+        case frameStyle
+    }
+}
+
+struct CloudFirstCutTitle: Codable, Hashable, Sendable {
+    let kind: CloudFirstCutTitleKind
+    let title: String
+    let subtitle: String
+    let style: AICutTitleStyle
+    let durationSeconds: Double
+}
+
+/// A privacy-safe description of the edit already created on-device. The AI
+/// can now improve a real baseline instead of independently ranking stills.
+struct CloudFirstCutInput: Codable, Hashable, Sendable {
+    let photoCount: Int
+    let durationSeconds: Double
+    let omittedPhotoCount: Int
+    let sequence: [CloudFirstCutSequenceItem]
+    let titles: [CloudFirstCutTitle]
+    let soundtrackID: String
+    let look: AICutLook
+    let motionIntensity: AICutMotionIntensity
+
+    enum CodingKeys: String, CodingKey {
+        case photoCount
+        case durationSeconds
+        case omittedPhotoCount
+        case sequence
+        case titles
+        case soundtrackID = "soundtrackId"
+        case look
+        case motionIntensity
     }
 }
 
@@ -180,6 +287,51 @@ struct AICutPlanItem: Codable, Hashable, Sendable {
     }
 }
 
+enum AICutDiagnosisKind: String, Codable, CaseIterable, Hashable, Sendable {
+    case weakHook = "weak_hook"
+    case flatPacing = "flat_pacing"
+    case repetition
+    case missingContext = "missing_context"
+    case weakEnding = "weak_ending"
+    case limitedVariety = "limited_variety"
+}
+
+struct AICutDiagnosisIssue: Codable, Hashable, Sendable {
+    let kind: AICutDiagnosisKind
+    let title: String
+    let detail: String
+    let evidencePhotoIDs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case title
+        case detail
+        case evidencePhotoIDs = "evidencePhotoIds"
+    }
+}
+
+struct AICutDiagnosis: Codable, Hashable, Sendable {
+    let verdict: String
+    let issues: [AICutDiagnosisIssue]
+}
+
+/// Computed by TripReel's Worker from the submitted First Cut and returned AI
+/// timeline. These figures are never self-reported by the model.
+struct AICutComparison: Codable, Hashable, Sendable {
+    let firstCutPhotoCount: Int
+    let aiCutPhotoCount: Int
+    let restoredCount: Int
+    let removedCount: Int
+    let reorderedCount: Int
+    let retimedCount: Int
+    let motionChangedCount: Int
+    let titleChangedCount: Int
+    let soundtrackChanged: Bool
+    let treatmentChanged: Bool
+    let score: Int
+    let materiallyDifferent: Bool
+}
+
 struct AICutEditPlan: Codable, Hashable, Sendable {
     let version: Int
     let direction: AICutDirection
@@ -190,6 +342,34 @@ struct AICutEditPlan: Codable, Hashable, Sendable {
     let soundtrack: AICutSoundtrackPlan
     let treatment: AICutTreatmentPlan
     let sequence: [AICutPlanItem]
+    let diagnosis: AICutDiagnosis?
+    let comparison: AICutComparison?
+
+    init(
+        version: Int,
+        direction: AICutDirection,
+        summary: String,
+        story: AICutStory,
+        hook: AICutTitleCardPlan,
+        ending: AICutEndingPlan,
+        soundtrack: AICutSoundtrackPlan,
+        treatment: AICutTreatmentPlan,
+        sequence: [AICutPlanItem],
+        diagnosis: AICutDiagnosis? = nil,
+        comparison: AICutComparison? = nil
+    ) {
+        self.version = version
+        self.direction = direction
+        self.summary = summary
+        self.story = story
+        self.hook = hook
+        self.ending = ending
+        self.soundtrack = soundtrack
+        self.treatment = treatment
+        self.sequence = sequence
+        self.diagnosis = diagnosis
+        self.comparison = comparison
+    }
 }
 
 enum AICutPlanValidationError: Error, Equatable {
@@ -208,6 +388,8 @@ enum AICutPlanValidationError: Error, Equatable {
     case invalidEnding
     case invalidSoundtrack
     case invalidTreatment
+    case invalidDiagnosis
+    case invalidComparison
 }
 
 enum AICutPlanValidator {
@@ -219,7 +401,7 @@ enum AICutPlanValidator {
         requestedIDs: Set<String>,
         direction: AICutDirection
     ) throws -> AICutEditPlan {
-        guard plan.version == 2 else { throw AICutPlanValidationError.invalidVersion }
+        guard plan.version == 2 || plan.version == 3 else { throw AICutPlanValidationError.invalidVersion }
         guard plan.direction == direction else { throw AICutPlanValidationError.mismatchedDirection }
         guard !plan.sequence.isEmpty else { throw AICutPlanValidationError.emptySequence }
         guard plan.sequence.count <= requestedIDs.count,
@@ -254,6 +436,52 @@ enum AICutPlanValidator {
             throw AICutPlanValidationError.invalidTreatment
         }
 
+        let diagnosis: AICutDiagnosis?
+        let comparison: AICutComparison?
+        if plan.version == 3 {
+            guard let sourceDiagnosis = plan.diagnosis,
+                  let verdict = normalizedText(sourceDiagnosis.verdict, minimum: 1, maximum: 180),
+                  (1...3).contains(sourceDiagnosis.issues.count) else {
+                throw AICutPlanValidationError.invalidDiagnosis
+            }
+            var issues: [AICutDiagnosisIssue] = []
+            for issue in sourceDiagnosis.issues {
+                guard let title = normalizedText(issue.title, minimum: 1, maximum: 60),
+                      let detail = normalizedText(issue.detail, minimum: 1, maximum: 180),
+                      issue.evidencePhotoIDs.count <= 3,
+                      issue.evidencePhotoIDs.allSatisfy(requestedIDs.contains) else {
+                    throw AICutPlanValidationError.invalidDiagnosis
+                }
+                var seenEvidence: Set<String> = []
+                let evidence = issue.evidencePhotoIDs.filter {
+                    seenEvidence.insert($0).inserted
+                }
+                issues.append(AICutDiagnosisIssue(
+                    kind: issue.kind,
+                    title: title,
+                    detail: detail,
+                    evidencePhotoIDs: evidence
+                ))
+            }
+            guard let sourceComparison = plan.comparison,
+                  (0...10_000).contains(sourceComparison.firstCutPhotoCount),
+                  sourceComparison.aiCutPhotoCount == plan.sequence.count,
+                  (0...sourceComparison.aiCutPhotoCount).contains(sourceComparison.restoredCount),
+                  (0...sourceComparison.firstCutPhotoCount).contains(sourceComparison.removedCount),
+                  (0...sourceComparison.aiCutPhotoCount).contains(sourceComparison.reorderedCount),
+                  (0...sourceComparison.aiCutPhotoCount).contains(sourceComparison.retimedCount),
+                  (0...sourceComparison.aiCutPhotoCount).contains(sourceComparison.motionChangedCount),
+                  (0...3).contains(sourceComparison.titleChangedCount),
+                  (0...100).contains(sourceComparison.score) else {
+                throw AICutPlanValidationError.invalidComparison
+            }
+            diagnosis = AICutDiagnosis(verdict: verdict, issues: issues)
+            comparison = sourceComparison
+        } else {
+            diagnosis = nil
+            comparison = nil
+        }
+
         let ordered = plan.sequence.sorted { $0.order < $1.order }
         guard ordered.map(\.order) == Array(0..<ordered.count) else {
             throw AICutPlanValidationError.invalidOrder
@@ -276,7 +504,7 @@ enum AICutPlanValidator {
         }
 
         return AICutEditPlan(
-            version: 2,
+            version: plan.version,
             direction: direction,
             summary: summary,
             story: AICutStory(title: storyTitle, arc: storyArc),
@@ -311,7 +539,9 @@ enum AICutPlanValidator {
                     emphasis: item.emphasis,
                     motion: item.motion
                 )
-            }
+            },
+            diagnosis: diagnosis,
+            comparison: comparison
         )
     }
 
@@ -353,6 +583,23 @@ protocol CloudPhotoAnalysisServing: Sendable {
         storyContext: String?,
         photos: [CloudPhotoAnalysisInput]
     ) async throws -> AICutEditPlan
+    func createEditPlan(
+        direction: AICutDirection,
+        storyContext: String?,
+        baseline: CloudFirstCutInput?,
+        photos: [CloudPhotoAnalysisInput]
+    ) async throws -> AICutEditPlan
+}
+
+extension CloudPhotoAnalysisServing {
+    func createEditPlan(
+        direction: AICutDirection,
+        storyContext: String?,
+        baseline: CloudFirstCutInput?,
+        photos: [CloudPhotoAnalysisInput]
+    ) async throws -> AICutEditPlan {
+        try await createEditPlan(direction: direction, storyContext: storyContext, photos: photos)
+    }
 }
 
 protocol CloudPhotoAnalysisAuthorizing: Sendable {
@@ -409,6 +656,7 @@ enum CloudPhotoAnalysisError: LocalizedError, Equatable {
     case thumbnailTooLarge
     case invalidEphemeralIdentifier
     case invalidStoryContext
+    case invalidBaseline
     case invalidResponse
     case server(statusCode: Int, code: String?)
 
@@ -417,7 +665,7 @@ enum CloudPhotoAnalysisError: LocalizedError, Equatable {
         case .notConfigured:
             "AI couldn't create another cut right now. Your First Cut is still ready."
         case .invalidEndpoint:
-            "TripReel's cloud analysis endpoint must use HTTPS."
+            "Memories' cloud analysis endpoint must use HTTPS."
         case .emptyRequest:
             "There were no eligible previews for an AI cut."
         case .tooManyPhotos:
@@ -428,8 +676,10 @@ enum CloudPhotoAnalysisError: LocalizedError, Equatable {
             "AI preview identifiers must be temporary per-request values."
         case .invalidStoryContext:
             "Keep the story hint under 160 characters."
+        case .invalidBaseline:
+            "The First Cut could not be prepared for comparison."
         case .invalidResponse:
-            "TripReel received an invalid cloud analysis response."
+            "Memories received an invalid cloud analysis response."
         case let .server(statusCode, code):
             Self.serverMessage(statusCode: statusCode, code: code)
         }
@@ -442,14 +692,14 @@ enum CloudPhotoAnalysisError: LocalizedError, Equatable {
         case "upstream_timeout", "upstream_unavailable", "upstream_error":
             "The AI editor is temporarily unavailable. Your First Cut is still ready."
         case "internal_error", "server_misconfigured":
-            "TripReel's secure AI service hit a temporary setup problem. Your First Cut is still ready."
+            "Memories' secure AI service hit a temporary setup problem. Your First Cut is still ready."
         case "invalid_attestation", "invalid_assertion", "counter_replay",
              "key_not_registered", "authentication_unavailable":
             "This iPhone couldn't be securely verified. Please try once more."
         case "invalid_upstream_response":
             "The AI editor returned an unusable cut. Please try a different direction."
         default:
-            "TripReel's AI service returned error \(statusCode). Your First Cut is still ready."
+            "Memories' AI service returned error \(statusCode). Your First Cut is still ready."
         }
     }
 }
@@ -528,6 +778,20 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
         storyContext: String? = nil,
         photos: [CloudPhotoAnalysisInput]
     ) async throws -> AICutEditPlan {
+        try await createEditPlan(
+            direction: direction,
+            storyContext: storyContext,
+            baseline: nil,
+            photos: photos
+        )
+    }
+
+    func createEditPlan(
+        direction: AICutDirection,
+        storyContext: String? = nil,
+        baseline: CloudFirstCutInput?,
+        photos: [CloudPhotoAnalysisInput]
+    ) async throws -> AICutEditPlan {
         guard let endpoint, authorizer.isReady else { throw CloudPhotoAnalysisError.notConfigured }
         guard Self.isValidHTTPSURL(endpoint) else { throw CloudPhotoAnalysisError.invalidEndpoint }
         guard !photos.isEmpty else { throw CloudPhotoAnalysisError.emptyRequest }
@@ -539,16 +803,26 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
             throw CloudPhotoAnalysisError.thumbnailTooLarge
         }
         let normalizedStoryContext = try Self.normalizedStoryContext(storyContext)
+        if baseline != nil {
+            guard photos.allSatisfy({ $0.context.map(Self.isValidContext) == true }),
+                  Self.isValidBaseline(baseline, requestedIDs: Set(photos.map(\.id))) else {
+                throw CloudPhotoAnalysisError.invalidBaseline
+            }
+        }
+
+        let requestVersion = baseline == nil ? 2 : 3
 
         let requestBody = CloudRequest(
-            version: 2,
+            version: requestVersion,
             direction: direction,
             storyContext: normalizedStoryContext,
+            baseline: baseline,
             photos: photos.map {
                 CloudRequest.Photo(
                     id: $0.id,
                     imageBase64: $0.jpegData.base64EncodedString(),
-                    localSelection: $0.localSelection
+                    localSelection: $0.localSelection,
+                    context: $0.context
                 )
             }
         )
@@ -562,7 +836,7 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
             request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.setValue("TripReel-iOS/2", forHTTPHeaderField: "X-TripReel-Client")
+            request.setValue("TripReel-iOS/\(requestVersion)", forHTTPHeaderField: "X-TripReel-Client")
 
             let authorizationHeaders = try await authorizer.authorizationHeaders(for: encodedBody)
             guard !authorizationHeaders.isEmpty else { throw CloudPhotoAnalysisError.notConfigured }
@@ -651,14 +925,63 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
         url.scheme?.lowercased() == "https" && url.host?.isEmpty == false
     }
 
+    private static func isValidBaseline(
+        _ baseline: CloudFirstCutInput?,
+        requestedIDs: Set<String>
+    ) -> Bool {
+        guard let baseline,
+              baseline.photoCount >= baseline.sequence.count,
+              baseline.photoCount <= 10_000,
+              baseline.omittedPhotoCount == baseline.photoCount - baseline.sequence.count,
+              baseline.durationSeconds.isFinite,
+              (0...40_000).contains(baseline.durationSeconds),
+              baseline.sequence.count <= maximumBatchSize,
+              baseline.titles.count <= 3,
+              Set(baseline.titles.map(\.kind)).count == baseline.titles.count,
+              (Set(AICutSoundtrackID.allCases.map(\.rawValue)).union(["none"]))
+                .contains(baseline.soundtrackID) else { return false }
+        let ids = baseline.sequence.map(\.photoID)
+        guard Set(ids).count == ids.count,
+              ids.allSatisfy(requestedIDs.contains),
+              baseline.sequence.sorted(by: { $0.order < $1.order }).map(\.order) == Array(0..<ids.count),
+              baseline.sequence.allSatisfy({
+                  $0.durationSeconds.isFinite && (0.6...4).contains($0.durationSeconds)
+              }) else { return false }
+        return baseline.titles.allSatisfy {
+            !$0.title.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+                && !$0.subtitle.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+                && $0.title.count <= 60
+                && $0.subtitle.count <= 100
+                && $0.durationSeconds.isFinite
+                && (1...4).contains($0.durationSeconds)
+        }
+    }
+
+    private static func isValidContext(_ context: CloudPhotoEditorialContext) -> Bool {
+        let labelPattern = #"^[A-Za-z0-9][A-Za-z0-9 _-]{0,47}$"#
+        let groupPattern = #"^(?:|g(?:0|[1-9][0-9]?))$"#
+        return (0...100_000).contains(context.captureIndex)
+            && (0...365).contains(context.dayIndex)
+            && (0...20).contains(context.peopleCount)
+            && context.similarityGroup.range(of: groupPattern, options: .regularExpression) != nil
+            && context.sceneLabels.count <= 3
+            && context.sceneLabels.allSatisfy {
+                $0.range(of: labelPattern, options: .regularExpression) != nil
+            }
+    }
+
     private static func hasExactResponseShape(_ data: Data) -> Bool {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               Set(root.keys) == ["model", "plan", "retention"],
               let plan = root["plan"] as? [String: Any],
-              Set(plan.keys) == [
+              let version = plan["version"] as? Int,
+              ((version == 2 && Set(plan.keys) == [
                   "version", "direction", "summary", "story", "hook", "ending",
                   "soundtrack", "treatment", "sequence"
-              ],
+              ]) || (version == 3 && Set(plan.keys) == [
+                  "version", "direction", "summary", "story", "hook", "ending",
+                  "soundtrack", "treatment", "sequence", "diagnosis", "comparison"
+              ])),
               let story = plan["story"] as? [String: Any],
               Set(story.keys) == ["title", "arc"],
               let hook = plan["hook"] as? [String: Any],
@@ -673,10 +996,27 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
               sequence.allSatisfy({ item in
                   Set(item.keys) == ["photoId", "order", "durationSeconds", "role", "emphasis", "motion"]
               }),
+              (version != 3 || Self.hasExactDirectorFields(plan)),
               let retention = root["retention"] as? [String: Any],
               Set(retention.keys) == ["proxyStored", "openAIStore", "abuseMonitoring"] else {
             return false
         }
+        return true
+    }
+
+    private static func hasExactDirectorFields(_ plan: [String: Any]) -> Bool {
+        guard let diagnosis = plan["diagnosis"] as? [String: Any],
+              Set(diagnosis.keys) == ["verdict", "issues"],
+              let issues = diagnosis["issues"] as? [[String: Any]],
+              issues.allSatisfy({
+                  Set($0.keys) == ["kind", "title", "detail", "evidencePhotoIds"]
+              }),
+              let comparison = plan["comparison"] as? [String: Any],
+              Set(comparison.keys) == [
+                  "firstCutPhotoCount", "aiCutPhotoCount", "restoredCount", "removedCount",
+                  "reorderedCount", "retimedCount", "motionChangedCount", "titleChangedCount",
+                  "soundtrackChanged", "treatmentChanged", "score", "materiallyDifferent"
+              ] else { return false }
         return true
     }
 
@@ -692,11 +1032,13 @@ private struct CloudRequest: Encodable {
         let id: String
         let imageBase64: String
         let localSelection: CloudPhotoLocalSelection
+        let context: CloudPhotoEditorialContext?
     }
 
     let version: Int
     let direction: AICutDirection
     let storyContext: String?
+    let baseline: CloudFirstCutInput?
     let photos: [Photo]
 }
 
