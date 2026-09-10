@@ -453,7 +453,7 @@ struct SmartSelectionReviewView: View {
             }
             .buttonStyle(TactileButtonStyle())
             .accessibilityIdentifier("photo-analysis-retry-button")
-            .accessibilityHint("Checks the source trip again and refreshes the preview")
+            .accessibilityHint("Checks the source memory again and refreshes the preview")
         }
         .padding(15)
         .glassCard(cornerRadius: 18)

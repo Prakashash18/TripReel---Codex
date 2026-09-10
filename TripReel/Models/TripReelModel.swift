@@ -1005,7 +1005,9 @@ enum LocalStoryIntelligence {
         let normalized = place.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return normalized.isEmpty
             || normalized == "photo trip"
+            || normalized == "photo memory"
             || normalized == "nearby outing"
+            || normalized == "local memory"
             || normalized.hasPrefix("travel ·")
     }
 
@@ -1488,7 +1490,7 @@ final class TripReelModel: ObservableObject {
             libraryPreviewPhotos = Array(photos.prefix(6))
             libraryPhotoCount = fixtures.reduce(0) { $0 + $1.photoCount }
             selectedPhotoCount = 3
-            titleText = fixtures.first?.shortPlace ?? "My trip"
+            titleText = fixtures.first?.shortPlace ?? "My memory"
         } else {
             self.photoLibrary.onLibraryChange = { [weak self] in
                 Task { @MainActor [weak self] in
@@ -1914,7 +1916,7 @@ final class TripReelModel: ObservableObject {
         case .dynamic:
             ["A day full of energy", "The best moments, fast", "From start to celebration"]
         case .betterStory:
-            ["How the day unfolded", "The moments behind the trip", "From arrival to goodbye"]
+            ["How the day unfolded", "The moments behind the memory", "From arrival to goodbye"]
         case .surpriseMe:
             ["What made this memorable", "The story between the photos", "Find the unexpected thread"]
         }
@@ -1924,21 +1926,21 @@ final class TripReelModel: ObservableObject {
         formats.first { $0.id == selectedFormatID } ?? formats[0]
     }
 
-    var tripsEyebrow: String {
+    var overseasMemoriesEyebrow: String {
         if isScanningLibrary { return "Scanning \(libraryPhotoCount) photos" }
         if !usesDemoData {
-            return "\(trips.count) trip\(trips.count == 1 ? "" : "s") · \(libraryPhotoCount) photos scanned"
+            return "\(trips.count) memor\(trips.count == 1 ? "y" : "ies") · \(libraryPhotoCount) photos scanned"
         }
-        return "\(trips.count) trip\(trips.count == 1 ? "" : "s") found"
+        return "\(trips.count) memor\(trips.count == 1 ? "y" : "ies") found"
     }
 
-    var nearbyEyebrow: String {
-        if isScanningLibrary { return "Finding nearby moments" }
-        return "\(nearbyEvents.count) local outing\(nearbyEvents.count == 1 ? "" : "s") · on this iPhone"
+    var localMemoriesEyebrow: String {
+        if isScanningLibrary { return "Finding local memories" }
+        return "\(nearbyEvents.count) local memor\(nearbyEvents.count == 1 ? "y" : "ies") · on this iPhone"
     }
 
-    var tripPlace: String { selectedTrip?.place ?? "Your trip" }
-    var tripShortPlace: String { selectedTrip?.shortPlace ?? "Your trip" }
+    var tripPlace: String { selectedTrip?.place ?? "Your memory" }
+    var tripShortPlace: String { selectedTrip?.shortPlace ?? "Your memory" }
     var tripDates: String { selectedTrip?.dates ?? "Selected photos" }
 
     /// Backward-compatible opening-title access. Each title card now keeps an
@@ -1950,7 +1952,7 @@ final class TripReelModel: ObservableObject {
     }
 
     var tripMonthYear: String {
-        guard let date = selectedTrip?.startDate else { return "Your trip" }
+        guard let date = selectedTrip?.startDate else { return "Your memory" }
         return Self.monthYearFormatter.string(from: date)
     }
 
@@ -2229,7 +2231,7 @@ final class TripReelModel: ObservableObject {
             return
         }
         guard let sourceTrip = activeAnalysisTrip ?? selectedTrip else {
-            aiCutFailureMessage = "The original trip photos aren't available for another cut. Your First Cut is unchanged."
+            aiCutFailureMessage = "The original memory photos aren't available for another cut. Your First Cut is unchanged."
             return
         }
         let sourceAssets = sourceTrip.assets
@@ -2956,7 +2958,7 @@ final class TripReelModel: ObservableObject {
             titleCards: firstCutSnapshot.titleCards.union([.opening, .ending]),
             titleDrafts: firstCutSnapshot.titleDrafts.merging([
                 .opening: TitleCardDraft(
-                    title: "One trip, many little turns",
+                    title: "One memory, many little turns",
                     subtitle: "A different way to remember it",
                     style: .editorial,
                     duration: 2.4
@@ -2974,7 +2976,7 @@ final class TripReelModel: ObservableObject {
         aiCutSummary = "A tighter alternative with a stronger opening, fewer repeated moments and a quicker finish."
         aiCutRecommendations = [
             AICutRecommendation(kind: .story, title: "Arrival to afterglow", detail: "Open with discovery, build through people and details, then finish on a quiet memory."),
-            AICutRecommendation(kind: .titles, title: "Titles with a story", detail: "Opens with “One trip, many little turns”, adds a chapter beat, and closes with a brief final thought."),
+            AICutRecommendation(kind: .titles, title: "Titles with a story", detail: "Opens with “One memory, many little turns”, adds a chapter beat, and closes with a brief final thought."),
             AICutRecommendation(kind: .music, title: "Simplicity", detail: "A light acoustic rhythm supports the warmer, quicker edit."),
             AICutRecommendation(kind: .treatment, title: "Story · Expressive", detail: "Varied framing and movement give each moment a distinct role.")
         ]
@@ -3213,7 +3215,7 @@ final class TripReelModel: ObservableObject {
                 photoAnalysisTask = nil
                 activePhotoInsights = montageInsights
                 photoAnalysisFollowUp = followUp.hasAnythingToCheck ? followUp : nil
-                libraryErrorMessage = "Your trip is safe in Photos. These moments are still syncing from iCloud, so Memories held back the preview instead of showing empty frames. Check your connection and try this trip again shortly."
+                libraryErrorMessage = "Your memory is safe in Photos. These moments are still syncing from iCloud, so Memories held back the preview instead of showing empty frames. Check your connection and try this memory again shortly."
                 return
             }
         }
@@ -3296,7 +3298,7 @@ final class TripReelModel: ObservableObject {
         case 0: photoAnalysisStatus = "Reading light and composition"
         case 1: photoAnalysisStatus = "Finding faces and shared moments"
         case 2: photoAnalysisStatus = "Comparing similar frames"
-        default: photoAnalysisStatus = "Building the rhythm of your trip"
+        default: photoAnalysisStatus = "Building the rhythm of your memory"
         }
     }
 
@@ -4271,7 +4273,7 @@ final class TripReelModel: ObservableObject {
             )
         }
         let fallbackPlace = detected.centroid == nil
-            ? "Photo trip"
+            ? "Photo memory"
             : "Travel · \(monthYearFormatter.string(from: detected.startDate))"
         return Trip(
             id: detected.id,
@@ -4286,7 +4288,7 @@ final class TripReelModel: ObservableObject {
 
     private static func makeNearbyEvent(from detected: DetectedTrip) -> Trip {
         let trip = makeTrip(from: detected)
-        return trip.renamed("Nearby outing")
+        return trip.renamed("Local memory")
     }
 
     private static func makePreviewPhotos(from metadata: [PhotoMetadata]) -> [ReelPhoto] {

@@ -1351,6 +1351,39 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertFalse(decisions.contains { $0.id == stronger.id })
     }
 
+    func testMemoryCollectionsOnlyExposeCategoriesThatContainMemories() {
+        XCTAssertEqual(
+            MemoryCollection.available(overseasCount: 2, localCount: 3),
+            [.overseas, .local]
+        )
+        XCTAssertEqual(
+            MemoryCollection.available(overseasCount: 0, localCount: 3),
+            [.local]
+        )
+        XCTAssertEqual(
+            MemoryCollection.available(overseasCount: 2, localCount: 0),
+            [.overseas]
+        )
+        XCTAssertTrue(
+            MemoryCollection.available(overseasCount: 0, localCount: 0).isEmpty
+        )
+    }
+
+    func testMemoryCollectionSelectionMovesToTheOnlyAvailableCategory() {
+        XCTAssertEqual(
+            MemoryCollection.resolvedSelection(.overseas, available: [.local]),
+            .local
+        )
+        XCTAssertEqual(
+            MemoryCollection.resolvedSelection(.local, available: [.overseas, .local]),
+            .local
+        )
+        XCTAssertEqual(
+            MemoryCollection.resolvedSelection(.local, available: []),
+            .overseas
+        )
+    }
+
     private func makeAsset(
         _ id: String,
         start: Date,

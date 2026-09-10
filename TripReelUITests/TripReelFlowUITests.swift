@@ -107,15 +107,13 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("cleanup-screen").waitForExistence(timeout: 3))
     }
 
-    func testTripsAndNearbyStayInOneCalmCollectionScreen() {
+    func testSingleMemoryCollectionRemovesUnhelpfulTabs() {
         launchApp()
         XCTAssertTrue(screen("trips-screen").waitForExistence(timeout: 3))
         XCTAssertFalse(screen("cloud-analysis-settings-card").exists)
-
-        app.buttons["Nearby"].tap()
-
-        XCTAssertTrue(app.staticTexts["Nearby moments"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["No nearby outings yet"].exists)
+        XCTAssertTrue(app.staticTexts["Your memories"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.buttons["Overseas"].exists)
+        XCTAssertFalse(app.buttons["Local"].exists)
         XCTAssertTrue(screen("trips-screen").exists)
     }
 

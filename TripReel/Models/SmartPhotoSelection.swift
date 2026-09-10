@@ -192,7 +192,7 @@ enum SmartPhotoSelectionPolicy {
             return SmartExcludedPhoto(
                 asset: asset,
                 reason: .lowQuality,
-                detail: "A stronger frame from this part of the trip was preferred.",
+                detail: "A stronger frame from this part of the memory was preferred.",
                 confidence: scores.nativeConfidence,
                 origin: .onDevice
             )
@@ -341,7 +341,7 @@ enum SmartHighlightSelector {
             return SmartExcludedPhoto(
                 asset: asset,
                 reason: .notAHighlight,
-                detail: "Kept nearby for a shorter, more varied first cut.",
+                detail: "Kept in More Photos for a shorter, more varied first cut.",
                 confidence: 0.72,
                 origin: .onDevice
             )

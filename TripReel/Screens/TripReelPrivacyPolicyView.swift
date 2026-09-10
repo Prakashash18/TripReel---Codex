@@ -12,7 +12,7 @@ struct TripReelPrivacyPolicyView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         policyHeader
                         section(
-                            "Photos and trip detection",
+                            "Photos and memory grouping",
                             "With your Photos permission, Memories reads accessible images, capture dates, and embedded locations to find meaningful moments and build a film. Detection and grouping happen on your device; Memories uses Apple's system geocoder to turn one representative coordinate into a place name. Originals remain in Apple Photos unless you explicitly select cut photos in Cleanup, accept Memories' warning, and confirm Apple's system deletion prompt. With iCloud Photos, that confirmed deletion can affect your other synced devices. Photos you pick without broad library access are copied temporarily into Memories' private on-device cache for the editing session."
                         )
                         section(

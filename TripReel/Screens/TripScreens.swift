@@ -1,21 +1,52 @@
 import PhotosUI
 import SwiftUI
 
+enum MemoryCollection: String, CaseIterable, Identifiable {
+    case overseas = "Overseas"
+    case local = "Local"
+
+    var id: String { rawValue }
+
+    static func available(overseasCount: Int, localCount: Int) -> [MemoryCollection] {
+        allCases.filter { collection in
+            switch collection {
+            case .overseas: overseasCount > 0
+            case .local: localCount > 0
+            }
+        }
+    }
+
+    static func resolvedSelection(
+        _ selection: MemoryCollection,
+        available: [MemoryCollection]
+    ) -> MemoryCollection {
+        available.contains(selection) ? selection : (available.first ?? .overseas)
+    }
+}
+
 struct TripsScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var collection: TripCollection = .trips
+    @State private var collection: MemoryCollection = .overseas
     @Namespace private var collectionSelection
 
-    private enum TripCollection: String, CaseIterable, Identifiable {
-        case trips = "Trips"
-        case nearby = "Nearby"
-
-        var id: String { rawValue }
+    private var availableCollections: [MemoryCollection] {
+        MemoryCollection.available(
+            overseasCount: model.trips.count,
+            localCount: model.nearbyEvents.count
+        )
     }
 
-    private var displayedTrips: [Trip] {
-        collection == .trips ? model.trips : model.nearbyEvents
+    private var activeCollection: MemoryCollection {
+        MemoryCollection.resolvedSelection(collection, available: availableCollections)
+    }
+
+    private var displayedMemories: [Trip] {
+        activeCollection == .overseas ? model.trips : model.nearbyEvents
+    }
+
+    private var isShowingLocalMemories: Bool {
+        activeCollection == .local
     }
 
     var body: some View {
@@ -24,18 +55,22 @@ struct TripsScreen: View {
 
             VStack(spacing: 0) {
                 ScreenHeading(
-                    eyebrow: collection == .trips ? model.tripsEyebrow : model.nearbyEyebrow,
-                    title: collection == .trips ? "Your trips" : "Nearby moments"
+                    eyebrow: isShowingLocalMemories
+                        ? model.localMemoriesEyebrow
+                        : model.overseasMemoriesEyebrow,
+                    title: "Your memories"
                 )
                     .padding(.horizontal, 24)
                     .padding(.top, 4)
                     .padding(.bottom, 13)
                     .trEntrance(0, distance: 10)
 
-                collectionPicker
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 14)
-                    .trEntrance(1, distance: 8)
+                if availableCollections.count > 1 {
+                    collectionPicker
+                        .padding(.horizontal, 18)
+                        .padding(.bottom, 14)
+                        .trEntrance(1, distance: 8)
+                }
 
                 ScrollView(showsIndicators: false) {
                     LazyVStack(spacing: 10) {
@@ -49,18 +84,18 @@ struct TripsScreen: View {
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 72)
-                        } else if displayedTrips.isEmpty {
+                        } else if displayedMemories.isEmpty {
                             emptyCollection
                         } else {
-                            ForEach(Array(displayedTrips.enumerated()), id: \.element.id) { index, trip in
-                                TripRow(trip: trip, isNearby: collection == .nearby) {
+                            ForEach(Array(displayedMemories.enumerated()), id: \.element.id) { index, trip in
+                                TripRow(trip: trip, isNearby: isShowingLocalMemories) {
                                     model.requestBuild(trip: trip)
                                 }
                                 .trEntrance(min(index, 4), distance: 8)
                             }
 
-                            if collection == .nearby {
-                                Text("One-day photo outings near places you visit often. Screenshots never create an event.")
+                            if isShowingLocalMemories {
+                                Text("One-day memories near places you visit often. Screenshots never create a memory.")
                                     .font(TR.ui(11))
                                     .foregroundStyle(.white.opacity(0.39))
                                     .multilineTextAlignment(.center)
@@ -89,17 +124,15 @@ struct TripsScreen: View {
                 }
             }
         }
-        .onAppear {
-            if model.trips.isEmpty && !model.nearbyEvents.isEmpty {
-                collection = .nearby
-            }
+        .onChange(of: availableCollections, initial: true) { _, available in
+            collection = MemoryCollection.resolvedSelection(collection, available: available)
         }
         .accessibilityIdentifier("trips-screen")
     }
 
     private var collectionPicker: some View {
         HStack(spacing: 4) {
-            ForEach(TripCollection.allCases) { item in
+            ForEach(availableCollections) { item in
                 Button {
                     withAnimation(
                         reduceMotion
@@ -142,15 +175,15 @@ struct TripsScreen: View {
 
     private var emptyCollection: some View {
         VStack(spacing: 12) {
-            Image(systemName: collection == .trips ? "airplane" : "mappin.and.ellipse")
+            Image(systemName: isShowingLocalMemories ? "mappin.and.ellipse" : "airplane")
                 .font(.system(size: 27, weight: .light))
                 .foregroundStyle(TR.accent.opacity(0.8))
-            Text(collection == .trips ? "No multi-day trips found" : "No nearby outings yet")
+            Text(isShowingLocalMemories ? "No local memories yet" : "No overseas memories yet")
                 .font(TR.display(22))
                 .foregroundStyle(TR.cream)
-            Text(collection == .trips
-                 ? "Try Nearby for one-day moments, or pull down to scan again."
-                 : "Nearby appears after Memories recognizes a familiar area and a compact day with six or more photos.")
+            Text(isShowingLocalMemories
+                 ? "Local memories appear after Memories recognizes a familiar area and a compact day with six or more photos."
+                 : "Pull down to scan again, or pick the photos that matter yourself.")
                 .font(TR.ui(12))
                 .foregroundStyle(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
@@ -233,7 +266,7 @@ struct EmptyTripsScreen: View {
             WarmBackground(variant: .trips)
 
             VStack(spacing: 0) {
-                ScreenHeading(eyebrow: nil, title: "Your trips")
+                ScreenHeading(eyebrow: nil, title: "Your memories")
                     .padding(.horizontal, 24)
                     .padding(.top, 30)
                     .trEntrance(0, distance: 8)
@@ -248,7 +281,7 @@ struct EmptyTripsScreen: View {
                     }
                     .opacity(0.55)
 
-                    Text("We couldn't find any trips yet — trips need at least 15 photos taken in one place over a day or more.")
+                    Text("We couldn't find a clear memory yet. Pick the photos that matter, or add more moments and scan again.")
                         .font(TR.display(21))
                         .foregroundStyle(.white.opacity(0.86))
                         .multilineTextAlignment(.center)
