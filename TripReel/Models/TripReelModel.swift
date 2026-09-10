@@ -1370,6 +1370,7 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var cloudConsentIsSettings = false
     @Published private(set) var selectedAICutDirection: AICutDirection?
     @Published private(set) var selectedAICutPhotoIDs: Set<String> = []
+    @Published var aiCutStoryContext = ""
     @Published private(set) var firstCutSnapshot: TripEditSnapshot?
     @Published private(set) var aiCutSnapshot: TripEditSnapshot?
     @Published private(set) var selectedCutSource: TripCutSource = .firstCut
@@ -1887,6 +1888,24 @@ final class TripReelModel: ObservableObject {
         }
     }
 
+    /// Short, optional creator prompts. These are intentionally broad: the app
+    /// never invents an event or relationship, and sends a hint only after the
+    /// user taps one or writes their own.
+    var aiCutStoryContextSuggestions: [String] {
+        switch recommendedAICutDirection {
+        case .people:
+            ["The people made the day", "A shared achievement", "Small moments together"]
+        case .calm:
+            ["A quiet escape", "The feeling of being there", "Slow moments worth keeping"]
+        case .dynamic:
+            ["A day full of energy", "The best moments, fast", "From start to celebration"]
+        case .betterStory:
+            ["How the day unfolded", "The moments behind the trip", "From arrival to goodbye"]
+        case .surpriseMe:
+            ["What made this memorable", "The story between the photos", "Find the unexpected thread"]
+        }
+    }
+
     var selectedFormat: ProjectFormat {
         formats.first { $0.id == selectedFormatID } ?? formats[0]
     }
@@ -2240,6 +2259,7 @@ final class TripReelModel: ObservableObject {
             do {
                 let plan = try await self.cloudPhotoAnalysis.createEditPlan(
                     direction: direction,
+                    storyContext: self.aiCutStoryContext,
                     photos: wireInputs
                 )
                 guard self.aiCutGeneration == generation, !Task.isCancelled else { return }
@@ -2333,7 +2353,8 @@ final class TripReelModel: ObservableObject {
             direction: direction
         )
         var plannedPhotos: [ReelPhoto] = []
-        for item in validated.sequence {
+        var previousMotion: MontageMotionStyle?
+        for (index, item) in validated.sequence.enumerated() {
             guard let localID = localIDsByWireID[item.photoID],
                   var photo = candidatePhotosByLocalID[localID] else {
                 throw AICutPlanValidationError.unknownPhotoID
@@ -2341,7 +2362,13 @@ final class TripReelModel: ObservableObject {
             photo.durationSeconds = item.emphasis == .highlight
                 ? max(2.2, item.durationSeconds)
                 : item.durationSeconds
-            photo.motionStyle = Self.motionStyle(for: item.motion, fallback: photo.automaticMotionStyle)
+            photo.motionStyle = Self.choreographedMotionStyle(
+                for: item,
+                photo: photo,
+                index: index,
+                previous: previousMotion
+            )
+            previousMotion = photo.motionStyle
             plannedPhotos.append(photo)
         }
 
@@ -2351,12 +2378,32 @@ final class TripReelModel: ObservableObject {
         var titleCards = firstCut.titleCards
         var titleDrafts = firstCut.titleDrafts
         titleCards.insert(.opening)
+        titleCards.remove(.place)
         titleDrafts[.opening] = TitleCardDraft(
             title: validated.hook.title,
             subtitle: validated.hook.subtitle,
             style: Self.titleStyle(for: validated.hook.style),
             duration: validated.hook.durationSeconds
         )
+        let normalizedHook = validated.hook.title.folding(
+            options: [.caseInsensitive, .diacriticInsensitive],
+            locale: .current
+        )
+        let normalizedChapter = validated.story.title.folding(
+            options: [.caseInsensitive, .diacriticInsensitive],
+            locale: .current
+        )
+        if plannedPhotos.count >= 5, normalizedChapter != normalizedHook {
+            let anchor = plannedPhotos[max(1, (plannedPhotos.count / 2) - 1)]
+            titleCards.insert(.place)
+            titleDrafts[.place] = TitleCardDraft(
+                title: validated.story.title,
+                subtitle: "",
+                style: .clean,
+                duration: 1.6,
+                afterPhotoID: anchor.id
+            )
+        }
         if validated.ending.enabled {
             titleCards.insert(.ending)
             titleDrafts[.ending] = TitleCardDraft(
@@ -2392,9 +2439,14 @@ final class TripReelModel: ObservableObject {
     }
 
     private static func recommendations(for plan: AICutEditPlan) -> [AICutRecommendation] {
+        let hasChapter = plan.sequence.count >= 5 && plan.story.title.compare(
+            plan.hook.title,
+            options: [.caseInsensitive, .diacriticInsensitive]
+        ) != .orderedSame
+        let chapter = hasChapter ? ", adds “\(plan.story.title)” as a chapter" : ""
         let closing = plan.ending.enabled
-            ? " Opens with “\(plan.hook.title)” and closes with “\(plan.ending.title)”."
-            : " Opens with “\(plan.hook.title)” and lets the final photo close the film."
+            ? "Opens with “\(plan.hook.title)”\(chapter), and closes with “\(plan.ending.title)”."
+            : "Opens with “\(plan.hook.title)”\(chapter), and lets the final photo close the film."
         return [
             AICutRecommendation(
                 kind: .story,
@@ -2403,8 +2455,8 @@ final class TripReelModel: ObservableObject {
             ),
             AICutRecommendation(
                 kind: .titles,
-                title: "A stronger hook",
-                detail: closing.trimmingCharacters(in: .whitespaces)
+                title: "Titles with a story",
+                detail: closing
             ),
             AICutRecommendation(
                 kind: .music,
@@ -2520,18 +2572,49 @@ final class TripReelModel: ObservableObject {
         }
     }
 
-    private static func motionStyle(
-        for requested: AICutMotion,
-        fallback: MontageMotionStyle
+    private static func choreographedMotionStyle(
+        for item: AICutPlanItem,
+        photo: ReelPhoto,
+        index: Int,
+        previous: MontageMotionStyle?
     ) -> MontageMotionStyle {
+        // Preserve the face-aware motion chosen on-device. A cloud suggestion
+        // must never turn a safe group composition into an aggressive crop.
+        if photo.protectsPeople {
+            return photo.automaticMotionStyle
+        }
+
+        let requested: MontageMotionStyle
+        switch item.motion {
+        case .automatic:
+            switch item.role {
+            case .opening, .establishing, .scenery:
+                requested = index.isMultiple(of: 2) ? .panLeft : .panRight
+            case .people:
+                requested = index.isMultiple(of: 2) ? .zoomIn : .settle
+            case .detail, .food:
+                requested = index.isMultiple(of: 2) ? .rise : .zoomIn
+            case .bridge:
+                requested = index.isMultiple(of: 2) ? .zoomOut : .panRight
+            case .closing:
+                requested = .settle
+            }
+        case .zoomIn: requested = .zoomIn
+        case .zoomOut: requested = .zoomOut
+        case .panLeft: requested = .panLeft
+        case .panRight: requested = .panRight
+        case .rise: requested = .rise
+        case .settle: requested = .settle
+        }
+
+        guard requested == previous else { return requested }
         switch requested {
-        case .automatic: fallback
-        case .zoomIn: .zoomIn
-        case .zoomOut: .zoomOut
-        case .panLeft: .panLeft
-        case .panRight: .panRight
-        case .rise: .rise
-        case .settle: .settle
+        case .zoomIn: return .panLeft
+        case .zoomOut: return .rise
+        case .panLeft: return .zoomIn
+        case .panRight: return .settle
+        case .rise: return .panRight
+        case .settle: return .zoomOut
         }
     }
 
@@ -2586,7 +2669,7 @@ final class TripReelModel: ObservableObject {
         aiCutSummary = "A tighter alternative with a stronger opening, fewer repeated moments and a quicker finish."
         aiCutRecommendations = [
             AICutRecommendation(kind: .story, title: "Arrival to afterglow", detail: "Open with discovery, build through people and details, then finish on a quiet memory."),
-            AICutRecommendation(kind: .titles, title: "A stronger hook", detail: "Opens with “One trip, many little turns” and adds a brief closing thought."),
+            AICutRecommendation(kind: .titles, title: "Titles with a story", detail: "Opens with “One trip, many little turns”, adds a chapter beat, and closes with a brief final thought."),
             AICutRecommendation(kind: .music, title: "Simplicity", detail: "A light acoustic rhythm supports the warmer, quicker edit."),
             AICutRecommendation(kind: .treatment, title: "Story · Expressive", detail: "Varied framing and movement give each moment a distinct role.")
         ]
@@ -3241,6 +3324,7 @@ final class TripReelModel: ObservableObject {
         cleanupSelection = []
         selectedCutSource = .firstCut
         selectedAICutPhotoIDs = []
+        aiCutStoryContext = ""
         aiCutConsentGranted = false
         aiCutSnapshot = nil
         aiCutSummary = nil
@@ -3321,6 +3405,26 @@ final class TripReelModel: ObservableObject {
         history.removeAll()
         currentPhotoIndex = min(currentPhotoIndex, max(0, photos.count - 1))
         go(.secondWatch, direction: .backward)
+    }
+
+    /// Reorders only the kept-photo slots, leaving cut photos where they are
+    /// for the cleanup flow. This keeps timeline edits reversible and avoids
+    /// changing which images belong to the film.
+    func moveKeptPhoto(id: String, before targetID: String) {
+        guard id != targetID else { return }
+        var reordered = keptPhotos
+        guard let sourceIndex = reordered.firstIndex(where: { $0.id == id }),
+              let targetIndex = reordered.firstIndex(where: { $0.id == targetID }) else { return }
+        let moving = reordered.remove(at: sourceIndex)
+        let adjustedTarget = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex
+        reordered.insert(moving, at: adjustedTarget)
+
+        var nextKeptIndex = 0
+        for index in photos.indices where !cutPhotoIDs.contains(photos[index].id) {
+            photos[index] = reordered[nextKeptIndex]
+            nextKeptIndex += 1
+        }
+        selectedCutSource = .working
     }
 
     func selectTrack(_ track: MusicTrack) {
@@ -3662,6 +3766,7 @@ final class TripReelModel: ObservableObject {
         aiCutFailureMessage = nil
         aiCutProgress = 0
         selectedAICutPhotoIDs = []
+        aiCutStoryContext = ""
         aiCutConsentGranted = false
         pendingBuildTrip = nil
         activeAnalysisTrip = nil

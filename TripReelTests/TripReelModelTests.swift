@@ -770,6 +770,23 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertTrue(model.history.isEmpty)
     }
 
+    func testFilmStudioTimelineReordersOnlyKeptPhotoSlots() throws {
+        let model = makeModel()
+        let original = model.photos
+        let cutID = original[1].id
+        model.cutPhotoIDs = [cutID]
+        let keptBefore = model.keptPhotos
+        let movedID = try XCTUnwrap(keptBefore.last?.id)
+        let targetID = try XCTUnwrap(keptBefore.first?.id)
+
+        model.moveKeptPhoto(id: movedID, before: targetID)
+
+        XCTAssertEqual(model.keptPhotos.first?.id, movedID)
+        XCTAssertEqual(model.photos[1].id, cutID)
+        XCTAssertEqual(model.cutPhotoIDs, [cutID])
+        XCTAssertEqual(Set(model.keptPhotos.map(\.id)), Set(keptBefore.map(\.id)))
+    }
+
     func testProductionRenderUsesEditedTimelineAndProducesShareableURL() async throws {
         let exporter = RecordingVideoExporter()
         let model = TripReelModel(

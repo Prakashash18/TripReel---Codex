@@ -375,15 +375,20 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         model.openAICutDirections()
         model.useCloudEnhancement()
         model.selectAICutDirection(.people)
+        model.aiCutStoryContext = "Our students’ competition day"
         model.continueWithAICutDirection()
         try await waitUntil { model.screen == .aiComparison }
 
         let localSelections = await cloud.observedLocalSelections()
+        let storyContexts = await cloud.observedStoryContexts()
         XCTAssertEqual(localSelections.filter { $0 == .firstCut }.count, 26)
         XCTAssertEqual(localSelections.filter { $0 == .morePhotos }.count, 10)
+        XCTAssertEqual(storyContexts, ["Our students’ competition day"])
         let aiIDs = Set(try XCTUnwrap(model.aiCutSnapshot).keptPhotos.map(\.id))
         XCTAssertEqual(aiIDs.intersection(morePhotoIDs), morePhotoIDs)
         XCTAssertEqual(aiIDs.count, CloudPhotoAnalysisClient.maximumBatchSize)
+        XCTAssertTrue(try XCTUnwrap(model.aiCutSnapshot).titleCards.contains(.place))
+        XCTAssertEqual(model.aiCutSnapshot?.titleDrafts[.place]?.title, "People make the moment")
 
         model.useAICut()
         XCTAssertNil(model.smartSelectionSummary)
@@ -576,6 +581,7 @@ private actor CloudAnalysisSpy: CloudPhotoAnalysisServing {
     private(set) var callCount = 0
     private(set) var wireIDs: [String] = []
     private(set) var localSelections: [CloudPhotoLocalSelection] = []
+    private(set) var storyContexts: [String?] = []
     private let fails: Bool
 
     init(isConfigured: Bool = true, fails: Bool = false) {
@@ -585,11 +591,13 @@ private actor CloudAnalysisSpy: CloudPhotoAnalysisServing {
 
     func createEditPlan(
         direction: AICutDirection,
+        storyContext: String?,
         photos: [CloudPhotoAnalysisInput]
     ) async throws -> AICutEditPlan {
         callCount += 1
         wireIDs = photos.map(\.id)
         localSelections = photos.map(\.localSelection)
+        storyContexts.append(storyContext)
         if fails { throw CloudPhotoAnalysisError.invalidResponse }
         return AICutEditPlan(
             version: 2,
@@ -637,6 +645,7 @@ private actor CloudAnalysisSpy: CloudPhotoAnalysisServing {
     func observedCallCount() -> Int { callCount }
     func observedWireIDs() -> [String] { wireIDs }
     func observedLocalSelections() -> [CloudPhotoLocalSelection] { localSelections }
+    func observedStoryContexts() -> [String?] { storyContexts }
 }
 
 private actor ThumbnailStub: PhotoAnalysisThumbnailServing {

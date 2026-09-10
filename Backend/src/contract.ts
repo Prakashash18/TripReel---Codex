@@ -12,6 +12,7 @@ export const LIMITS = Object.freeze({
   maxShortTitleCharacters: 60,
   maxSubtitleCharacters: 100,
   maxReasonCharacters: 180,
+  maxStoryContextCharacters: 160,
   bodyReadTimeoutMs: 15_000,
   defaultOpenAITimeoutMs: 30_000,
   minOpenAITimeoutMs: 5_000,
@@ -143,6 +144,7 @@ export type AIEditPlan = AIEditPlanV1 | AIEditPlanV2;
 export interface ValidatedPayload {
   version: RequestVersion;
   direction: AICutDirection;
+  storyContext?: string;
   photos: PhotoInput[];
 }
 

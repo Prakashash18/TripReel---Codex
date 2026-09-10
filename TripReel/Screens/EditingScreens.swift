@@ -211,6 +211,9 @@ struct AICutDirectionScreen: View {
                     }
                         .trEntrance(1, distance: 8)
 
+                    storyContextEditor
+                        .trEntrance(2, distance: 8)
+
                     MetadataText(text: "Reel recipe", color: .white.opacity(0.52))
                         .padding(.top, 2)
 
@@ -235,7 +238,7 @@ struct AICutDirectionScreen: View {
                     .accessibilityHint("Sends only the selected reduced previews to OpenAI and creates another cut")
                     .accessibilityIdentifier("ai-direction-continue")
 
-                    Text("\(model.aiCutSelectedPhotoCount) small previews will be sent to OpenAI’s GPT-5.6 Luna.")
+                    Text(sharingSummary)
                         .font(TR.ui(11))
                         .foregroundStyle(.white.opacity(0.42))
                         .multilineTextAlignment(.center)
@@ -255,6 +258,82 @@ struct AICutDirectionScreen: View {
                 .presentationBackground(TR.sheet)
         }
         .accessibilityIdentifier("ai-direction-screen")
+    }
+
+    private var storyContextEditor: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("What is this reel about?")
+                        .font(TR.ui(15, weight: .semibold))
+                    Text("Optional · one clue helps AI find the meaning")
+                        .font(TR.ui(10))
+                        .foregroundStyle(.white.opacity(0.48))
+                }
+                Spacer()
+                Text("\(model.aiCutStoryContext.count)/\(CloudPhotoAnalysisClient.maximumStoryContextCharacters)")
+                    .font(TR.mono(9))
+                    .foregroundStyle(.white.opacity(0.34))
+            }
+
+            TextField(
+                "e.g. Our students’ competition day",
+                text: $model.aiCutStoryContext,
+                axis: .vertical
+            )
+            .font(TR.ui(13))
+            .lineLimit(2...3)
+            .textInputAutocapitalization(.sentences)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 12)
+            .background(.black.opacity(0.20))
+            .overlay(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .stroke(.white.opacity(0.12), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .onChange(of: model.aiCutStoryContext) { _, value in
+                if value.count > CloudPhotoAnalysisClient.maximumStoryContextCharacters {
+                    model.aiCutStoryContext = String(
+                        value.prefix(CloudPhotoAnalysisClient.maximumStoryContextCharacters)
+                    )
+                }
+            }
+            .accessibilityIdentifier("ai-story-context")
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    ForEach(model.aiCutStoryContextSuggestions, id: \.self) { suggestion in
+                        Button(suggestion) {
+                            withAnimation(TRMotion.selection) {
+                                model.aiCutStoryContext = suggestion
+                            }
+                        }
+                        .font(TR.ui(10, weight: .semibold))
+                        .foregroundStyle(
+                            model.aiCutStoryContext == suggestion ? TR.ink : .white.opacity(0.64)
+                        )
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 8)
+                        .background(
+                            model.aiCutStoryContext == suggestion ? TR.accent : .white.opacity(0.055)
+                        )
+                        .clipShape(Capsule())
+                        .buttonStyle(TactileButtonStyle(pressedScale: 0.96))
+                    }
+                }
+            }
+        }
+        .foregroundStyle(TR.cream)
+        .padding(15)
+        .glassCard(cornerRadius: 18)
+    }
+
+    private var sharingSummary: String {
+        let context = model.aiCutStoryContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        return context.isEmpty
+            ? "\(model.aiCutSelectedPhotoCount) small previews will be sent to OpenAI’s GPT-5.6 Luna."
+            : "\(model.aiCutSelectedPhotoCount) small previews and your story hint will be sent to OpenAI’s GPT-5.6 Luna."
     }
 }
 
@@ -1511,15 +1590,18 @@ struct SecondWatchScreen: View {
     @State private var showStyle = false
     @State private var showPhotoEditor = false
     @State private var showFullPreview = false
+    @State private var selectedPhotoID: String?
     @StateObject private var soundtrack = LocalSoundtrackPlayer()
 
     var body: some View {
         ZStack {
             WarmBackground(variant: .cutting)
 
-            ViewThatFits(in: .vertical) {
-                studioContent(previewHeight: 458, compact: false)
-                studioContent(previewHeight: 294, compact: true)
+            GeometryReader { proxy in
+                ViewThatFits(in: .vertical) {
+                    studioContent(previewHeight: min(392, proxy.size.height * 0.47), compact: false)
+                    studioContent(previewHeight: min(292, proxy.size.height * 0.39), compact: true)
+                }
             }
         }
         .fullScreenCover(isPresented: $showTitles) {
@@ -1543,7 +1625,7 @@ struct SecondWatchScreen: View {
                 .presentationBackground(TR.sheet)
         }
         .sheet(isPresented: $showPhotoEditor) {
-            PhotoEditorSheet()
+            PhotoEditorSheet(initialPhotoID: selectedPhotoID)
                 .environmentObject(model)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
@@ -1567,33 +1649,108 @@ struct SecondWatchScreen: View {
         .onDisappear {
             soundtrack.stop()
         }
+        .onChange(of: model.keptPhotos.map(\.id)) { _, ids in
+            if let selectedPhotoID, !ids.contains(selectedPhotoID) {
+                self.selectedPhotoID = nil
+            }
+        }
     }
 
     private func studioContent(previewHeight: CGFloat, compact: Bool) -> some View {
         VStack(spacing: 0) {
-            VStack(spacing: 6) {
-                MetadataText(text: "FILM STUDIO · \(model.tripShortPlace)", color: .white.opacity(0.82))
-                Text("\(model.keptCount) photos · \(model.filmDurationText)\(trackSuffix)")
-                    .font(TR.ui(12))
-                    .foregroundStyle(.white.opacity(0.53))
+            HStack(spacing: 10) {
+                Color.clear.frame(width: 52, height: 38)
+                VStack(spacing: 4) {
+                    MetadataText(text: "FILM STUDIO · \(model.tripShortPlace)", color: .white.opacity(0.82))
+                        .accessibilityIdentifier("second-watch-screen")
+                    Text("\(model.keptCount) photos · \(model.filmDurationText)\(trackSuffix)")
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.53))
+                }
+                .frame(maxWidth: .infinity)
+
+                Button("Export") {
+                    model.openExport()
+                }
+                .font(TR.ui(12, weight: .semibold))
+                .foregroundStyle(TR.ink)
+                .padding(.horizontal, 13)
+                .frame(height: 34)
+                .background(TR.cream)
+                .clipShape(Capsule())
+                .buttonStyle(TactileButtonStyle(pressedScale: 0.95))
+                .accessibilityIdentifier("studio-export-button")
             }
-            .padding(.horizontal, 62)
+            .padding(.horizontal, 16)
             .padding(.top, 4)
             .trEntrance(0, distance: 7)
-            .accessibilityIdentifier("second-watch-screen")
 
             Spacer(minLength: compact ? 5 : 12)
 
             ZStack {
                 MontageView(
-                    photos: model.keptPhotos,
-                    titleCards: model.montageTitleCards,
+                    photos: previewPhotos,
+                    titleCards: selectedPhotoID == nil ? model.montageTitleCards : [],
                     showLabels: false,
                     look: model.montageLook,
                     motionIntensity: model.montageMotionIntensity,
                     secondsPerSlide: model.secondsPerPhoto
                 )
+                .id(previewIdentity)
                 .frame(width: previewHeight * 9 / 16, height: previewHeight)
+
+                VStack {
+                    HStack {
+                        if selectedPhotoID != nil {
+                            Label("CLIP", systemImage: "viewfinder")
+                                .font(TR.mono(9, weight: .semibold))
+                                .tracking(1)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 6)
+                                .background(.black.opacity(0.58))
+                                .clipShape(Capsule())
+                        }
+                        Spacer()
+                    }
+                    Spacer()
+                    HStack {
+                        Button {
+                            selectedPhotoID = nil
+                            soundtrack.stop()
+                            showFullPreview = true
+                        } label: {
+                            Label("Play film", systemImage: "play.fill")
+                                .font(TR.ui(11, weight: .semibold))
+                                .padding(.horizontal, 12)
+                                .frame(height: 34)
+                                .background(.black.opacity(0.64))
+                                .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(TactileButtonStyle(pressedScale: 0.94))
+                        .accessibilityIdentifier("full-preview-button")
+
+                        Spacer()
+
+                        Button {
+                            soundtrack.toggle(track: model.selectedTrack)
+                        } label: {
+                            Image(systemName: soundtrack.isPlaying ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                                .frame(width: 34, height: 34)
+                                .background(.black.opacity(0.64))
+                                .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
+                                .clipShape(Circle())
+                                .contentTransition(.symbolEffect(.replace))
+                        }
+                        .buttonStyle(TactileButtonStyle(pressedScale: 0.92))
+                        .disabled(model.selectedTrack == nil)
+                        .opacity(model.selectedTrack == nil ? 0.42 : 1)
+                        .accessibilityLabel(soundtrack.isPlaying ? "Pause soundtrack" : "Play soundtrack")
+                    }
+                }
+                .foregroundStyle(TR.cream)
+                .padding(10)
             }
             .frame(width: previewHeight * 9 / 16, height: previewHeight)
             .clipShape(RoundedRectangle(cornerRadius: compact ? 18 : 22, style: .continuous))
@@ -1604,43 +1761,6 @@ struct SecondWatchScreen: View {
             .shadow(color: .black.opacity(0.56), radius: 28, y: 20)
             .trEntrance(1, distance: 12)
 
-            HStack(spacing: 9) {
-                Button {
-                    soundtrack.stop()
-                    showFullPreview = true
-                } label: {
-                    Label("Preview full film", systemImage: "play.fill")
-                        .font(TR.ui(11, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 34)
-                }
-                .buttonStyle(TactileButtonStyle(pressedScale: 0.96))
-                .foregroundStyle(TR.cream)
-                .background(.white.opacity(0.07))
-                .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
-                .clipShape(Capsule())
-                .accessibilityIdentifier("full-preview-button")
-
-                Button {
-                    soundtrack.toggle(track: model.selectedTrack)
-                } label: {
-                    Image(systemName: soundtrack.isPlaying ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(TR.cream)
-                        .frame(width: 36, height: 36)
-                        .background(.white.opacity(0.07))
-                        .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
-                        .clipShape(Circle())
-                        .contentTransition(.symbolEffect(.replace))
-                }
-                .buttonStyle(TactileButtonStyle(pressedScale: 0.92))
-                .disabled(model.selectedTrack == nil)
-                .opacity(model.selectedTrack == nil ? 0.42 : 1)
-                .accessibilityLabel(soundtrack.isPlaying ? "Pause soundtrack" : "Play soundtrack")
-            }
-            .frame(width: max(previewHeight * 9 / 16, 214))
-            .padding(.top, compact ? 7 : 9)
-
             if let errorMessage = soundtrack.errorMessage {
                 Text(errorMessage)
                     .font(TR.ui(10, weight: .medium))
@@ -1649,101 +1769,93 @@ struct SecondWatchScreen: View {
                     .padding(.top, 6)
             }
 
-            Spacer(minLength: compact ? 7 : 14)
+            Spacer(minLength: compact ? 6 : 10)
 
-            VStack(spacing: 10) {
-                Menu {
-                    Button {
-                        model.editPhotoSelection()
-                    } label: {
-                        Label("Photos · \(model.keptCount) in", systemImage: "photo.stack")
-                    }
-                    .accessibilityIdentifier("studio-tool-photos")
-
-                    if let summary = model.smartSelectionSummary {
-                        Button {
-                            model.isSmartSelectionReviewPresented = true
-                        } label: {
-                            Label(summary, systemImage: "sparkles")
-                        }
-                        .accessibilityIdentifier("studio-tool-more-photos")
-                    }
-
-                    Button {
-                        showPhotoEditor = true
-                    } label: {
-                        Label("Framing · \(framingBadge)", systemImage: "crop.rotate")
-                    }
-                    .accessibilityIdentifier("studio-tool-framing")
-
-                    Button {
-                        showStyle = true
-                    } label: {
-                        Label("Style · \(model.montageLook.name)", systemImage: "wand.and.stars")
-                    }
-                    .accessibilityIdentifier("studio-tool-style")
-
-                    Button {
-                        showTitles = true
-                    } label: {
-                        Label("Titles · \(titleBadge.lowercased())", systemImage: "textformat")
-                    }
-                    .accessibilityIdentifier("studio-tool-titles")
-
-                    Button {
-                        showMusic = true
-                    } label: {
-                        Label("Music · \(model.selectedTrack?.name ?? "None")", systemImage: "music.note")
-                    }
-                    .accessibilityIdentifier("studio-tool-music")
-
-                    Button {
-                        model.go(.pace)
-                    } label: {
-                        Label("Pace · \(String(format: "%.1fs", model.secondsPerPhoto))", systemImage: "metronome")
-                    }
-                    .accessibilityIdentifier("studio-tool-pace")
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(TR.accent)
-                            .frame(width: 34, height: 34)
-                            .background(TR.accent.opacity(0.12))
-                            .clipShape(Circle())
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Edit film")
-                                .font(TR.ui(14, weight: .semibold))
-                            Text("Photos, framing, look, titles, music and pace")
-                                .font(TR.ui(10))
-                                .foregroundStyle(.white.opacity(0.50))
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.42))
-                    }
-                    .foregroundStyle(TR.cream)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .glassCard(cornerRadius: 16)
+            FilmStudioTimeline(
+                photos: model.keptPhotos,
+                titleCards: model.montageTitleCards,
+                trackName: model.selectedTrack?.name,
+                defaultPhotoDuration: model.secondsPerPhoto,
+                selectedPhotoID: $selectedPhotoID,
+                onOpenTitles: { showTitles = true },
+                onOpenMusic: { showMusic = true },
+                onMove: { sourceID, targetID in
+                    model.moveKeptPhoto(id: sourceID, before: targetID)
+                    selectedPhotoID = sourceID
                 }
-                .buttonStyle(TactileButtonStyle())
-                .accessibilityLabel("Edit film")
-                .accessibilityHint("Choose photos, framing, style, titles, music or pace")
-                .accessibilityIdentifier("studio-edit-menu")
-
-                Button("Export film") {
-                    model.openExport()
-                }
-                .buttonStyle(CreamButtonStyle())
-                .accessibilityIdentifier("studio-export-button")
-            }
-            .padding(.horizontal, 24)
-            .padding(.bottom, compact ? 2 : 8)
+            )
+            .frame(height: compact ? 126 : 142)
             .trEntrance(2, distance: 8)
+
+            studioToolDock
+                .padding(.top, compact ? 3 : 7)
+                .padding(.bottom, compact ? 0 : 5)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var studioToolDock: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                studioTool("Photos", symbol: "photo.stack", identifier: "studio-tool-photos") {
+                    model.editPhotoSelection()
+                }
+                studioTool("Crop", symbol: "crop.rotate", identifier: "studio-tool-framing") {
+                    selectedPhotoID = selectedPhotoID ?? model.keptPhotos.first?.id
+                    showPhotoEditor = true
+                }
+                studioTool("Text", symbol: "textformat", identifier: "studio-tool-titles") {
+                    showTitles = true
+                }
+                studioTool("Music", symbol: "music.note", identifier: "studio-tool-music") {
+                    showMusic = true
+                }
+                studioTool("Style", symbol: "wand.and.stars", identifier: "studio-tool-style") {
+                    showStyle = true
+                }
+                studioTool("Pace", symbol: "metronome", identifier: "studio-tool-pace") {
+                    model.go(.pace)
+                }
+            }
+            .padding(.horizontal, 18)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("studio-edit-menu")
+    }
+
+    private func studioTool(
+        _ title: String,
+        symbol: String,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 5) {
+                Image(systemName: symbol)
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 34, height: 28)
+                    .background(.white.opacity(0.065))
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                Text(title)
+                    .font(TR.ui(9, weight: .semibold))
+            }
+            .foregroundStyle(TR.cream.opacity(0.78))
+            .frame(width: 54)
+        }
+        .buttonStyle(TactileButtonStyle(pressedScale: 0.93))
+        .accessibilityIdentifier(identifier)
+    }
+
+    private var previewPhotos: [ReelPhoto] {
+        guard let selectedPhotoID,
+              let photo = model.keptPhotos.first(where: { $0.id == selectedPhotoID }) else {
+            return model.keptPhotos
+        }
+        return [photo]
+    }
+
+    private var previewIdentity: String {
+        "\(selectedPhotoID ?? "film")-\(model.montageLook.rawValue)-\(model.montageMotionIntensity.rawValue)"
     }
 
     private var trackSuffix: String {
@@ -1751,12 +1863,152 @@ struct SecondWatchScreen: View {
         return " · \(track.name)"
     }
 
-    private var titleBadge: String {
-        model.titleCards.isEmpty ? "NONE" : "\(model.titleCards.count) ON"
+}
+
+private struct FilmStudioTimeline: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let photos: [ReelPhoto]
+    let titleCards: [MontageTitleCard]
+    let trackName: String?
+    let defaultPhotoDuration: Double
+    @Binding var selectedPhotoID: String?
+    let onOpenTitles: () -> Void
+    let onOpenMusic: () -> Void
+    let onMove: (String, String) -> Void
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack {
+                MetadataText(text: "TIMELINE", color: .white.opacity(0.45))
+                Spacer()
+                Text(selectedPhotoID == nil ? "Tap a clip · drag to reorder" : "Clip selected · tap Crop to edit")
+                    .font(TR.ui(9, weight: .medium))
+                    .foregroundStyle(selectedPhotoID == nil ? .white.opacity(0.38) : TR.accent.opacity(0.85))
+            }
+            .padding(.horizontal, 20)
+
+            ZStack {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 5) {
+                        ForEach(timelineItems) { item in
+                            switch item {
+                            case let .title(card):
+                                titleClip(card)
+                            case let .photo(photo):
+                                photoClip(
+                                    photo,
+                                    index: photos.firstIndex(where: { $0.id == photo.id }) ?? 0
+                                )
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                }
+
+                Rectangle()
+                    .fill(TR.accent)
+                    .frame(width: 2, height: 70)
+                    .shadow(color: TR.accent.opacity(0.7), radius: 4)
+                    .allowsHitTesting(false)
+            }
+            .frame(height: 66)
+
+            Button(action: onOpenMusic) {
+                HStack(spacing: 9) {
+                    Image(systemName: "music.note")
+                        .foregroundStyle(TR.keep)
+                    HStack(spacing: 3) {
+                        ForEach(0..<18, id: \.self) { index in
+                            Capsule()
+                                .fill(TR.keep.opacity(0.46))
+                                .frame(width: 2, height: CGFloat(4 + ((index * 7) % 10)))
+                        }
+                    }
+                    Text(trackName ?? "Add music")
+                        .font(TR.ui(9, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.62))
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 26)
+                .background(TR.keep.opacity(0.07))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(TactileButtonStyle(pressedScale: 0.98))
+            .padding(.horizontal, 20)
+            .accessibilityIdentifier("studio-music-track")
+        }
+        .padding(.vertical, 7)
+        .background(.black.opacity(0.24))
+        .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.08)).frame(height: 1) }
+        .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.08)).frame(height: 1) }
     }
 
-    private var framingBadge: String {
-        model.customizedPhotoCount == 0 ? "Auto" : "\(model.customizedPhotoCount) edited"
+    private var timelineItems: [MontageTimelineItem] {
+        MontageTimelineBuilder.make(photos: photos, titleCards: titleCards)
+    }
+
+    private func titleClip(_ card: MontageTitleCard) -> some View {
+        Button(action: onOpenTitles) {
+            VStack(spacing: 4) {
+                Image(systemName: "textformat")
+                Text(card.title)
+                    .lineLimit(1)
+            }
+            .font(TR.ui(9, weight: .semibold))
+            .foregroundStyle(TR.accent)
+            .frame(width: 62, height: 62)
+            .background(TR.accent.opacity(0.10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(TR.accent.opacity(0.32), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+        .buttonStyle(TactileButtonStyle(pressedScale: 0.95))
+        .accessibilityLabel("Title, \(card.title)")
+    }
+
+    private func photoClip(_ photo: ReelPhoto, index: Int) -> some View {
+        Button {
+            withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                selectedPhotoID = selectedPhotoID == photo.id ? nil : photo.id
+            }
+        } label: {
+            ZStack(alignment: .bottomLeading) {
+                PhotoAssetView(source: photo.source)
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.65)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
+                Text("\(index + 1) · \(String(format: "%.1fs", photo.durationSeconds ?? defaultPhotoDuration))")
+                    .font(TR.mono(8, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.86))
+                    .padding(5)
+            }
+            .frame(width: 58, height: 62)
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(
+                        selectedPhotoID == photo.id ? TR.accent : .white.opacity(0.12),
+                        lineWidth: selectedPhotoID == photo.id ? 2 : 1
+                    )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+        .buttonStyle(TactileButtonStyle(pressedScale: 0.95))
+        .draggable(photo.id) {
+            PhotoAssetView(source: photo.source)
+                .frame(width: 58, height: 62)
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+        .dropDestination(for: String.self) { sourceIDs, _ in
+            guard let sourceID = sourceIDs.first, sourceID != photo.id else { return false }
+            onMove(sourceID, photo.id)
+            return true
+        }
+        .accessibilityLabel("Clip \(index + 1), \(photo.label)")
     }
 }
 
@@ -1889,6 +2141,10 @@ private struct PhotoEditorSheet: View {
     @State private var dragStartX: Double?
     @State private var dragStartY: Double?
     @State private var editFeedback = 0
+
+    init(initialPhotoID: String? = nil) {
+        _selectedID = State(initialValue: initialPhotoID)
+    }
 
     private var selectedPhoto: ReelPhoto? {
         let photos = model.keptPhotos

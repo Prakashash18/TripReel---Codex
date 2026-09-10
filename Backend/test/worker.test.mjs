@@ -171,6 +171,15 @@ test("validates only the versioned editorial request contract", () => {
     (error) => error instanceof RequestProblem && error.code === "invalid_request",
   );
   assert.equal(validatePayload(directorPayload()).version, 2);
+  const contextual = validatePayload({
+    ...directorPayload(),
+    storyContext: "  Our students’ competition day  ",
+  });
+  assert.equal(contextual.storyContext, "Our students’ competition day");
+  assert.throws(
+    () => validatePayload({ ...directorPayload(), storyContext: "x".repeat(161) }),
+    (error) => error instanceof RequestProblem && error.code === "invalid_story_context",
+  );
   assert.throws(
     () => validatePayload({ ...payload(), version: 3 }),
     (error) => error instanceof RequestProblem && error.code === "invalid_request",
@@ -292,7 +301,10 @@ test("version 2 asks for an editable reel direction and returns it without chang
   let upstream;
   const expected = directorPlan(["p0", "p1"], "people");
   const response = await handleRequest(
-    analyzeRequest(directorPayload(["p0", "p1"], "people", ["first_cut", "more_photos"])),
+    analyzeRequest({
+      ...directorPayload(["p0", "p1"], "people", ["first_cut", "more_photos"]),
+      storyContext: "Our students’ competition day",
+    }),
     ENV,
     async (_url, init) => {
       upstream = JSON.parse(init.body);
@@ -302,8 +314,10 @@ test("version 2 asks for an editable reel direction and returns it without chang
 
   assert.equal(response.status, 200);
   assert.match(upstream.instructions, /act as a reel director/u);
+  assert.match(upstream.instructions, /specific, meaningful titles/u);
   assert.match(upstream.instructions, /long-way-home/u);
   assert.match(upstream.input[0].content[0].text, /story arc, opening hook/u);
+  assert.match(upstream.input[0].content[1].text, /Our students’ competition day/u);
   assert.equal(upstream.text.format.schema.properties.version.const, 2);
   assert.deepEqual(
     new Set(upstream.text.format.schema.required),

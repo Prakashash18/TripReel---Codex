@@ -16,7 +16,7 @@ Apple Vision analyzes reduced images on the iPhone for screenshots, document-lik
 
 ## Optional OpenAI analysis
 
-TripReel creates a complete First Cut on-device without cloud AI. Only after the user chooses Improve with AI, selects a creative direction, and explicitly continues may selected reduced-resolution JPEG previews pass through TripReel's secure backend to a configurable OpenAI image-capable model. TripReel re-encodes the copies without EXIF, GPS, filenames, capture dates, or stable Apple Photos identifiers. Known screenshots and sensitive or document-like images are blocked. OpenAI returns only a structured editorial plan, which TripReel validates and applies locally without modifying original photos.
+TripReel creates a complete First Cut on-device without cloud AI. Only after the user chooses Improve with AI, selects a creative direction, and explicitly continues may selected reduced-resolution JPEG previews pass through TripReel's secure backend to a configurable OpenAI image-capable model. If the user writes or chooses an optional story hint, that short text is sent with the selected previews so titles and story structure can reflect the intended occasion. TripReel re-encodes the copies without EXIF, GPS, filenames, capture dates, or stable Apple Photos identifiers. Known screenshots and sensitive or document-like images are blocked. OpenAI returns only a structured editorial plan, which TripReel validates and applies locally without modifying original photos.
 
 ## Storage and deletion
 

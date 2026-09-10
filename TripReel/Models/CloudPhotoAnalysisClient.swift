@@ -32,21 +32,21 @@ enum AICutDirection: String, CaseIterable, Codable, Identifiable, Hashable, Send
 
     var title: String {
         switch self {
-        case .betterStory: "Tell a Better Story"
-        case .dynamic: "Make It More Dynamic"
-        case .calm: "Keep It Calm"
-        case .people: "Focus on People"
-        case .surpriseMe: "Surprise Me"
+        case .betterStory: "Story Arc"
+        case .dynamic: "Fast Highlights"
+        case .calm: "Cinematic Calm"
+        case .people: "People & Connection"
+        case .surpriseMe: "Director's Choice"
         }
     }
 
     var detail: String {
         switch self {
-        case .betterStory: "Build a stronger beginning, middle and ending."
-        case .dynamic: "Quicker pacing, bolder movement and less repetition."
-        case .calm: "Scenic moments, longer holds and a gentler rhythm."
-        case .people: "Prioritize faces, shared moments and human connection."
-        case .surpriseMe: "Let the director choose the strongest overall shape."
+        case .betterStory: "A clear opening, turning point and satisfying ending."
+        case .dynamic: "Quick cuts, energetic motion and punchier music."
+        case .calm: "Longer scenic holds, restrained motion and room to breathe."
+        case .people: "Build the story around faces, reactions and shared moments."
+        case .surpriseMe: "Let the director choose the strongest complete treatment."
         }
     }
 
@@ -350,6 +350,7 @@ protocol CloudPhotoAnalysisServing: Sendable {
     var isConfigured: Bool { get }
     func createEditPlan(
         direction: AICutDirection,
+        storyContext: String?,
         photos: [CloudPhotoAnalysisInput]
     ) async throws -> AICutEditPlan
 }
@@ -407,6 +408,7 @@ enum CloudPhotoAnalysisError: LocalizedError, Equatable {
     case tooManyPhotos
     case thumbnailTooLarge
     case invalidEphemeralIdentifier
+    case invalidStoryContext
     case invalidResponse
     case server(statusCode: Int, code: String?)
 
@@ -424,6 +426,8 @@ enum CloudPhotoAnalysisError: LocalizedError, Equatable {
             "A reduced thumbnail was larger than the privacy limit."
         case .invalidEphemeralIdentifier:
             "AI preview identifiers must be temporary per-request values."
+        case .invalidStoryContext:
+            "Keep the story hint under 160 characters."
         case .invalidResponse:
             "TripReel received an invalid cloud analysis response."
         case let .server(statusCode, code):
@@ -456,6 +460,7 @@ enum CloudPhotoAnalysisError: LocalizedError, Equatable {
 final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Sendable {
     static let maximumBatchSize = 36
     static let maximumThumbnailBytes = 128 * 1_024
+    static let maximumStoryContextCharacters = 160
     static let endpointInfoPlistKey = "TRIPREEL_PHOTO_ANALYSIS_ENDPOINT"
 
     let isConfigured: Bool
@@ -520,6 +525,7 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
 
     func createEditPlan(
         direction: AICutDirection,
+        storyContext: String? = nil,
         photos: [CloudPhotoAnalysisInput]
     ) async throws -> AICutEditPlan {
         guard let endpoint, authorizer.isReady else { throw CloudPhotoAnalysisError.notConfigured }
@@ -532,10 +538,12 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
         guard photos.allSatisfy({ !$0.jpegData.isEmpty && $0.jpegData.count <= Self.maximumThumbnailBytes }) else {
             throw CloudPhotoAnalysisError.thumbnailTooLarge
         }
+        let normalizedStoryContext = try Self.normalizedStoryContext(storyContext)
 
         let requestBody = CloudRequest(
             version: 2,
             direction: direction,
+            storyContext: normalizedStoryContext,
             photos: photos.map {
                 CloudRequest.Photo(
                     id: $0.id,
@@ -624,6 +632,21 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
         return url
     }
 
+    private static func normalizedStoryContext(_ value: String?) throws -> String? {
+        guard let value else { return nil }
+        guard !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+            throw CloudPhotoAnalysisError.invalidStoryContext
+        }
+        let normalized = value
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard normalized.count <= maximumStoryContextCharacters else {
+            throw CloudPhotoAnalysisError.invalidStoryContext
+        }
+        return normalized.isEmpty ? nil : normalized
+    }
+
     private static func isValidHTTPSURL(_ url: URL) -> Bool {
         url.scheme?.lowercased() == "https" && url.host?.isEmpty == false
     }
@@ -673,6 +696,7 @@ private struct CloudRequest: Encodable {
 
     let version: Int
     let direction: AICutDirection
+    let storyContext: String?
     let photos: [Photo]
 }
 

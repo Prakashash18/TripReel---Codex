@@ -49,7 +49,6 @@ final class TripReelFlowUITests: XCTestCase {
 
         let editMenu = screen("studio-edit-menu")
         XCTAssertTrue(editMenu.waitForExistence(timeout: 3))
-        editMenu.tap()
         screen("studio-tool-photos").tap()
         XCTAssertTrue(screen("cut-screen").waitForExistence(timeout: 3))
 
@@ -60,7 +59,7 @@ final class TripReelFlowUITests: XCTestCase {
         doneSelecting.tap()
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
 
-        screen("studio-edit-menu").tap()
+        screen("studio-edit-menu").swipeLeft()
         screen("studio-tool-pace").tap()
         XCTAssertTrue(screen("pace-screen").waitForExistence(timeout: 3))
 
@@ -68,7 +67,7 @@ final class TripReelFlowUITests: XCTestCase {
         app.buttons["Apply pace"].tap()
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
 
-        screen("studio-edit-menu").tap()
+        screen("studio-edit-menu").swipeLeft()
         screen("studio-tool-style").tap()
         XCTAssertTrue(screen("film-style-sheet").waitForExistence(timeout: 3))
         let stylePreview = screen("film-style-live-preview")
@@ -81,7 +80,9 @@ final class TripReelFlowUITests: XCTestCase {
         waitForExpectations(timeout: 2)
         app.buttons["Done"].tap()
 
-        screen("studio-export-button").tap()
+        let studioExport = screen("studio-export-button")
+        XCTAssertTrue(studioExport.waitForExistence(timeout: 3))
+        studioExport.tap()
         XCTAssertTrue(screen("export-screen").waitForExistence(timeout: 3))
 
         let standardExport = app.buttons
@@ -117,7 +118,6 @@ final class TripReelFlowUITests: XCTestCase {
         app.buttons["Close preview"].tap()
 
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
-        screen("studio-edit-menu").tap()
         screen("studio-tool-photos").tap()
         XCTAssertTrue(screen("cut-screen").waitForExistence(timeout: 3))
         screen("finish-photo-selection-button").tap()
@@ -236,7 +236,6 @@ final class TripReelFlowUITests: XCTestCase {
 
         let editMenu = screen("studio-edit-menu")
         XCTAssertTrue(editMenu.waitForExistence(timeout: 3))
-        editMenu.tap()
         screen("studio-tool-titles").tap()
 
         XCTAssertTrue(screen("title-editor-screen").waitForExistence(timeout: 3))

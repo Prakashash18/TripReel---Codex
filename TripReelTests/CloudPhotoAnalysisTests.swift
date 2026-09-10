@@ -58,7 +58,8 @@ final class CloudPhotoAnalysisTests: XCTestCase {
             XCTAssertEqual(json["version"] as? Int, 2)
             XCTAssertEqual(request.value(forHTTPHeaderField: "X-TripReel-Client"), "TripReel-iOS/2")
             XCTAssertEqual(json["direction"] as? String, "better_story")
-            XCTAssertEqual(Set(json.keys), ["version", "direction", "photos"])
+            XCTAssertEqual(json["storyContext"] as? String, "Our students’ competition day")
+            XCTAssertEqual(Set(json.keys), ["version", "direction", "storyContext", "photos"])
             XCTAssertEqual(photos.count, 1)
             XCTAssertEqual(Set(photos[0].keys), ["id", "imageBase64", "localSelection"])
             XCTAssertEqual(photos[0]["id"] as? String, "p0")
@@ -85,6 +86,7 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         )
         let result = try await client.createEditPlan(
             direction: .betterStory,
+            storyContext: "  Our students’ competition day  ",
             photos: [.init(
                 id: "p0",
                 jpegData: Data([0xFF, 0xD8, 0xFF]),

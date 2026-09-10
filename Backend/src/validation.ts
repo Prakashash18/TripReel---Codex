@@ -256,9 +256,14 @@ export function validateJpegBase64(value: unknown, photoIndex: number): number {
 }
 
 export function validatePayload(value: unknown): ValidatedPayload {
+  const hasLegacyRequestShape = isRecord(value) && hasExactKeys(value, ["version", "direction", "photos"]);
+  const hasContextRequestShape = isRecord(value) && hasExactKeys(
+    value,
+    ["version", "direction", "storyContext", "photos"],
+  );
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["version", "direction", "photos"]) ||
+    (!hasLegacyRequestShape && !hasContextRequestShape) ||
     typeof value.version !== "number" ||
     !REQUEST_VERSIONS.includes(value.version as RequestVersion) ||
     typeof value.direction !== "string" ||
@@ -268,8 +273,27 @@ export function validatePayload(value: unknown): ValidatedPayload {
     throw new RequestProblem(
       400,
       "invalid_request",
-      "Body must contain only version, direction, and photos using supported values.",
+      "Body must contain only version, direction, optional storyContext, and photos using supported values.",
     );
+  }
+
+  let storyContext: string | undefined;
+  if (hasContextRequestShape) {
+    if (
+      typeof value.storyContext !== "string" ||
+      /[\u0000-\u001f\u007f]/u.test(value.storyContext)
+    ) {
+      throw new RequestProblem(400, "invalid_story_context", "storyContext must be plain text.");
+    }
+    const normalized = value.storyContext.replace(/\s+/gu, " ").trim();
+    if (normalized.length < 1 || normalized.length > LIMITS.maxStoryContextCharacters) {
+      throw new RequestProblem(
+        400,
+        "invalid_story_context",
+        `storyContext must contain between 1 and ${LIMITS.maxStoryContextCharacters} characters.`,
+      );
+    }
+    storyContext = normalized;
   }
   if (value.photos.length < 1 || value.photos.length > LIMITS.maxPhotos) {
     throw new RequestProblem(
@@ -357,6 +381,7 @@ export function validatePayload(value: unknown): ValidatedPayload {
   return {
     version: value.version as RequestVersion,
     direction: value.direction as AICutDirection,
+    ...(storyContext === undefined ? {} : { storyContext }),
     photos,
   };
 }
