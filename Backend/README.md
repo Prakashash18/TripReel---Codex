@@ -1,6 +1,6 @@
-# TripReel visual-analysis proxy
+# Memories AI proxy
 
-This directory is a dependency-light TypeScript Cloudflare Worker for TripReel's **explicitly opt-in AI Remix**. It accepts selected reduced JPEG previews, asks a configurable OpenAI image-capable model for a bounded editorial plan, and returns only structured editing decisions. It never renders a video and does not contain or expose an OpenAI key to the app.
+This directory is a dependency-light TypeScript Cloudflare Worker for Memories' explicit AI features. It accepts selected reduced JPEG previews, asks a configurable OpenAI image-capable model for a bounded editorial plan, and can submit one or two explicitly selected stills to ByteDance Seedance 2.0 through OpenRouter for a four- or six-second image-to-video story. It does not contain or expose either provider key to the app.
 
 The implementation deliberately has no database, object storage, cache writes, analytics SDK, or `console` calls. It never logs or persists request bodies or images.
 
@@ -93,6 +93,26 @@ Errors use a stable, sanitized shape and never include an upstream response body
 { "error": { "code": "invalid_image", "message": "..." } }
 ```
 
+### AI video contract
+
+The same App Attest assertion scheme protects all three video routes. The
+assertion is bound to the exact route and JSON bytes, so it cannot be replayed
+against another operation.
+
+- `POST /v1/video/generate` accepts `{version:2,imagesBase64:[beginning,ending],prompt}` with one or two images and returns
+  an opaque, device-bound `jobToken` plus the fixed model
+  `bytedance/seedance-2.0`.
+- `POST /v1/video/status` accepts `{version:1,jobToken}` and returns only a
+  bounded status and progress value.
+- `POST /v1/video/content` accepts the same job request and streams the finished
+  video with `no-store` headers.
+
+Each image is a metadata-stripped JPEG no larger than 384 KiB and 1024×1024.
+Memories submits a 6-second, 720p, vertical first-to-last-frame story with audio when two moments are selected. The legacy version 1, single-frame request remains accepted for older TestFlight builds and produces a 4-second animation.
+The client polls at a restrained interval and adds its editable title locally;
+Seedance is explicitly told not to generate captions, logos, or watermarks.
+Three new AI-video jobs per attested installation per UTC day are allowed.
+
 ## Enforced limits
 
 - Version `1` (legacy sequence) or `2` (director recommendations), one supported direction, and 1–36 photos per request.
@@ -108,9 +128,18 @@ The OpenAI call uses image detail `low`, `store: false`, no tools, a fixed trave
 
 ## Data handling and retention
 
-TripReel creates reduced, re-encoded JPEG thumbnails in memory only after the user opts in. It strips metadata during re-encoding and discards each thumbnail and its base64 representation immediately when the request succeeds, fails, or is cancelled. It must not place thumbnails in a background-upload queue, on-disk cache, crash report, URL, header, or analytics event.
+Memories creates reduced, re-encoded JPEG thumbnails in memory only after the user opts in. It strips metadata during re-encoding and discards each thumbnail and its base64 representation immediately when the request succeeds, fails, or is cancelled. It must not place thumbnails in a background-upload queue, on-disk cache, crash report, URL, header, or analytics event.
 
 This Worker holds the JSON and thumbnails in memory only long enough to validate the request and make the foreground OpenAI request. It does not write them to KV, D1, R2, Cache API, logs, or any other persistence layer. Client and upstream fetches are marked `no-store`. Worker observability and invocation logging are disabled in `wrangler.toml`; also audit account-level Logpush, Tail Workers, WAF rules, reverse proxies, and error trackers before production so none capture bodies. Platform metadata such as method, URL, status, timing, and billing may still exist, so never put content in the URL.
+
+AI video is a separate data flow. The selected re-encoded stills are forwarded in
+memory to OpenRouter and ByteDance, and the completed clip is streamed back
+without being written to Worker storage. OpenRouter documents that asynchronous
+video generation is not eligible for Zero Data Retention: the provider must
+temporarily retain the input/job output so it can be polled and downloaded.
+Memories therefore asks again immediately before submission and does not claim
+zero retention for this feature. See OpenRouter's current
+[video generation documentation](https://openrouter.ai/docs/guides/overview/multimodal/video-generation).
 
 The `tripreel_app_attest_diagnostics` Analytics Engine dataset is a narrow operational exception used only when secure-device verification fails. Each event contains the operation, a bounded failure stage, an error category, and sanitized error text. It never contains a thumbnail, request body or hash, IP address, App Attest key ID, Photos identifier, filename, or model response. Normal Worker Logs remain disabled.
 
@@ -151,9 +180,9 @@ The live Worker uses the versioned AI edit-plan contract in this repository. Dep
 
 The `workers.dev` hostname is enabled for this initial deployment and preview URLs are disabled. Before each deployment:
 
-1. Create a dedicated OpenAI project, use a project-scoped key, restrict its access, and configure spend/rate alerts.
+1. Create dedicated OpenAI and OpenRouter projects, use project-scoped keys, restrict their access, and configure spend/rate alerts. The video model is fixed in code to `bytedance/seedance-2.0`; review current model support, availability, and per-second price before enabling it.
 2. Generate `TRIPREEL_AUTH_TOKEN` and `APP_ATTEST_ROUTING_SECRET` with a cryptographically secure generator; use at least 32 random bytes for each. The bearer token is suitable only for local tests, a private prototype, or a server-to-server caller—never as a long-lived secret embedded in the shipped iOS binary. The App Attest routing secret determines the Durable Object shard for every registered device and must remain stable across deployments.
-3. Store `OPENAI_API_KEY`, `TRIPREEL_AUTH_TOKEN`, and `APP_ATTEST_ROUTING_SECRET` as encrypted Cloudflare Worker secrets, not plaintext `[vars]`. Cloudflare documents `.dev.vars` and [`wrangler secret put`](https://developers.cloudflare.com/workers/configuration/secrets/). For an atomic first deployment, `wrangler deploy --secrets-file <protected-env-file>` can upload secrets with the code; securely delete that local production file afterward.
+3. Store `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `TRIPREEL_AUTH_TOKEN`, and `APP_ATTEST_ROUTING_SECRET` as encrypted Cloudflare Worker secrets, not plaintext `[vars]`. Cloudflare documents `.dev.vars` and [`wrangler secret put`](https://developers.cloudflare.com/workers/configuration/secrets/). For an atomic first deployment, `wrangler deploy --secrets-file <protected-env-file>` can upload secrets with the code; securely delete that local production file afterward.
 4. Leave `ALLOWED_ORIGIN` unset for the native iOS app. CORS is then off and browser-origin requests are rejected. If a browser client is genuinely required, configure exactly one HTTPS origin. Wildcards and comma-separated origins are rejected.
 5. Before production launch, consider putting the Worker behind a dedicated HTTPS custom domain. The current `workers.dev` hostname is suitable for development and TestFlight integration work; preview URLs remain disabled. Edge rate-limit bindings provide a fast abuse guard (60 assertion-route operations per minute, covering challenge plus analysis), while the Durable Object enforces the authoritative per-key assertion counter, 30 analyses/minute quota, and 1,000-photo/UTC-day quota.
 6. Confirm Workers Logs remains disabled. The source contains no `console` statements, and `wrangler.toml` explicitly disables observability and invocation logs. Review Cloudflare's current [Workers Logs behavior](https://developers.cloudflare.com/workers/observability/logs/workers-logs/) whenever deployment configuration changes.
@@ -166,11 +195,11 @@ The configuration opts in to Cloudflare's `enable_request_signal` flag so a disc
 
 ## Production mobile authentication: App Attest
 
-The Worker implements Apple's [server validation procedure](https://developer.apple.com/documentation/devicecheck/validating-apps-that-connect-to-your-server). `POST /v1/app-attest/challenge` issues a random five-minute, single-use challenge for registration or assertion. `POST /v1/app-attest/register` validates Apple's pinned App Attestation certificate chain, nonce, production AAGUID, App ID/RP ID, credential ID, public key, and initial counter. Every `POST /v1/analyze` assertion is bound to its one-time challenge, method, path, and SHA-256 of the exact JSON body.
+The Worker implements Apple's [server validation procedure](https://developer.apple.com/documentation/devicecheck/validating-apps-that-connect-to-your-server). `POST /v1/app-attest/challenge` issues a random five-minute, single-use challenge for registration or assertion. `POST /v1/app-attest/register` validates Apple's pinned App Attestation certificate chain, nonce, production AAGUID, App ID/RP ID, credential ID, public key, and initial counter. Every analysis and video assertion is bound to its one-time challenge, method, protected path, and SHA-256 of the exact JSON body.
 
 Verification metadata is distributed across 256 secret-HMAC-selected SQLite Durable Object shards. They retain only the verified public key, opaque Apple receipt, environment, assertion counter, challenge hashes, quota counters, and timestamps. They never receive or store photo bytes, the request body, its hash, filenames, Photos identifiers, or model results. Up to four overlapping challenges per key and purpose are retained so concurrent network requests cannot invalidate each other; challenge consumption, counter advancement, and quota charging are atomic. Inactive keys are removed after 180 days.
 
-The production app uses no shared bearer secret: the private App Attest key is created and held by the iPhone. The bearer path remains for local Debug smoke tests and must never be compiled into or configured for TestFlight. Devices where App Attest is unsupported fail closed to TripReel's on-device analysis.
+The production app uses no shared bearer secret: the private App Attest key is created and held by the iPhone. The bearer path remains for local Debug smoke tests and must never be compiled into or configured for TestFlight. Devices where App Attest is unsupported fail closed to Memories' on-device analysis.
 
 ## Source layout
 
@@ -181,5 +210,6 @@ The production app uses no shared bearer secret: the private App Attest key is c
 - `src/app-attest-state.ts` — sharded Durable Object challenge, key, replay, quota, and retention state.
 - `src/validation.ts` — streaming body cap, strict wire validation, base64/JPEG/dimension checks.
 - `src/openai.ts` — configurable Responses API editorial request, timeout, bounded response read, and fail-closed parsing.
+- `src/openrouter-video.ts` — fixed Seedance submission, signed device-bound job tokens, status polling, and bounded video streaming.
 - `src/contract.ts` — limits, public types, JSON Schema, and output validation.
-- `test/worker.test.mjs` — dependency-free unit tests with a mocked upstream.
+- `test/worker.test.mjs` and `test/video.test.mjs` — dependency-free unit tests with mocked upstreams.

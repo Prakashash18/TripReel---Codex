@@ -13,6 +13,11 @@ import {
 import { LIMITS } from "./contract.ts";
 
 export type AppAttestPurpose = "attestation" | "assertion";
+export type AppAttestProtectedPath =
+  | "/v1/analyze"
+  | "/v1/video/generate"
+  | "/v1/video/status"
+  | "/v1/video/content";
 
 export interface AppAttestStateEnv {
   APP_ATTEST_APP_ID?: string;
@@ -40,9 +45,10 @@ export interface AuthorizeAnalysisInput {
   challenge: Uint8Array;
   assertionObject: Uint8Array;
   method: "POST";
-  path: "/v1/analyze";
+  path: AppAttestProtectedPath;
   bodyHash: Uint8Array;
   photoCount: number;
+  videoGenerationCount: number;
   nowMs: number;
 }
 
@@ -97,6 +103,8 @@ interface KeyRow {
   minute_requests: number;
   utc_day: number;
   day_photos: number;
+  utc_video_day: number;
+  day_video_generations: number;
 }
 
 const CHALLENGE_BYTES = 32;
@@ -105,6 +113,13 @@ const MAX_OUTSTANDING_CHALLENGES_PER_PURPOSE = 4;
 const KEY_RETENTION_MS = 180 * 24 * 60 * 60 * 1_000;
 const MAX_REQUESTS_PER_MINUTE = 30;
 const MAX_PHOTOS_PER_UTC_DAY = 1_000;
+const MAX_VIDEO_GENERATIONS_PER_UTC_DAY = 3;
+const PROTECTED_PATHS: ReadonlySet<AppAttestProtectedPath> = new Set([
+  "/v1/analyze",
+  "/v1/video/generate",
+  "/v1/video/status",
+  "/v1/video/content",
+]);
 
 function isValidNow(value: number): boolean {
   return Number.isSafeInteger(value) && value >= 1_577_836_800_000 && value <= 4_102_444_800_000;
@@ -249,6 +264,8 @@ export class AppAttestShard extends DurableObject<AppAttestStateEnv> {
             minute_requests INTEGER NOT NULL DEFAULT 0,
             utc_day INTEGER NOT NULL DEFAULT 0,
             day_photos INTEGER NOT NULL DEFAULT 0,
+            utc_video_day INTEGER NOT NULL DEFAULT 0,
+            day_video_generations INTEGER NOT NULL DEFAULT 0,
             last_validation_category INTEGER,
             last_bundle_version TEXT,
             created_at_ms INTEGER NOT NULL,
@@ -274,13 +291,34 @@ export class AppAttestShard extends DurableObject<AppAttestStateEnv> {
         );
       });
     }
+
+    if (current < 2) {
+      this.ctx.storage.transactionSync(() => {
+        const columns = new Set(
+          sql.exec<{ name: string }>("PRAGMA table_info(app_attest_keys)")
+            .toArray()
+            .map((column) => column.name),
+        );
+        if (!columns.has("utc_video_day")) {
+          sql.exec("ALTER TABLE app_attest_keys ADD COLUMN utc_video_day INTEGER NOT NULL DEFAULT 0");
+        }
+        if (!columns.has("day_video_generations")) {
+          sql.exec("ALTER TABLE app_attest_keys ADD COLUMN day_video_generations INTEGER NOT NULL DEFAULT 0");
+        }
+        sql.exec(
+          "INSERT OR IGNORE INTO _sql_schema_migrations(version, applied_at_ms) VALUES(2, ?)",
+          Date.now(),
+        );
+      });
+    }
   }
 
   private keyRow(keyID: Uint8Array): KeyRow | undefined {
     return this.ctx.storage.sql
       .exec<KeyRow>(
         `SELECT public_key_spki, sign_count, status, minute_bucket,
-                minute_requests, utc_day, day_photos
+                minute_requests, utc_day, day_photos,
+                utc_video_day, day_video_generations
            FROM app_attest_keys WHERE key_hash = ?`,
         exactBuffer(keyID),
       )
@@ -564,10 +602,18 @@ export class AppAttestShard extends DurableObject<AppAttestStateEnv> {
       input.bodyHash.byteLength !== 32 ||
       input.assertionObject.byteLength === 0 ||
       input.method !== "POST" ||
-      input.path !== "/v1/analyze" ||
+      !PROTECTED_PATHS.has(input.path) ||
       !Number.isInteger(input.photoCount) ||
-      input.photoCount < 1 ||
+      input.photoCount < 0 ||
       input.photoCount > LIMITS.maxPhotos ||
+      !Number.isInteger(input.videoGenerationCount) ||
+      input.videoGenerationCount < 0 ||
+      input.videoGenerationCount > 1 ||
+      (input.path === "/v1/analyze" && (input.photoCount < 1 || input.videoGenerationCount !== 0)) ||
+      (input.path === "/v1/video/generate" &&
+        ((input.photoCount !== 1 && input.photoCount !== 2) || input.videoGenerationCount !== 1)) ||
+      ((input.path === "/v1/video/status" || input.path === "/v1/video/content") &&
+        (input.photoCount !== 0 || input.videoGenerationCount !== 0)) ||
       !isValidNow(input.nowMs) ||
       this.env.APP_ATTEST_APP_ID === undefined
     ) {
@@ -639,9 +685,14 @@ export class AppAttestShard extends DurableObject<AppAttestStateEnv> {
       const utcDay = Math.floor(input.nowMs / 86_400_000);
       const minuteRequests = currentKey.minute_bucket === minuteBucket ? currentKey.minute_requests : 0;
       const dayPhotos = currentKey.utc_day === utcDay ? currentKey.day_photos : 0;
+      const dayVideoGenerations = currentKey.utc_video_day === utcDay
+        ? currentKey.day_video_generations
+        : 0;
       const minuteLimited = minuteRequests >= MAX_REQUESTS_PER_MINUTE;
       const dayLimited = dayPhotos + input.photoCount > MAX_PHOTOS_PER_UTC_DAY;
-      const allowed = !minuteLimited && !dayLimited;
+      const videoDayLimited = dayVideoGenerations + input.videoGenerationCount
+        > MAX_VIDEO_GENERATIONS_PER_UTC_DAY;
+      const allowed = !minuteLimited && !dayLimited && !videoDayLimited;
 
       this.ctx.storage.sql.exec(
         `UPDATE app_attest_keys SET
@@ -650,6 +701,8 @@ export class AppAttestShard extends DurableObject<AppAttestStateEnv> {
            minute_requests = ?,
            utc_day = ?,
            day_photos = ?,
+           utc_video_day = ?,
+           day_video_generations = ?,
            last_validation_category = COALESCE(?, last_validation_category),
            last_bundle_version = COALESCE(?, last_bundle_version),
            last_seen_at_ms = ?
@@ -659,6 +712,10 @@ export class AppAttestShard extends DurableObject<AppAttestStateEnv> {
         allowed ? minuteRequests + 1 : minuteRequests,
         utcDay,
         allowed ? dayPhotos + input.photoCount : dayPhotos,
+        utcDay,
+        allowed
+          ? dayVideoGenerations + input.videoGenerationCount
+          : dayVideoGenerations,
         verified.validationCategory ?? null,
         verified.bundleVersion ?? null,
         input.nowMs,
@@ -669,7 +726,7 @@ export class AppAttestShard extends DurableObject<AppAttestStateEnv> {
         const retryAfter = Math.max(1, Math.ceil(((minuteBucket + 1) * 60_000 - input.nowMs) / 1_000));
         return stateFailure("rate_limited", retryAfter);
       }
-      if (dayLimited) {
+      if (dayLimited || videoDayLimited) {
         const retryAfter = Math.max(1, Math.ceil(((utcDay + 1) * 86_400_000 - input.nowMs) / 1_000));
         return stateFailure("rate_limited", retryAfter);
       }

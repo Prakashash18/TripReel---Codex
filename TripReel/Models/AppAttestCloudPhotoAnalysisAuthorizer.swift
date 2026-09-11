@@ -417,9 +417,12 @@ private extension HTTPTripReelAppAttestBackendClient {
 
 enum TripReelAppAttestRequestBinding {
     private static let attestationPrefix = Data("TripReel-App-Attest/v1\nattestation\n".utf8)
-    private static let assertionPrefix = Data(
-        "TripReel-App-Attest/v1\nassertion\nPOST\n/v1/analyze\n".utf8
-    )
+    private static let allowedPaths: Set<String> = [
+        "/v1/analyze",
+        "/v1/video/generate",
+        "/v1/video/status",
+        "/v1/video/content"
+    ]
 
     static func attestationClientDataHash(challenge: Data) -> Data {
         var clientData = attestationPrefix
@@ -428,10 +431,19 @@ enum TripReelAppAttestRequestBinding {
     }
 
     static func assertionClientDataHash(challenge: Data, body: Data) -> Data {
-        var clientData = assertionPrefix
+        assertionClientDataHash(challenge: challenge, body: body, path: "/v1/analyze")
+    }
+
+    static func assertionClientDataHash(challenge: Data, body: Data, path: String) -> Data {
+        precondition(allowedPaths.contains(path), "Unsupported App Attest request path")
+        var clientData = Data("TripReel-App-Attest/v1\nassertion\nPOST\n\(path)\n".utf8)
         clientData.append(challenge)
         clientData.append(digest(body))
         return digest(clientData)
+    }
+
+    static func isAllowed(path: String) -> Bool {
+        allowedPaths.contains(path)
     }
 
     private static func digest(_ data: Data) -> Data {
@@ -498,8 +510,11 @@ actor TripReelAppAttestCoordinator {
         self.now = now
     }
 
-    func authorizationHeaders(for body: Data) async throws -> [String: String] {
+    func authorizationHeaders(for body: Data, path: String = "/v1/analyze") async throws -> [String: String] {
         guard service.isSupported else { throw TripReelAppAttestError.unsupported }
+        guard TripReelAppAttestRequestBinding.isAllowed(path: path) else {
+            throw TripReelAppAttestError.invalidServerResponse
+        }
         var didResetKey = false
 
         while true {
@@ -512,7 +527,8 @@ actor TripReelAppAttestCoordinator {
                 try validateFresh(challenge)
                 let clientDataHash = TripReelAppAttestRequestBinding.assertionClientDataHash(
                     challenge: challenge.data,
-                    body: body
+                    body: body,
+                    path: path
                 )
                 let assertion = try await service.generateAssertion(
                     keyID,
@@ -755,6 +771,11 @@ final class AppAttestCloudPhotoAnalysisAuthorizer: CloudPhotoAnalysisAuthorizing
     func authorizationHeaders(for body: Data) async throws -> [String: String] {
         guard isReady else { throw TripReelAppAttestError.unsupported }
         return try await coordinator.authorizationHeaders(for: body)
+    }
+
+    func authorizationHeaders(for body: Data, path: String) async throws -> [String: String] {
+        guard isReady else { throw TripReelAppAttestError.unsupported }
+        return try await coordinator.authorizationHeaders(for: body, path: path)
     }
 
     func recoverAuthorization(afterStatusCode statusCode: Int, responseBody: Data) async -> Bool {

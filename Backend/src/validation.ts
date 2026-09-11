@@ -337,7 +337,11 @@ function jpegDimensions(bytes: Uint8Array): { width: number; height: number } | 
   return null;
 }
 
-export function validateJpegBase64(value: unknown, photoIndex: number): number {
+export function validateJpegBase64(
+  value: unknown,
+  photoIndex: number,
+  maximumBytes: number = LIMITS.maxImageBytes,
+): number {
   const field = `photos[${photoIndex}].imageBase64`;
   if (typeof value !== "string" || value.length === 0) {
     throw new RequestProblem(400, "invalid_image", `${field} must be a base64 string.`);
@@ -353,11 +357,11 @@ export function validateJpegBase64(value: unknown, photoIndex: number): number {
   if (byteLength < 32) {
     throw new RequestProblem(400, "invalid_image", `${field} is too short to be a JPEG image.`);
   }
-  if (byteLength > LIMITS.maxImageBytes) {
+  if (byteLength > maximumBytes) {
     throw new RequestProblem(
       413,
       "image_too_large",
-      `${field} must decode to no more than ${LIMITS.maxImageBytes} bytes.`,
+      `${field} must decode to no more than ${maximumBytes} bytes.`,
     );
   }
 

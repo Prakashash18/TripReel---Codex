@@ -15,6 +15,9 @@ enum AppScreen: String {
     case aiDirection
     case aiProcessing
     case aiComparison
+    case aiVideoIntro
+    case aiVideoGenerating
+    case aiVideoReady
     case cut
     case pace
     case secondWatch
@@ -36,12 +39,13 @@ enum AppScreen: String {
         case .aiDirection: 7
         case .aiProcessing: 8
         case .aiComparison: 9
-        case .secondWatch: 10
-        case .cut, .pace: 11
-        case .export: 12
-        case .paywall, .rendering: 13
-        case .done: 14
-        case .cleanup: 15
+        case .aiVideoIntro, .aiVideoGenerating, .aiVideoReady: 10
+        case .secondWatch: 11
+        case .cut, .pace: 12
+        case .export: 13
+        case .paywall, .rendering: 14
+        case .done: 15
+        case .cleanup: 16
         }
     }
 }
@@ -430,6 +434,126 @@ struct MontagePhotoInsight: Hashable, Sendable {
             featurePrint: result.signals.featurePrint,
             focalPoint: result.signals.focalPoint
         )
+    }
+}
+
+enum AIVideoMomentRole: String, CaseIterable, Hashable, Sendable {
+    case beginning
+    case ending
+
+    var title: String {
+        switch self {
+        case .beginning: "Beginning"
+        case .ending: "Ending"
+        }
+    }
+}
+
+struct AIVideoMomentRecommendation: Equatable, Sendable {
+    let photoIDs: [String]
+    let isVisionBased: Bool
+}
+
+/// Selects two complementary story anchors from the already-computed local
+/// Vision results. The first favors a strong sense of place; the second favors
+/// people and emotional payoff. Nothing leaves the device during this step.
+enum AIVideoMomentRecommender {
+    static func recommend(
+        photos: [ReelPhoto],
+        insights: [String: MontagePhotoInsight]
+    ) -> AIVideoMomentRecommendation {
+        var seen = Set<String>()
+        let candidates = photos.filter { seen.insert($0.id).inserted }
+        guard candidates.count > 1 else {
+            return AIVideoMomentRecommendation(
+                photoIDs: candidates.map(\.id),
+                isVisionBased: candidates.first.map { insights[$0.id] != nil } ?? false
+            )
+        }
+
+        let denominator = Double(max(1, candidates.count - 1))
+        var bestPair = (first: 0, second: candidates.count - 1, score: -Double.infinity)
+
+        for firstIndex in 0..<(candidates.count - 1) {
+            for secondIndex in (firstIndex + 1)..<candidates.count {
+                let first = candidates[firstIndex]
+                let second = candidates[secondIndex]
+                let firstInsight = insights[first.id] ?? MontagePhotoInsight()
+                let secondInsight = insights[second.id] ?? MontagePhotoInsight()
+                let firstPosition = Double(firstIndex) / denominator
+                let secondPosition = Double(secondIndex) / denominator
+                let separation = Double(secondIndex - firstIndex) / denominator
+
+                var score = openingScore(firstInsight, position: firstPosition)
+                    + endingScore(secondInsight, position: secondPosition)
+                    + min(0.20, separation * 0.20)
+
+                if firstInsight.contentKind != secondInsight.contentKind {
+                    score += 0.10
+                }
+                if orientationBucket(first) == orientationBucket(second) {
+                    score += 0.04
+                }
+                if areNearDuplicates(firstInsight, secondInsight) {
+                    score -= 1.4
+                }
+
+                if score > bestPair.score {
+                    bestPair = (firstIndex, secondIndex, score)
+                }
+            }
+        }
+
+        let selected = [candidates[bestPair.first], candidates[bestPair.second]]
+        return AIVideoMomentRecommendation(
+            photoIDs: selected.map(\.id),
+            isVisionBased: selected.allSatisfy { insights[$0.id] != nil }
+        )
+    }
+
+    private static func openingScore(
+        _ insight: MontagePhotoInsight,
+        position: Double
+    ) -> Double {
+        var score = (0.58 * insight.memoryScore) + (0.34 * insight.aestheticScore)
+        if insight.contentKind == .scenery { score += 0.28 }
+        if insight.contentKind == .moment { score += 0.08 }
+        score += (1 - position) * 0.10
+        return score
+    }
+
+    private static func endingScore(
+        _ insight: MontagePhotoInsight,
+        position: Double
+    ) -> Double {
+        var score = (0.58 * insight.memoryScore) + (0.34 * insight.aestheticScore)
+        if insight.contentKind == .people { score += 0.24 }
+        if insight.peopleCount > 1 { score += 0.12 }
+        if insight.contentKind == .moment { score += 0.08 }
+        score += position * 0.10
+        return score
+    }
+
+    private static func orientationBucket(_ photo: ReelPhoto) -> Int {
+        if photo.aspectRatio < 0.88 { return 0 }
+        if photo.aspectRatio > 1.25 { return 2 }
+        return 1
+    }
+
+    private static func areNearDuplicates(
+        _ first: MontagePhotoInsight,
+        _ second: MontagePhotoInsight
+    ) -> Bool {
+        // Global feature prints can overvalue a repeated classroom or stage
+        // background. Do not collapse people moments when faces may differ.
+        guard first.peopleCount == 0,
+              second.peopleCount == 0,
+              let firstPrint = first.featurePrint,
+              let secondPrint = second.featurePrint,
+              let distance = try? firstPrint.distance(to: secondPrint) else {
+            return false
+        }
+        return distance <= 7
     }
 }
 
@@ -1383,6 +1507,16 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var aiCutProgress = 0.0
     @Published private(set) var aiCutStatus = "Finding the strongest moments…"
     @Published private(set) var aiCutFailureMessage: String?
+    @Published private(set) var aiVideoSource: TripCutSource = .aiCut
+    @Published private(set) var aiVideoSelectedPhotoIDs: [String] = []
+    @Published private(set) var aiVideoRecommendedPhotoIDs: [String] = []
+    @Published private(set) var aiVideoRecommendationIsVisionBased = false
+    @Published private(set) var aiVideoProgress = 0.0
+    @Published private(set) var aiVideoStatus = "Preparing your memory…"
+    @Published private(set) var aiVideoFailureMessage: String?
+    @Published private(set) var aiVideoURL: URL?
+    @Published private(set) var isSavingAIVideo = false
+    @Published private(set) var aiVideoSaveMessage: String?
     @Published private(set) var isAnalyzingPhotos = false
     @Published private(set) var photoAnalysisProgress = 0.0
     @Published private(set) var photoAnalysisStatus = "Preparing smart selection"
@@ -1410,6 +1544,7 @@ final class TripReelModel: ObservableObject {
 
     private let photoLibrary: any PhotoLibraryServing
     private let cloudPhotoAnalysis: any CloudPhotoAnalysisServing
+    private let aiVideoGeneration: any AIVideoGenerationServing
     private let photoAnalysisThumbnails: any PhotoAnalysisThumbnailServing
     private let nativePhotoIntelligence: any NativePhotoIntelligenceServing
     private let preferenceStore: UserDefaults
@@ -1417,8 +1552,10 @@ final class TripReelModel: ObservableObject {
     private var workTask: Task<Void, Never>?
     private var photoAnalysisTask: Task<Void, Never>?
     private var aiCutTask: Task<Void, Never>?
+    private var aiVideoTask: Task<Void, Never>?
     private var photoAnalysisGeneration = UUID()
     private var aiCutGeneration = UUID()
+    private var aiVideoGenerationID = UUID()
     private var exportGeneration = UUID()
     private var exportReturnScreen: AppScreen = .secondWatch
     private var studioReturnScreen: AppScreen = .firstCutOptions
@@ -1454,6 +1591,7 @@ final class TripReelModel: ObservableObject {
         useDemoData: Bool? = nil,
         photoLibrary: (any PhotoLibraryServing)? = nil,
         cloudPhotoAnalysis: (any CloudPhotoAnalysisServing)? = nil,
+        aiVideoGeneration: (any AIVideoGenerationServing)? = nil,
         photoAnalysisThumbnails: (any PhotoAnalysisThumbnailServing)? = nil,
         nativePhotoIntelligence: (any NativePhotoIntelligenceServing)? = nil,
         videoExporter: (any TripReelVideoExporting)? = nil,
@@ -1463,6 +1601,7 @@ final class TripReelModel: ObservableObject {
         usesDemoData = demoMode
         self.photoLibrary = photoLibrary ?? PhotoLibraryService()
         self.cloudPhotoAnalysis = cloudPhotoAnalysis ?? CloudPhotoAnalysisClient()
+        self.aiVideoGeneration = aiVideoGeneration ?? OpenRouterAIVideoClient()
         self.photoAnalysisThumbnails = photoAnalysisThumbnails ?? PhotoAnalysisThumbnailService()
         self.nativePhotoIntelligence = nativePhotoIntelligence ?? NativePhotoIntelligenceService()
         self.videoExporter = videoExporter ?? TripReelVideoExporter()
@@ -2022,9 +2161,10 @@ final class TripReelModel: ObservableObject {
     var canNavigateBack: Bool {
         switch screen {
         case .access, .limited, .firstWatch, .firstCutOptions, .aiDirection, .aiComparison,
-             .secondWatch, .pace, .export, .paywall, .done:
+             .aiVideoIntro, .aiVideoReady, .secondWatch, .pace, .export, .paywall, .done:
             true
-        case .welcome, .trips, .empty, .building, .aiProcessing, .cut, .rendering, .cleanup:
+        case .welcome, .trips, .empty, .building, .aiProcessing, .aiVideoGenerating,
+             .cut, .rendering, .cleanup:
             false
         }
     }
@@ -2041,6 +2181,8 @@ final class TripReelModel: ObservableObject {
             go(.firstWatch, direction: .backward)
         case .aiDirection, .aiComparison:
             go(.firstCutOptions, direction: .backward)
+        case .aiVideoIntro, .aiVideoReady:
+            go(.aiComparison, direction: .backward)
         case .secondWatch:
             go(studioReturnScreen, direction: .backward)
         case .pace:
@@ -2051,7 +2193,8 @@ final class TripReelModel: ObservableObject {
             go(.export, direction: .backward)
         case .done:
             go(.export, direction: .backward)
-        case .welcome, .trips, .empty, .building, .aiProcessing, .cut, .rendering, .cleanup:
+        case .welcome, .trips, .empty, .building, .aiProcessing, .aiVideoGenerating,
+             .cut, .rendering, .cleanup:
             break
         }
     }
@@ -2103,6 +2246,46 @@ final class TripReelModel: ObservableObject {
 
     var aiCutSelectedPhotoCount: Int {
         selectedAICutPhotoIDs.count
+    }
+
+    var aiVideoPhotoOptions: [ReelPhoto] {
+        editSnapshot(for: aiVideoSource)?.keptPhotos ?? []
+    }
+
+    var aiVideoSelectedPhotoID: String? {
+        aiVideoSelectedPhotoIDs.first
+    }
+
+    var aiVideoSelectedPhotos: [ReelPhoto] {
+        let options = Dictionary(uniqueKeysWithValues: aiVideoPhotoOptions.map { ($0.id, $0) })
+        return aiVideoSelectedPhotoIDs.compactMap { options[$0] }
+    }
+
+    var aiVideoSelectedPhoto: ReelPhoto? {
+        aiVideoSelectedPhotos.first ?? aiVideoPhotoOptions.first
+    }
+
+    var aiVideoEndingPhoto: ReelPhoto? {
+        aiVideoSelectedPhotos.dropFirst().first
+    }
+
+    var aiVideoHasStoryPair: Bool {
+        aiVideoSelectedPhotos.count == 2
+    }
+
+    var aiVideoSelectionIsRecommended: Bool {
+        aiVideoSelectedPhotoIDs == aiVideoRecommendedPhotoIDs
+    }
+
+    var aiVideoIsConfigured: Bool {
+        aiVideoGeneration.isConfigured
+    }
+
+    var aiVideoTitle: String {
+        let snapshot = editSnapshot(for: aiVideoSource)
+        let opening = snapshot?.montageTitleCards.first(where: { $0.kind == .opening })?.title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return opening?.isEmpty == false ? opening! : tripShortPlace
     }
 
     var aiCutCanCreate: Bool {
@@ -2369,10 +2552,201 @@ final class TripReelModel: ObservableObject {
     }
 
     func useAICut() {
-        guard let aiCutSnapshot else { return }
-        applyEditSnapshot(aiCutSnapshot, source: .aiCut)
-        studioReturnScreen = .aiComparison
-        go(.secondWatch, direction: .forward)
+        exportCut(.aiCut)
+    }
+
+    func openAIVideoIntro(from source: TripCutSource) {
+        guard let snapshot = editSnapshot(for: source), !snapshot.keptPhotos.isEmpty else { return }
+        aiVideoTask?.cancel()
+        aiVideoGenerationID = UUID()
+        aiVideoSource = source
+        let recommendation = AIVideoMomentRecommender.recommend(
+            photos: snapshot.keptPhotos,
+            insights: activePhotoInsights
+        )
+        aiVideoRecommendedPhotoIDs = recommendation.photoIDs
+        aiVideoSelectedPhotoIDs = recommendation.photoIDs
+        aiVideoRecommendationIsVisionBased = recommendation.isVisionBased
+        aiVideoProgress = 0
+        aiVideoStatus = "Preparing your memory…"
+        aiVideoFailureMessage = nil
+        aiVideoSaveMessage = nil
+        go(.aiVideoIntro, direction: .forward)
+    }
+
+    func selectAIVideoPhoto(_ photoID: String) {
+        selectAIVideoPhoto(photoID, for: .beginning)
+    }
+
+    func selectAIVideoPhoto(_ photoID: String, for role: AIVideoMomentRole) {
+        guard aiVideoPhotoOptions.contains(where: { $0.id == photoID }) else { return }
+        guard aiVideoPhotoOptions.count > 1 else {
+            aiVideoSelectedPhotoIDs = [photoID]
+            return
+        }
+
+        var selection = aiVideoSelectedPhotoIDs
+        if selection.count < 2 {
+            selection = Array(aiVideoPhotoOptions.prefix(2).map(\.id))
+        }
+        let target = role == .beginning ? 0 : 1
+        let other = target == 0 ? 1 : 0
+        if selection[other] == photoID {
+            selection.swapAt(target, other)
+        } else {
+            selection[target] = photoID
+        }
+        aiVideoSelectedPhotoIDs = selection
+    }
+
+    func beginAIVideoGeneration() {
+        let selectedPhotos = aiVideoSelectedPhotos
+        guard !selectedPhotos.isEmpty else { return }
+        guard aiVideoGeneration.isConfigured else {
+            aiVideoFailureMessage = "AI video is not configured yet. Your existing cut is unchanged."
+            return
+        }
+
+        aiVideoTask?.cancel()
+        let generation = UUID()
+        aiVideoGenerationID = generation
+        aiVideoFailureMessage = nil
+        aiVideoSaveMessage = nil
+        aiVideoProgress = 0.02
+        aiVideoStatus = selectedPhotos.count == 2
+            ? "Preparing two reduced previews…"
+            : "Preparing one reduced preview…"
+        go(.aiVideoGenerating, direction: .forward)
+
+        let assets = selectedPhotos.map { photo in
+            TripAsset(
+                id: photo.id,
+                source: photo.source,
+                creationDate: nil,
+                filename: photo.label,
+                pixelWidth: photo.pixelWidth,
+                pixelHeight: photo.pixelHeight
+            )
+        }
+        let prompt = Self.aiVideoPrompt(for: selectedPhotos)
+        let thumbnailService = photoAnalysisThumbnails
+        let generationService = aiVideoGeneration
+        let exporter = videoExporter
+        let title = aiVideoTitle
+
+        aiVideoTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                var preparedFrames: [PreparedPhotoThumbnail] = []
+                for asset in assets {
+                    preparedFrames.append(
+                        try await thumbnailService.prepareVideoFrame(asset: asset)
+                    )
+                }
+                guard self.aiVideoGenerationID == generation, !Task.isCancelled else { return }
+                self.aiVideoProgress = 0.08
+                let rawURL = try await generationService.generate(
+                    AIVideoGenerationInput(
+                        jpegFrames: preparedFrames.map(\.jpegData),
+                        prompt: prompt
+                    )
+                ) { [weak self] update in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.aiVideoGenerationID == generation else { return }
+                        self.aiVideoProgress = update.fraction
+                        self.aiVideoStatus = update.status
+                    }
+                }
+                guard self.aiVideoGenerationID == generation, !Task.isCancelled else {
+                    try? FileManager.default.removeItem(at: rawURL)
+                    return
+                }
+                self.aiVideoStatus = "Adding your title…"
+                self.aiVideoProgress = 0.97
+                let finishedURL = try await exporter.finishGeneratedClip(
+                    rawURL,
+                    title: title
+                )
+                if finishedURL != rawURL {
+                    try? FileManager.default.removeItem(at: rawURL)
+                }
+                guard self.aiVideoGenerationID == generation, !Task.isCancelled else {
+                    try? FileManager.default.removeItem(at: finishedURL)
+                    return
+                }
+                if let previous = self.aiVideoURL, previous != finishedURL {
+                    try? FileManager.default.removeItem(at: previous)
+                }
+                self.aiVideoURL = finishedURL
+                self.aiVideoProgress = 1
+                self.aiVideoTask = nil
+                self.go(.aiVideoReady, direction: .forward)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard self.aiVideoGenerationID == generation else { return }
+                self.aiVideoTask = nil
+                self.aiVideoFailureMessage = (error as? LocalizedError)?.errorDescription
+                    ?? "The AI video could not be finished. Your existing cut is unchanged."
+                self.go(.aiVideoIntro, direction: .backward)
+            }
+        }
+    }
+
+    func cancelAIVideoGeneration() {
+        aiVideoGenerationID = UUID()
+        aiVideoTask?.cancel()
+        aiVideoTask = nil
+        aiVideoProgress = 0
+        aiVideoFailureMessage = nil
+        go(.aiVideoIntro, direction: .backward)
+    }
+
+    func dismissAIVideoMessage() {
+        aiVideoFailureMessage = nil
+        aiVideoSaveMessage = nil
+    }
+
+    @discardableResult
+    func saveAIVideoToPhotos() async -> Bool {
+        guard let aiVideoURL, !isSavingAIVideo else { return false }
+        isSavingAIVideo = true
+        aiVideoSaveMessage = nil
+        defer { isSavingAIVideo = false }
+        do {
+            try await videoExporter.saveToPhotoLibrary(aiVideoURL)
+            aiVideoSaveMessage = "Saved to Photos"
+            return true
+        } catch {
+            aiVideoFailureMessage = (error as? LocalizedError)?.errorDescription
+                ?? "Memories couldn't save this AI video to Photos."
+            return false
+        }
+    }
+
+    private static func aiVideoPrompt(for photos: [ReelPhoto]) -> String {
+        let peopleDirection = photos.contains(where: \.protectsPeople)
+            ? "Keep every face, body, expression, and identity faithful to the source. Use only subtle natural gestures."
+            : "Preserve the original subjects, objects, lighting, and composition."
+        let storyDirection = photos.count == 2
+            ? "Begin exactly with the first memory and resolve exactly on the second. Use a motivated cinematic transition rather than morphing people or objects."
+            : "Keep the source memory as the visual anchor throughout."
+        let openingDirection = photos.count == 2
+            ? "Animate these exact memories as a polished six-second vertical reel story."
+            : "Animate this exact memory as a polished four-second vertical reel shot."
+        return """
+        \(openingDirection) \(storyDirection) \(peopleDirection) \
+        Add restrained cinematic depth, natural environmental movement, and one confident camera move. \
+        Do not add or remove people or important objects. Do not create speech, logos, captions, or watermarks. \
+        Avoid morphing, warped hands, distorted faces, abrupt motion, and invented scene changes.
+        """
+    }
+
+    func exportCut(_ source: TripCutSource) {
+        guard let snapshot = editSnapshot(for: source) else { return }
+        applyEditSnapshot(snapshot, source: source)
+        exportReturnScreen = .aiComparison
+        go(.export, direction: .forward)
     }
 
     func keepFirstCut() {
@@ -3669,6 +4043,19 @@ final class TripReelModel: ObservableObject {
         aiCutComparison = nil
         aiCutFailureMessage = nil
         aiCutProgress = 0
+        aiVideoGenerationID = UUID()
+        aiVideoTask?.cancel()
+        aiVideoTask = nil
+        aiVideoSelectedPhotoIDs = []
+        aiVideoRecommendedPhotoIDs = []
+        aiVideoRecommendationIsVisionBased = false
+        aiVideoProgress = 0
+        aiVideoFailureMessage = nil
+        aiVideoSaveMessage = nil
+        if let aiVideoURL {
+            try? FileManager.default.removeItem(at: aiVideoURL)
+            self.aiVideoURL = nil
+        }
         firstCutSnapshot = makeCurrentEditSnapshot()
         go(.building)
 
@@ -4108,6 +4495,19 @@ final class TripReelModel: ObservableObject {
         selectedAICutPhotoIDs = []
         aiCutStoryContext = ""
         aiCutConsentGranted = false
+        aiVideoGenerationID = UUID()
+        aiVideoTask?.cancel()
+        aiVideoTask = nil
+        aiVideoSelectedPhotoIDs = []
+        aiVideoRecommendedPhotoIDs = []
+        aiVideoRecommendationIsVisionBased = false
+        aiVideoFailureMessage = nil
+        aiVideoProgress = 0
+        aiVideoSaveMessage = nil
+        if let aiVideoURL {
+            try? FileManager.default.removeItem(at: aiVideoURL)
+            self.aiVideoURL = nil
+        }
         pendingBuildTrip = nil
         activeAnalysisTrip = nil
         photoAnalysisFollowUp = nil

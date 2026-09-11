@@ -217,15 +217,39 @@ final class TripReelFlowUITests: XCTestCase {
         attachScreenshot(named: "AI exact photo selection")
     }
 
-    func testAICutComparisonKeepsBothVersionsEditable() {
+    func testAICutComparisonKeepsExportAndEditAsDistinctRoutes() {
         launchApp(at: "aiComparison")
         XCTAssertTrue(screen("ai-comparison-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("compare-firstCut").exists)
         XCTAssertTrue(screen("compare-aiCut").exists)
 
-        screen("compare-firstCut").tap()
-        XCTAssertTrue(screen("edit-compared-cut-button").exists)
-        XCTAssertTrue(screen("use-ai-cut-button").exists)
+        let export = screen("use-ai-cut-button")
+        XCTAssertTrue(export.waitForExistence(timeout: 2))
+        export.tap()
+        XCTAssertTrue(screen("export-screen").waitForExistence(timeout: 3))
+
+        screen("app-back-button").tap()
+        XCTAssertTrue(screen("ai-comparison-screen").waitForExistence(timeout: 3))
+        screen("edit-compared-cut-button").tap()
+        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
+    }
+
+    func testAICutComparisonOffersSeparateGenerativeVideoChoice() {
+        launchApp(at: "aiComparison")
+        XCTAssertTrue(screen("ai-comparison-screen").waitForExistence(timeout: 3))
+
+        let videoChoice = screen("open-ai-video-button")
+        XCTAssertTrue(videoChoice.waitForExistence(timeout: 2))
+        if !videoChoice.isHittable { app.swipeUp() }
+        XCTAssertTrue(videoChoice.isHittable)
+        videoChoice.tap()
+
+        XCTAssertTrue(screen("ai-video-intro-screen").waitForExistence(timeout: 3))
+        XCTAssertTrue(screen("ai-video-beginning-card").exists)
+        XCTAssertTrue(screen("ai-video-ending-card").exists)
+        XCTAssertTrue(screen("ai-video-photo-picker").exists)
+        XCTAssertTrue(screen("create-ai-video-button").exists)
+        XCTAssertFalse(screen("ai-video-generating-screen").exists)
     }
 
     func testAIProcessingShowsSecureTransferAndCanCancel() {

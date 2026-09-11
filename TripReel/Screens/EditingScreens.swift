@@ -1,3 +1,4 @@
+import AVKit
 import SwiftUI
 
 struct FirstWatchScreen: View {
@@ -936,6 +937,7 @@ struct AICutComparisonScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var previewSource: TripCutSource = .aiCut
+    @State private var detailPage = 0
     @StateObject private var soundtrack = LocalSoundtrackPlayer()
 
     private var snapshot: TripEditSnapshot? {
@@ -950,17 +952,33 @@ struct AICutComparisonScreen: View {
         "\(previewSource.rawValue)-\(previewTrack?.id ?? "none")"
     }
 
+    private var storyRecommendation: AICutRecommendation? {
+        model.aiCutRecommendations.first { $0.kind == .story }
+    }
+
+    private var titleRecommendation: AICutRecommendation? {
+        model.aiCutRecommendations.first { $0.kind == .titles }
+    }
+
+    private var musicRecommendation: AICutRecommendation? {
+        model.aiCutRecommendations.first { $0.kind == .music }
+    }
+
+    private var treatmentRecommendation: AICutRecommendation? {
+        model.aiCutRecommendations.first { $0.kind == .treatment }
+    }
+
     var body: some View {
         ZStack {
             WarmBackground(variant: .export)
 
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 20) {
+                VStack(spacing: 16) {
                     VStack(spacing: 6) {
-                        MetadataText(text: "Your AI Cut is ready", color: TR.accent)
-                        Text("Your AI-directed reel.")
+                        MetadataText(text: "AI Cut · ready", color: TR.accent)
+                        Text("A different take.")
                             .font(TR.display(35))
-                        Text("Preview the applied story, titles, music and visual treatment. Your First Cut is still here.")
+                        Text("Watch either cut, then swipe through what changed.")
                             .font(TR.ui(12))
                             .foregroundStyle(.white.opacity(0.55))
                             .multilineTextAlignment(.center)
@@ -997,7 +1015,7 @@ struct AICutComparisonScreen: View {
                             secondsPerSlide: 1.85 - (snapshot.pace * 1.25)
                         )
                         .id(previewSource)
-                        .frame(height: 290)
+                        .frame(height: 270)
                         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 22).stroke(.white.opacity(0.14), lineWidth: 1))
                         .shadow(color: .black.opacity(0.45), radius: 24, y: 16)
@@ -1039,43 +1057,101 @@ struct AICutComparisonScreen: View {
                         .accessibilityIdentifier("ai-comparison-audio")
                     }
 
-                    if previewSource == .aiCut, let summary = model.aiCutSummary {
-                        Text(summary)
-                            .font(TR.ui(13))
-                            .foregroundStyle(.white.opacity(0.64))
-                            .multilineTextAlignment(.center)
-                            .lineSpacing(3)
-                            .padding(.horizontal, 8)
-                            .transition(.opacity)
-                    }
+                    if previewSource == .aiCut {
+                        TabView(selection: $detailPage) {
+                            AIComparisonDetailPage(
+                                eyebrow: "What changed",
+                                title: model.aiCutDiagnosis?.verdict ?? "A clearer story shape",
+                                detail: model.aiCutSummary ?? "AI rebalanced the strongest moments without changing your originals.",
+                                symbol: "arrow.triangle.branch",
+                                badges: AIComparisonDetailPage.changeBadges(model.aiCutComparison)
+                            )
+                            .tag(0)
 
-                    if previewSource == .aiCut,
-                       let diagnosis = model.aiCutDiagnosis,
-                       let comparison = model.aiCutComparison {
-                        AICutDifferenceCard(diagnosis: diagnosis, comparison: comparison)
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    }
+                            AIComparisonDetailPage(
+                                eyebrow: "Story & titles",
+                                title: storyRecommendation?.title ?? "A stronger beginning and ending",
+                                detail: titleRecommendation?.title ?? storyRecommendation?.detail ?? "Titles now support the story instead of interrupting it.",
+                                symbol: "text.quote",
+                                badges: [
+                                    titleRecommendation.map { ("textformat", $0.title) },
+                                    model.aiCutComparison.map { ("arrow.up.arrow.down", "\($0.reorderedCount) reordered") }
+                                ].compactMap { $0 }
+                            )
+                            .tag(1)
 
-                    if previewSource == .aiCut, !model.aiCutRecommendations.isEmpty {
-                        AICutRecommendationsCard(recommendations: model.aiCutRecommendations)
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                            AIComparisonDetailPage(
+                                eyebrow: "Sound & movement",
+                                title: musicRecommendation?.title ?? "A new rhythm",
+                                detail: treatmentRecommendation?.title ?? musicRecommendation?.detail ?? "Music, timing and motion now move as one.",
+                                symbol: "waveform.path",
+                                badges: [
+                                    musicRecommendation.map { ("music.note", $0.title) },
+                                    treatmentRecommendation.map { ("wand.and.stars", $0.title) }
+                                ].compactMap { $0 }
+                            )
+                            .tag(2)
+                        }
+                        .tabViewStyle(.page(indexDisplayMode: .never))
+                        .frame(height: 188)
+                        .accessibilityLabel("AI cut details")
+                        .accessibilityValue("Page \(detailPage + 1) of 3")
+
+                        HStack(spacing: 7) {
+                            ForEach(0..<3, id: \.self) { index in
+                                Capsule()
+                                    .fill(index == detailPage ? TR.accent : .white.opacity(0.20))
+                                    .frame(width: index == detailPage ? 20 : 6, height: 6)
+                                    .animation(reduceMotion ? nil : TRMotion.selection, value: detailPage)
+                            }
+                        }
+                        .accessibilityHidden(true)
                     }
 
                     VStack(spacing: 11) {
-                        Button(previewSource == .aiCut ? "Use AI Cut" : "Keep First Cut") {
-                            if previewSource == .aiCut {
-                                model.useAICut()
-                            } else {
-                                model.keepFirstCut()
-                            }
+                        Button(previewSource == .aiCut ? "Export AI Cut" : "Export First Cut") {
+                            model.exportCut(previewSource)
                         }
-                            .buttonStyle(CreamButtonStyle())
-                            .accessibilityIdentifier("use-ai-cut-button")
+                        .buttonStyle(CreamButtonStyle())
+                        .accessibilityHint("Opens export with the version currently selected")
+                        .accessibilityIdentifier("use-ai-cut-button")
 
-                        Button("Edit This Cut Myself") { model.editCut(previewSource) }
+                        Button(previewSource == .aiCut ? "Edit AI Cut" : "Edit First Cut") {
+                            model.editCut(previewSource)
+                        }
                             .buttonStyle(GlassButtonStyle())
                             .accessibilityIdentifier("edit-compared-cut-button")
 
+                        Button {
+                            model.openAIVideoIntro(from: previewSource)
+                        } label: {
+                            HStack(spacing: 13) {
+                                Image(systemName: "photo.stack")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundStyle(TR.accent)
+                                    .frame(width: 42, height: 42)
+                                    .background(TR.accent.opacity(0.10))
+                                    .clipShape(Circle())
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Choose two moments")
+                                        .font(TR.ui(13, weight: .semibold))
+                                    Text("Start with two on-device recommendations")
+                                        .font(TR.ui(10))
+                                        .foregroundStyle(.white.opacity(0.50))
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.42))
+                            }
+                            .foregroundStyle(TR.cream)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .glassCard(cornerRadius: 18)
+                        }
+                        .buttonStyle(TactileButtonStyle())
+                        .accessibilityHint("Opens a separate generative video option. Nothing is sent yet")
+                        .accessibilityIdentifier("open-ai-video-button")
                     }
                 }
                 .padding(.horizontal, 24)
@@ -1113,17 +1189,67 @@ struct AICutComparisonScreen: View {
     }
 }
 
-private struct AICutDifferenceCard: View {
-    let diagnosis: AICutDiagnosis
-    let comparison: AICutComparison
+private struct AIComparisonDetailPage: View {
+    let eyebrow: String
+    let title: String
+    let detail: String
+    let symbol: String
+    let badges: [(String, String)]
 
-    private var changes: [(String, String)] {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(TR.accent)
+                    .frame(width: 34, height: 34)
+                    .background(TR.accent.opacity(0.10))
+                    .clipShape(Circle())
+                MetadataText(text: eyebrow, color: TR.accent)
+                Spacer()
+                Label("Swipe", systemImage: "arrow.left.and.right")
+                    .font(TR.mono(8))
+                    .foregroundStyle(.white.opacity(0.34))
+            }
+
+            Text(title)
+                .font(TR.ui(16, weight: .semibold))
+                .foregroundStyle(TR.cream)
+                .lineLimit(2)
+
+            Text(detail)
+                .font(TR.ui(11))
+                .foregroundStyle(.white.opacity(0.54))
+                .lineSpacing(2)
+                .lineLimit(3)
+
+            if !badges.isEmpty {
+                HStack(spacing: 7) {
+                    ForEach(Array(badges.prefix(3).enumerated()), id: \.offset) { _, badge in
+                        Label(badge.1, systemImage: badge.0)
+                            .font(TR.ui(9, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.68))
+                            .lineLimit(1)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 6)
+                            .background(.white.opacity(0.06))
+                            .clipShape(Capsule())
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .glassCard(cornerRadius: 20)
+        .padding(.horizontal, 1)
+        .accessibilityElement(children: .combine)
+    }
+
+    static func changeBadges(_ comparison: AICutComparison?) -> [(String, String)] {
+        guard let comparison else { return [] }
         var values: [(String, String)] = []
         if comparison.restoredCount > 0 {
             values.append(("arrow.uturn.backward", "+\(comparison.restoredCount) restored"))
-        }
-        if comparison.removedCount > 0 {
-            values.append(("minus.circle", "\(comparison.removedCount) removed"))
         }
         if comparison.reorderedCount > 0 {
             values.append(("arrow.up.arrow.down", "\(comparison.reorderedCount) reordered"))
@@ -1134,141 +1260,477 @@ private struct AICutDifferenceCard: View {
         if comparison.motionChangedCount > 0 {
             values.append(("move.3d", "\(comparison.motionChangedCount) new moves"))
         }
-        if comparison.titleChangedCount > 0 {
-            values.append(("textformat", "\(comparison.titleChangedCount) title edits"))
-        }
-        if comparison.soundtrackChanged { values.append(("music.note", "New soundtrack")) }
-        if comparison.treatmentChanged { values.append(("wand.and.stars", "New treatment")) }
-        return Array(values.prefix(6))
+        return values
     }
+}
+
+struct AIVideoIntroScreen: View {
+    @EnvironmentObject private var model: TripReelModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var page = 0
+    @State private var activeRole: AIVideoMomentRole = .beginning
+    @State private var showsConsent = false
+    @State private var showsPrivacyPolicy = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            HStack {
-                MetadataText(
-                    text: comparison.materiallyDifferent ? "What AI changed" : "Focused refinement",
-                    color: comparison.materiallyDifferent ? TR.keep : TR.accent
+        ZStack {
+            WarmBackground(variant: .export)
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 18) {
+                    VStack(spacing: 6) {
+                        MetadataText(text: "AI VIDEO · NOTHING SENT YET", color: TR.accent)
+                        Text("Turn two moments into a story.")
+                            .font(TR.display(37))
+                            .multilineTextAlignment(.center)
+                        Text("A beginning and ending are ready. Tap either one to change it.")
+                            .font(TR.ui(12))
+                            .foregroundStyle(.white.opacity(0.56))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 36)
+
+                    VStack(spacing: 10) {
+                        HStack {
+                            Label(
+                                recommendationLabel,
+                                systemImage: "iphone"
+                            )
+                            .font(TR.ui(11, weight: .semibold))
+                            .foregroundStyle(TR.keep)
+                            Spacer()
+                            Text(model.aiVideoHasStoryPair ? "6 SEC · 9:16" : "4 SEC · 9:16")
+                                .font(TR.mono(9))
+                                .foregroundStyle(.white.opacity(0.46))
+                        }
+
+                        HStack(spacing: 10) {
+                            ForEach(selectedRoles, id: \.self) { role in
+                                if let photo = selectedPhoto(for: role) {
+                                    momentCard(photo: photo, role: role)
+                                }
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .glassCard(cornerRadius: 24)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("CHOOSE A DIFFERENT \(activeRole.title.uppercased())")
+                            .font(TR.mono(9))
+                            .foregroundStyle(TR.accent)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(spacing: 10) {
+                                ForEach(model.aiVideoPhotoOptions) { photo in
+                                    Button {
+                                        model.selectAIVideoPhoto(photo.id, for: activeRole)
+                                    } label: {
+                                        PhotoAssetView(source: photo.source, samplingScale: 1.4)
+                                            .frame(width: 58, height: 72)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                            .overlay {
+                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                    .stroke(
+                                                        model.aiVideoSelectedPhotoIDs.contains(photo.id)
+                                                            ? TR.accent
+                                                            : .white.opacity(0.14),
+                                                        lineWidth: model.aiVideoSelectedPhotoIDs.contains(photo.id) ? 2 : 1
+                                                    )
+                                            }
+                                            .overlay(alignment: .topTrailing) {
+                                                if let index = model.aiVideoSelectedPhotoIDs.firstIndex(of: photo.id) {
+                                                    Text("\(index + 1)")
+                                                        .font(TR.mono(9))
+                                                        .foregroundStyle(TR.ink)
+                                                        .frame(width: 20, height: 20)
+                                                        .background(TR.accent)
+                                                        .clipShape(Circle())
+                                                        .padding(4)
+                                                }
+                                            }
+                                    }
+                                    .buttonStyle(TactileButtonStyle(pressedScale: 0.94))
+                                    .accessibilityLabel("Use \(photo.label) as the \(activeRole.title.lowercased())")
+                                }
+                            }
+                            .padding(.horizontal, 1)
+                        }
+                    }
+                    .accessibilityIdentifier("ai-video-photo-picker")
+
+                    TabView(selection: $page) {
+                        AIVideoBenefitPage(
+                            symbol: "camera.aperture",
+                            eyebrow: "STORY ANCHORS",
+                            title: "A beginning and an ending",
+                            detail: "Seedance moves naturally between the two real moments you approved."
+                        )
+                        .tag(0)
+                        AIVideoBenefitPage(
+                            symbol: "textformat",
+                            eyebrow: "MEMORIES FINISH",
+                            title: model.aiVideoTitle,
+                            detail: "Memories adds the title cleanly after generation—so the words stay sharp and editable."
+                        )
+                        .tag(1)
+                        AIVideoBenefitPage(
+                            symbol: "lock.shield",
+                            eyebrow: "YOUR CHOICE",
+                            title: model.aiVideoHasStoryPair ? "Two reduced copies" : "One reduced copy",
+                            detail: "Only these metadata-free previews go via OpenRouter to ByteDance Seedance 2.0 after you agree."
+                        )
+                        .tag(2)
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+                    .frame(height: 142)
+
+                    HStack(spacing: 7) {
+                        ForEach(0..<3, id: \.self) { index in
+                            Capsule()
+                                .fill(index == page ? TR.accent : .white.opacity(0.20))
+                                .frame(width: index == page ? 20 : 6, height: 6)
+                                .animation(reduceMotion ? nil : TRMotion.selection, value: page)
+                        }
+                    }
+                    .accessibilityHidden(true)
+
+                    VStack(spacing: 10) {
+                        Button(model.aiVideoHasStoryPair ? "Use these two moments" : "Animate this moment") {
+                            showsConsent = true
+                        }
+                            .buttonStyle(CreamButtonStyle())
+                            .disabled(
+                                !model.aiVideoIsConfigured ||
+                                model.aiVideoSelectedPhotos.count < min(2, model.aiVideoPhotoOptions.count)
+                            )
+                            .opacity(model.aiVideoIsConfigured ? 1 : 0.52)
+                            .accessibilityHint("Reviews a final sharing notice before uploading the reduced previews")
+                            .accessibilityIdentifier("create-ai-video-button")
+
+                        Button("Not now") { model.navigateBack() }
+                            .font(TR.ui(14, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.68))
+                            .padding(.vertical, 8)
+                            .buttonStyle(.plain)
+
+                        Button("Privacy details") { showsPrivacyPolicy = true }
+                            .font(TR.ui(11, weight: .medium))
+                            .foregroundStyle(TR.accent)
+                            .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 12)
+                .padding(.bottom, 34)
+            }
+        }
+        .animation(reduceMotion ? nil : TRMotion.selection, value: model.aiVideoSelectedPhotoIDs)
+        .alert(model.aiVideoHasStoryPair ? "Send two reduced previews?" : "Send one reduced preview?", isPresented: $showsConsent) {
+            Button("Agree & Create") { model.beginAIVideoGeneration() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Memories sends these metadata-free copies through our secure service to OpenRouter and ByteDance Seedance 2.0. The provider temporarily retains inputs and output to make the clip. AI may invent motion or details; your originals never change.")
+        }
+        .alert(
+            "AI video",
+            isPresented: Binding(
+                get: { model.aiVideoFailureMessage != nil },
+                set: { if !$0 { model.dismissAIVideoMessage() } }
+            )
+        ) {
+            Button("OK", role: .cancel) { model.dismissAIVideoMessage() }
+        } message: {
+            Text(model.aiVideoFailureMessage ?? "")
+        }
+        .sheet(isPresented: $showsPrivacyPolicy) {
+            TripReelPrivacyPolicyView()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .accessibilityIdentifier("ai-video-intro-screen")
+    }
+
+    private var recommendationLabel: String {
+        guard model.aiVideoSelectionIsRecommended else { return "Your two moments" }
+        return model.aiVideoRecommendationIsVisionBased
+            ? "Recommended on this iPhone"
+            : "Suggested from your film"
+    }
+
+    private var selectedRoles: [AIVideoMomentRole] {
+        model.aiVideoHasStoryPair ? [.beginning, .ending] : [.beginning]
+    }
+
+    private func selectedPhoto(for role: AIVideoMomentRole) -> ReelPhoto? {
+        switch role {
+        case .beginning: model.aiVideoSelectedPhoto
+        case .ending: model.aiVideoEndingPhoto
+        }
+    }
+
+    private func momentCard(photo: ReelPhoto, role: AIVideoMomentRole) -> some View {
+        Button {
+            activeRole = role
+        } label: {
+            ZStack(alignment: .bottomLeading) {
+                PhotoAssetView(
+                    source: photo.source,
+                    contentMode: .fit,
+                    samplingScale: 1.5
                 )
+                .frame(maxWidth: .infinity)
+                .frame(height: 190)
+                .background(.black.opacity(0.36))
+
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.76)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(role.title.uppercased())
+                        .font(TR.mono(8))
+                        .foregroundStyle(TR.accent)
+                    Text(role == .beginning ? "Start here" : "Land here")
+                        .font(TR.ui(11, weight: .semibold))
+                        .foregroundStyle(TR.cream)
+                }
+                .padding(11)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(
+                        activeRole == role ? TR.accent : .white.opacity(0.16),
+                        lineWidth: activeRole == role ? 2 : 1
+                    )
+            }
+        }
+        .buttonStyle(TactileButtonStyle(pressedScale: 0.97))
+        .accessibilityLabel("\(role.title) moment, \(photo.label)")
+        .accessibilityHint("Selects this slot so you can replace its photo")
+        .accessibilityIdentifier("ai-video-\(role.rawValue)-card")
+    }
+}
+
+private struct AIVideoBenefitPage: View {
+    let symbol: String
+    let eyebrow: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: symbol)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(TR.accent)
+                .frame(width: 42, height: 42)
+                .background(TR.accent.opacity(0.10))
+                .clipShape(Circle())
+            VStack(alignment: .leading, spacing: 6) {
+                MetadataText(text: eyebrow, color: TR.accent)
+                Text(title)
+                    .font(TR.ui(16, weight: .semibold))
+                    .foregroundStyle(TR.cream)
+                    .lineLimit(1)
+                Text(detail)
+                    .font(TR.ui(11))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .lineSpacing(2)
+                    .lineLimit(3)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .glassCard(cornerRadius: 20)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct AIVideoGeneratingScreen: View {
+    @EnvironmentObject private var model: TripReelModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var transmitting = false
+
+    var body: some View {
+        ZStack {
+            WarmBackground(variant: .rendering)
+
+            VStack(spacing: 24) {
                 Spacer()
-                Text("Change score \(comparison.score)")
+
+                ZStack {
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .stroke(TR.accent.opacity(transmitting ? 0.65 : 0.18), lineWidth: 1.5)
+                        .frame(width: 190, height: 286)
+                        .scaleEffect(transmitting ? 1.04 : 0.96)
+
+                    ForEach(Array(model.aiVideoSelectedPhotos.enumerated()), id: \.element.id) { index, photo in
+                        PhotoAssetView(source: photo.source, contentMode: .fit, samplingScale: 1.5)
+                            .frame(width: 150, height: 246)
+                            .background(.black.opacity(0.28))
+                            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                            .rotationEffect(.degrees(reduceMotion ? 0 : (index == 0 ? -4 : 4)))
+                            .rotation3DEffect(
+                                .degrees(reduceMotion ? 0 : (transmitting ? 2.5 : -2.5)),
+                                axis: (x: 0, y: 1, z: 0)
+                            )
+                            .offset(
+                                x: model.aiVideoHasStoryPair ? (index == 0 ? -35 : 35) : 0,
+                                y: reduceMotion ? 0 : (transmitting ? -5 : 5)
+                            )
+                    }
+
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(TR.accent)
+                        .padding(13)
+                        .background(.black.opacity(0.78))
+                        .clipShape(Circle())
+                        .offset(x: 88, y: -128)
+                        .symbolEffect(.pulse.byLayer, options: .repeating, isActive: !reduceMotion)
+                }
+                .animation(
+                    reduceMotion ? nil : .easeInOut(duration: 1.6).repeatForever(autoreverses: true),
+                    value: transmitting
+                )
+
+                VStack(spacing: 9) {
+                    MetadataText(text: "SEEDANCE 2.0 · AI VIDEO", color: TR.accent)
+                    Text(model.aiVideoHasStoryPair ? "Bringing your story to life…" : "Bringing it to life…")
+                        .font(TR.display(38))
+                    Text(model.aiVideoStatus)
+                        .font(TR.ui(13))
+                        .foregroundStyle(.white.opacity(0.58))
+                        .multilineTextAlignment(.center)
+                }
+
+                VStack(spacing: 9) {
+                    ProgressView(value: model.aiVideoProgress)
+                        .tint(TR.accent)
+                    HStack {
+                        Text(model.aiVideoHasStoryPair ? "TWO REDUCED PREVIEWS" : "ONE REDUCED PREVIEW")
+                        Spacer()
+                        Text("\(Int((model.aiVideoProgress * 100).rounded()))%")
+                    }
                     .font(TR.mono(9))
                     .foregroundStyle(.white.opacity(0.42))
-            }
-
-            Text(diagnosis.verdict)
-                .font(TR.ui(14, weight: .semibold))
-                .foregroundStyle(TR.cream)
-                .lineSpacing(2)
-
-            if !changes.isEmpty {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    ForEach(Array(changes.enumerated()), id: \.offset) { _, change in
-                        HStack(spacing: 7) {
-                            Image(systemName: change.0)
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(TR.accent)
-                            Text(change.1)
-                                .font(TR.ui(10, weight: .semibold))
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
-                        }
-                        .foregroundStyle(.white.opacity(0.72))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(.white.opacity(0.055))
-                        .clipShape(Capsule())
-                    }
                 }
-            }
+                .padding(.horizontal, 34)
 
-            if let issue = diagnosis.issues.first {
-                HStack(alignment: .top, spacing: 9) {
-                    Image(systemName: issue.kind.symbol)
-                        .foregroundStyle(TR.accent)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(issue.title)
-                            .font(TR.ui(11, weight: .semibold))
-                            .foregroundStyle(TR.cream)
-                        Text(issue.detail)
-                            .font(TR.ui(10))
-                            .foregroundStyle(.white.opacity(0.50))
-                            .lineSpacing(2)
-                    }
-                }
-                .accessibilityElement(children: .combine)
+                Button("Cancel") { model.cancelAIVideoGeneration() }
+                    .buttonStyle(GlassButtonStyle())
+                    .padding(.horizontal, 24)
+                    .accessibilityHint("Stops waiting in Memories. A submitted provider job may still finish")
+                    .accessibilityIdentifier("cancel-ai-video-button")
+
+                Text("Generation can take a few minutes. Cancelling after submission may not stop provider processing or cost.")
+                    .font(TR.ui(10))
+                    .foregroundStyle(.white.opacity(0.38))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 34)
+
+                Spacer()
             }
         }
-        .padding(16)
-        .glassCard(cornerRadius: 20)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("ai-cut-difference-card")
+        .onAppear { transmitting = true }
+        .accessibilityIdentifier("ai-video-generating-screen")
     }
 }
 
-private extension AICutDiagnosisKind {
-    var symbol: String {
-        switch self {
-        case .weakHook: "sparkles.rectangle.stack"
-        case .flatPacing: "metronome"
-        case .repetition: "rectangle.on.rectangle"
-        case .missingContext: "point.3.connected.trianglepath.dotted"
-        case .weakEnding: "flag.checkered"
-        case .limitedVariety: "square.grid.2x2"
-        }
-    }
-}
-
-private struct AICutRecommendationsCard: View {
-    let recommendations: [AICutRecommendation]
+struct AIVideoReadyScreen: View {
+    @EnvironmentObject private var model: TripReelModel
+    @State private var player: AVPlayer?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            MetadataText(text: "AI director’s picks", color: TR.accent)
-                .padding(.bottom, 5)
+        ZStack {
+            WarmBackground(variant: .export)
 
-            ForEach(recommendations) { recommendation in
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: recommendation.kind.symbol)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(TR.accent)
-                        .frame(width: 28, height: 28)
-                        .background(TR.accent.opacity(0.10))
-                        .clipShape(Circle())
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(recommendation.title)
-                            .font(TR.ui(13, weight: .semibold))
-                            .foregroundStyle(TR.cream)
-                        Text(recommendation.detail)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 18) {
+                    VStack(spacing: 6) {
+                        MetadataText(text: "AI-GENERATED MOTION · READY", color: TR.keep)
+                        Text("A memory in motion.")
+                            .font(TR.display(37))
+                        Text("Review carefully—AI can invent small visual details.")
                             .font(TR.ui(11))
                             .foregroundStyle(.white.opacity(0.52))
-                            .lineSpacing(2)
                     }
-                    Spacer(minLength: 0)
-                }
-                .padding(.vertical, 10)
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("ai-recommendation-\(recommendation.kind.rawValue)")
+                    .padding(.horizontal, 28)
 
-                if recommendation.id != recommendations.last?.id {
-                    Divider().overlay(.white.opacity(0.08)).padding(.leading, 40)
+                    if let player {
+                        VideoPlayer(player: player)
+                            .frame(height: 470)
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                    .stroke(.white.opacity(0.14), lineWidth: 1)
+                            )
+                            .shadow(color: .black.opacity(0.45), radius: 24, y: 16)
+                    } else if let photo = model.aiVideoSelectedPhoto {
+                        PhotoAssetView(source: photo.source, contentMode: .fit)
+                            .frame(height: 470)
+                            .background(.black.opacity(0.38))
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    }
+
+                    VStack(spacing: 10) {
+                        Button(model.isSavingAIVideo ? "Saving…" : "Save to Photos") {
+                            Task { await model.saveAIVideoToPhotos() }
+                        }
+                        .buttonStyle(CreamButtonStyle())
+                        .disabled(model.isSavingAIVideo || model.aiVideoURL == nil)
+                        .accessibilityIdentifier("save-ai-video-button")
+
+                        if let url = model.aiVideoURL {
+                            ShareLink(item: url) {
+                                Text("Share video")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(GlassButtonStyle())
+                            .accessibilityIdentifier("share-ai-video-button")
+                        }
+
+                        Button("Back to both cuts") { model.navigateBack() }
+                            .font(TR.ui(13, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.62))
+                            .padding(.vertical, 8)
+                            .buttonStyle(.plain)
+                    }
+
+                    if let message = model.aiVideoSaveMessage {
+                        Label(message, systemImage: "checkmark.circle.fill")
+                            .font(TR.ui(12, weight: .semibold))
+                            .foregroundStyle(TR.keep)
+                    }
                 }
+                .padding(.horizontal, 24)
+                .padding(.top, 12)
+                .padding(.bottom, 36)
             }
         }
-        .padding(16)
-        .glassCard(cornerRadius: 20)
-        .accessibilityIdentifier("ai-recommendations-card")
-    }
-}
-
-private extension AICutRecommendation.Kind {
-    var symbol: String {
-        switch self {
-        case .story: "point.3.connected.trianglepath.dotted"
-        case .titles: "textformat"
-        case .music: "music.note"
-        case .treatment: "wand.and.stars"
+        .task(id: model.aiVideoURL) {
+            guard let url = model.aiVideoURL else { return }
+            let player = AVPlayer(url: url)
+            self.player = player
+            player.play()
         }
+        .onDisappear { player?.pause() }
+        .alert(
+            "AI video",
+            isPresented: Binding(
+                get: { model.aiVideoFailureMessage != nil },
+                set: { if !$0 { model.dismissAIVideoMessage() } }
+            )
+        ) {
+            Button("OK", role: .cancel) { model.dismissAIVideoMessage() }
+        } message: {
+            Text(model.aiVideoFailureMessage ?? "")
+        }
+        .accessibilityIdentifier("ai-video-ready-screen")
     }
 }
 

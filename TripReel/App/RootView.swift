@@ -29,6 +29,12 @@ struct RootView: View {
                 AICutProcessingScreen()
             case .aiComparison:
                 AICutComparisonScreen()
+            case .aiVideoIntro:
+                AIVideoIntroScreen()
+            case .aiVideoGenerating:
+                AIVideoGeneratingScreen()
+            case .aiVideoReady:
+                AIVideoReadyScreen()
             case .cut:
                 CutScreen()
             case .pace:

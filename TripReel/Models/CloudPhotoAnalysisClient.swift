@@ -605,10 +605,15 @@ extension CloudPhotoAnalysisServing {
 protocol CloudPhotoAnalysisAuthorizing: Sendable {
     var isReady: Bool { get }
     func authorizationHeaders(for body: Data) async throws -> [String: String]
+    func authorizationHeaders(for body: Data, path: String) async throws -> [String: String]
     func recoverAuthorization(afterStatusCode statusCode: Int, responseBody: Data) async -> Bool
 }
 
 extension CloudPhotoAnalysisAuthorizing {
+    func authorizationHeaders(for body: Data, path: String) async throws -> [String: String] {
+        try await authorizationHeaders(for: body)
+    }
+
     func recoverAuthorization(afterStatusCode statusCode: Int, responseBody: Data) async -> Bool {
         false
     }
@@ -1046,4 +1051,426 @@ private struct CloudResponse: Decodable {
     let model: String
     let plan: AICutEditPlan
     let retention: CloudPhotoAnalysisRetention
+}
+
+struct AIVideoGenerationInput: Sendable {
+    let jpegFrames: [Data]
+    let prompt: String
+}
+
+struct AIVideoGenerationProgress: Equatable, Sendable {
+    let fraction: Double
+    let status: String
+
+    init(fraction: Double, status: String) {
+        self.fraction = min(1, max(0, fraction))
+        self.status = status
+    }
+}
+
+protocol AIVideoGenerationServing: Sendable {
+    var isConfigured: Bool { get }
+    func generate(
+        _ input: AIVideoGenerationInput,
+        progress: @escaping @Sendable (AIVideoGenerationProgress) -> Void
+    ) async throws -> URL
+}
+
+enum AIVideoGenerationError: LocalizedError, Equatable, Sendable {
+    case notConfigured
+    case invalidInput
+    case providerBusy
+    case providerRejected
+    case generationFailed
+    case timedOut
+    case invalidResponse
+    case downloadFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .notConfigured:
+            "AI video is not configured yet. Your existing cut is unchanged."
+        case .invalidInput:
+            "These moments could not be prepared safely for AI video."
+        case .providerBusy:
+            "Seedance is busy right now. Please wait a moment and try again."
+        case .providerRejected:
+            "Seedance could not animate these moments. Try another pair."
+        case .generationFailed:
+            "The AI video could not be finished. Try another pair or direction."
+        case .timedOut:
+            "The AI video is taking longer than expected. Try again later."
+        case .invalidResponse:
+            "Memories received an invalid AI video response."
+        case .downloadFailed:
+            "The generated video could not be downloaded securely."
+        }
+    }
+}
+
+/// Generates a short first-to-last-frame story through the Memories Worker.
+/// The OpenRouter credential never enters the app; App Attest signs every
+/// request and the Worker returns an opaque, device-bound job token.
+final class OpenRouterAIVideoClient: AIVideoGenerationServing, @unchecked Sendable {
+    static let maximumImageBytes = PhotoAnalysisThumbnailService.maximumVideoJPEGBytes
+    static let maximumPromptCharacters = 600
+
+    let isConfigured: Bool
+
+    private let endpoints: Endpoints?
+    private let session: URLSession
+    private let authorizer: any CloudPhotoAnalysisAuthorizing
+
+    convenience init(bundle: Bundle = .main) {
+        var rawValue = bundle.object(
+            forInfoDictionaryKey: CloudPhotoAnalysisClient.endpointInfoPlistKey
+        ) as? String
+#if DEBUG
+        rawValue = ProcessInfo.processInfo.environment[
+            CloudPhotoAnalysisClient.endpointInfoPlistKey
+        ] ?? rawValue
+#endif
+        let analysisEndpoint = Self.validAnalysisEndpoint(from: rawValue)
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        configuration.urlCache = nil
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.timeoutIntervalForRequest = 50
+        configuration.timeoutIntervalForResource = 70
+        let session = URLSession(configuration: configuration)
+
+        let authorizer: any CloudPhotoAnalysisAuthorizing
+#if DEBUG
+        let developmentAuthorizer = DevelopmentCloudPhotoAnalysisAuthorizer()
+        if developmentAuthorizer.isReady {
+            authorizer = developmentAuthorizer
+        } else if let analysisEndpoint,
+                  let appAttest = AppAttestCloudPhotoAnalysisAuthorizer(
+                      analysisEndpoint: analysisEndpoint,
+                      session: session
+                  ) {
+            authorizer = appAttest
+        } else {
+            authorizer = UnavailableCloudPhotoAnalysisAuthorizer()
+        }
+#else
+        if let analysisEndpoint,
+           let appAttest = AppAttestCloudPhotoAnalysisAuthorizer(
+               analysisEndpoint: analysisEndpoint,
+               session: session
+           ) {
+            authorizer = appAttest
+        } else {
+            authorizer = UnavailableCloudPhotoAnalysisAuthorizer()
+        }
+#endif
+        self.init(
+            analysisEndpoint: analysisEndpoint,
+            session: session,
+            authorizer: authorizer
+        )
+    }
+
+    init(
+        analysisEndpoint: URL?,
+        session: URLSession,
+        authorizer: any CloudPhotoAnalysisAuthorizing
+    ) {
+        endpoints = analysisEndpoint.flatMap(Endpoints.init)
+        self.session = session
+        self.authorizer = authorizer
+        isConfigured = endpoints != nil && authorizer.isReady
+    }
+
+    func generate(
+        _ input: AIVideoGenerationInput,
+        progress: @escaping @Sendable (AIVideoGenerationProgress) -> Void
+    ) async throws -> URL {
+        guard let endpoints, authorizer.isReady else {
+            throw AIVideoGenerationError.notConfigured
+        }
+        let generateBody = try Self.encodedGenerateBody(for: input)
+
+        let frameCount = input.jpegFrames.count
+        progress(.init(
+            fraction: 0.05,
+            status: frameCount == 2
+                ? "Preparing two reduced previews…"
+                : "Preparing one reduced preview…"
+        ))
+        let generatedData = try await sendJSON(
+            body: generateBody,
+            endpoint: endpoints.generate,
+            path: "/v1/video/generate"
+        )
+        guard Self.hasExactKeys(generatedData, ["jobToken", "model", "status", "retention"]),
+              let response = try? JSONDecoder().decode(GenerateResponse.self, from: generatedData),
+              response.model == "bytedance/seedance-2.0",
+              response.status == .pending || response.status == .inProgress,
+              response.jobToken.range(
+                of: #"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$"#,
+                options: .regularExpression
+              ) != nil,
+              response.retention.memoriesStored == false,
+              response.retention.providerTemporary == true else {
+            throw AIVideoGenerationError.invalidResponse
+        }
+
+        progress(.init(fraction: 0.16, status: "Seedance is directing the motion…"))
+        let started = ContinuousClock.now
+        var pollCount = 0
+        while started.duration(to: .now) < .seconds(8 * 60) {
+            try Task.checkCancellation()
+            try await Task.sleep(for: .seconds(pollCount == 0 ? 12 : 24))
+            pollCount += 1
+            let statusBody = try JSONEncoder().encode(JobRequest(
+                version: 1,
+                jobToken: response.jobToken
+            ))
+            let statusData = try await sendJSON(
+                body: statusBody,
+                endpoint: endpoints.status,
+                path: "/v1/video/status"
+            )
+            guard Self.hasExactKeys(statusData, ["status", "progress"]),
+                  let status = try? JSONDecoder().decode(StatusResponse.self, from: statusData),
+                  status.progress.isFinite,
+                  (0...1).contains(status.progress) else {
+                throw AIVideoGenerationError.invalidResponse
+            }
+            switch status.status {
+            case .pending:
+                progress(.init(
+                    fraction: max(0.18, min(0.42, status.progress)),
+                    status: "Waiting for the director…"
+                ))
+            case .inProgress:
+                progress(.init(
+                    fraction: max(0.42, min(0.91, status.progress)),
+                    status: "Animating movement and atmosphere…"
+                ))
+            case .completed:
+                progress(.init(fraction: 0.94, status: "Bringing your video back…"))
+                return try await download(
+                    jobToken: response.jobToken,
+                    endpoints: endpoints
+                )
+            case .failed, .cancelled, .expired:
+                throw AIVideoGenerationError.generationFailed
+            }
+        }
+        throw AIVideoGenerationError.timedOut
+    }
+
+    static func encodedGenerateBody(for input: AIVideoGenerationInput) throws -> Data {
+        guard (1...2).contains(input.jpegFrames.count),
+              input.jpegFrames.allSatisfy({ !$0.isEmpty && $0.count <= maximumImageBytes }),
+              Set(input.jpegFrames).count == input.jpegFrames.count,
+              !input.prompt.isEmpty,
+              input.prompt.count <= maximumPromptCharacters,
+              !input.prompt.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+            throw AIVideoGenerationError.invalidInput
+        }
+        return try JSONEncoder().encode(GenerateRequest(
+            version: 2,
+            imagesBase64: input.jpegFrames.map { $0.base64EncodedString() },
+            prompt: input.prompt
+        ))
+    }
+
+    private func sendJSON(
+        body: Data,
+        endpoint: URL,
+        path: String
+    ) async throws -> Data {
+        for attempt in 0..<2 {
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("Memories-iOS/1", forHTTPHeaderField: "X-TripReel-Client")
+            let headers = try await authorizer.authorizationHeaders(for: body, path: path)
+            guard !headers.isEmpty else { throw AIVideoGenerationError.notConfigured }
+            for (name, value) in headers {
+                guard Self.allowedAuthorizationHeaderNames.contains(name.lowercased()),
+                      !value.contains("\n"), !value.contains("\r") else {
+                    throw AIVideoGenerationError.notConfigured
+                }
+                request.setValue(value, forHTTPHeaderField: name)
+            }
+            request.httpBody = body
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw AIVideoGenerationError.invalidResponse
+            }
+            if (200..<300).contains(http.statusCode) { return data }
+            if attempt == 0,
+               await authorizer.recoverAuthorization(
+                afterStatusCode: http.statusCode,
+                responseBody: data
+               ) {
+                continue
+            }
+            throw Self.error(statusCode: http.statusCode, body: data)
+        }
+        throw AIVideoGenerationError.invalidResponse
+    }
+
+    private func download(jobToken: String, endpoints: Endpoints) async throws -> URL {
+        let body = try JSONEncoder().encode(JobRequest(version: 1, jobToken: jobToken))
+        for attempt in 0..<2 {
+            var request = URLRequest(url: endpoints.content)
+            request.httpMethod = "POST"
+            request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("video/mp4", forHTTPHeaderField: "Accept")
+            let headers = try await authorizer.authorizationHeaders(
+                for: body,
+                path: "/v1/video/content"
+            )
+            guard !headers.isEmpty else { throw AIVideoGenerationError.notConfigured }
+            for (name, value) in headers where Self.allowedAuthorizationHeaderNames.contains(name.lowercased()) {
+                guard !value.contains("\n"), !value.contains("\r") else {
+                    throw AIVideoGenerationError.notConfigured
+                }
+                request.setValue(value, forHTTPHeaderField: name)
+            }
+            request.httpBody = body
+
+            let (temporaryURL, response) = try await session.download(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw AIVideoGenerationError.downloadFailed
+            }
+            if !(200..<300).contains(http.statusCode) {
+                let errorData = (try? Data(contentsOf: temporaryURL, options: .mappedIfSafe)) ?? Data()
+                if attempt == 0,
+                   await authorizer.recoverAuthorization(
+                    afterStatusCode: http.statusCode,
+                    responseBody: errorData
+                   ) {
+                    continue
+                }
+                throw Self.error(statusCode: http.statusCode, body: errorData)
+            }
+            guard http.value(forHTTPHeaderField: "Content-Type")?
+                .lowercased().hasPrefix("video/") == true else {
+                throw AIVideoGenerationError.invalidResponse
+            }
+            let attributes = try FileManager.default.attributesOfItem(atPath: temporaryURL.path)
+            let byteCount = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+            guard (1...100_000_000).contains(byteCount) else {
+                throw AIVideoGenerationError.downloadFailed
+            }
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("Memories-AI-Videos", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let destination = directory.appendingPathComponent("Memory-\(UUID().uuidString).mp4")
+            try FileManager.default.copyItem(at: temporaryURL, to: destination)
+            return destination
+        }
+        throw AIVideoGenerationError.downloadFailed
+    }
+
+    private static func validAnalysisEndpoint(from rawValue: String?) -> URL? {
+        guard let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              !value.contains("$("),
+              let url = URL(string: value),
+              url.scheme?.lowercased() == "https",
+              url.host?.isEmpty == false,
+              url.user == nil,
+              url.password == nil,
+              url.query == nil,
+              url.fragment == nil,
+              url.path == "/v1/analyze" else { return nil }
+        return url
+    }
+
+    private static func hasExactKeys(_ data: Data, _ keys: Set<String>) -> Bool {
+        guard let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        return Set(value.keys) == keys
+    }
+
+    private static func error(statusCode: Int, body: Data) -> AIVideoGenerationError {
+        let code = HTTPTripReelAppAttestBackendClient.errorCode(from: body)
+        switch code {
+        case "rate_limited", "upstream_rate_limited", "provider_busy":
+            return .providerBusy
+        case "content_policy", "provider_rejected", "invalid_image":
+            return .providerRejected
+        case "generation_failed", "generation_cancelled", "generation_expired":
+            return .generationFailed
+        default:
+            if statusCode == 429 { return .providerBusy }
+            return statusCode >= 500 ? .generationFailed : .invalidResponse
+        }
+    }
+
+    private static let allowedAuthorizationHeaderNames: Set<String> = [
+        "authorization",
+        "x-tripreel-app-attest",
+        "x-tripreel-challenge"
+    ]
+
+    private struct Endpoints {
+        let generate: URL
+        let status: URL
+        let content: URL
+
+        init?(analysisEndpoint: URL) {
+            guard analysisEndpoint.path == "/v1/analyze" else { return nil }
+            var components = URLComponents(url: analysisEndpoint, resolvingAgainstBaseURL: false)
+            components?.path = "/v1/video/generate"
+            guard let generate = components?.url else { return nil }
+            components?.path = "/v1/video/status"
+            guard let status = components?.url else { return nil }
+            components?.path = "/v1/video/content"
+            guard let content = components?.url else { return nil }
+            self.generate = generate
+            self.status = status
+            self.content = content
+        }
+    }
+
+    private struct GenerateRequest: Encodable {
+        let version: Int
+        let imagesBase64: [String]
+        let prompt: String
+    }
+
+    private struct JobRequest: Encodable {
+        let version: Int
+        let jobToken: String
+    }
+
+    private struct GenerateResponse: Decodable {
+        let jobToken: String
+        let model: String
+        let status: JobStatus
+        let retention: Retention
+    }
+
+    private struct StatusResponse: Decodable {
+        let status: JobStatus
+        let progress: Double
+    }
+
+    private struct Retention: Decodable {
+        let memoriesStored: Bool
+        let providerTemporary: Bool
+    }
+
+    private enum JobStatus: String, Codable {
+        case pending
+        case inProgress = "in_progress"
+        case completed
+        case failed
+        case cancelled
+        case expired
+    }
 }

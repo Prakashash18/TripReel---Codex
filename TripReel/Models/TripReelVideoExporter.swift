@@ -3,6 +3,7 @@ import CoreGraphics
 import CoreVideo
 import ImageIO
 import Photos
+import QuartzCore
 import UIKit
 import UniformTypeIdentifiers
 
@@ -43,7 +44,12 @@ protocol TripReelVideoExporting: Sendable {
         _ request: TripReelVideoExportRequest,
         progress: @escaping @Sendable (TripReelVideoExportProgress) -> Void
     ) async throws -> URL
+    func finishGeneratedClip(_ url: URL, title: String) async throws -> URL
     func saveToPhotoLibrary(_ url: URL) async throws
+}
+
+extension TripReelVideoExporting {
+    func finishGeneratedClip(_ url: URL, title: String) async throws -> URL { url }
 }
 
 enum TripReelVideoExportError: LocalizedError, Sendable {
@@ -53,6 +59,7 @@ enum TripReelVideoExportError: LocalizedError, Sendable {
     case cannotCreateFrame
     case encodingFailed(String)
     case soundtrackFailed
+    case generatedClipFinishingFailed
     case photosPermissionDenied
     case saveFailed(String)
 
@@ -70,6 +77,8 @@ enum TripReelVideoExportError: LocalizedError, Sendable {
             "The video encoder stopped: \(message)"
         case .soundtrackFailed:
             "The film was rendered, but the selected soundtrack couldn't be added. Pick another track or No music and try again."
+        case .generatedClipFinishingFailed:
+            "The AI motion was created, but Memories couldn't add the title. Please try again."
         case .photosPermissionDenied:
             "Allow Memories to add videos in Settings to save this film to Photos."
         case let .saveFailed(message):
@@ -185,6 +194,155 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 }
             }
         }
+    }
+
+    func finishGeneratedClip(_ url: URL, title: String) async throws -> URL {
+        try Task.checkCancellation()
+        let asset = AVURLAsset(url: url)
+        let duration = try await asset.load(.duration)
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        guard let sourceVideo = videoTracks.first, duration > .zero else {
+            throw TripReelVideoExportError.generatedClipFinishingFailed
+        }
+        let naturalSize = try await sourceVideo.load(.naturalSize)
+        let preferredTransform = try await sourceVideo.load(.preferredTransform)
+        let transformedBounds = CGRect(origin: .zero, size: naturalSize)
+            .applying(preferredTransform)
+        let renderSize = CGSize(
+            width: max(1, abs(transformedBounds.width)),
+            height: max(1, abs(transformedBounds.height))
+        )
+
+        let composition = AVMutableComposition()
+        guard let compositionVideo = composition.addMutableTrack(
+            withMediaType: .video,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            throw TripReelVideoExportError.generatedClipFinishingFailed
+        }
+        try compositionVideo.insertTimeRange(
+            CMTimeRange(start: .zero, duration: duration),
+            of: sourceVideo,
+            at: .zero
+        )
+        if let sourceAudio = try await asset.loadTracks(withMediaType: .audio).first,
+           let compositionAudio = composition.addMutableTrack(
+            withMediaType: .audio,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+           ) {
+            try compositionAudio.insertTimeRange(
+                CMTimeRange(start: .zero, duration: duration),
+                of: sourceAudio,
+                at: .zero
+            )
+        }
+
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = CMTimeRange(start: .zero, duration: duration)
+        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionVideo)
+        let normalizedTransform = preferredTransform.concatenating(
+            CGAffineTransform(
+                translationX: -transformedBounds.minX,
+                y: -transformedBounds.minY
+            )
+        )
+        layerInstruction.setTransform(normalizedTransform, at: .zero)
+        instruction.layerInstructions = [layerInstruction]
+
+        let videoComposition = AVMutableVideoComposition()
+        videoComposition.renderSize = renderSize
+        videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
+        videoComposition.instructions = [instruction]
+
+        let parentLayer = CALayer()
+        parentLayer.frame = CGRect(origin: .zero, size: renderSize)
+        parentLayer.isGeometryFlipped = false
+        let videoLayer = CALayer()
+        videoLayer.frame = parentLayer.bounds
+        parentLayer.addSublayer(videoLayer)
+
+        let titleValue = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !titleValue.isEmpty {
+            let shade = CAGradientLayer()
+            shade.frame = parentLayer.bounds
+            shade.colors = [
+                UIColor.clear.cgColor,
+                UIColor.black.withAlphaComponent(0.10).cgColor,
+                UIColor.black.withAlphaComponent(0.72).cgColor
+            ]
+            shade.locations = [0.48, 0.68, 1]
+            parentLayer.addSublayer(shade)
+
+            let titleLayer = CATextLayer()
+            titleLayer.contentsScale = 2
+            titleLayer.alignmentMode = .left
+            titleLayer.isWrapped = true
+            let inset = max(42, renderSize.width * 0.075)
+            titleLayer.frame = CGRect(
+                x: inset,
+                y: max(58, renderSize.height * 0.075),
+                width: renderSize.width - (inset * 2),
+                height: min(230, renderSize.height * 0.18)
+            )
+            let fontSize = min(72, max(38, renderSize.width * 0.072))
+            let font = UIFont(name: "InstrumentSerif-Regular", size: fontSize)
+                ?? UIFont.systemFont(ofSize: fontSize, weight: .semibold)
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineBreakMode = .byWordWrapping
+            paragraph.lineSpacing = -2
+            titleLayer.string = NSAttributedString(
+                string: titleValue,
+                attributes: [
+                    .font: font,
+                    .foregroundColor: UIColor(red: 0.99, green: 0.98, blue: 0.95, alpha: 1),
+                    .paragraphStyle: paragraph,
+                    .kern: -0.6
+                ]
+            )
+            titleLayer.shadowColor = UIColor.black.cgColor
+            titleLayer.shadowOpacity = 0.62
+            titleLayer.shadowRadius = 10
+            titleLayer.shadowOffset = CGSize(width: 0, height: 3)
+
+            let reveal = CAKeyframeAnimation(keyPath: "opacity")
+            reveal.values = [0, 1, 1, 0]
+            reveal.keyTimes = [0, 0.10, 0.78, 1]
+            reveal.beginTime = AVCoreAnimationBeginTimeAtZero
+            reveal.duration = max(0.1, duration.seconds)
+            reveal.isRemovedOnCompletion = false
+            reveal.fillMode = .both
+            titleLayer.add(reveal, forKey: "memories-title-reveal")
+            parentLayer.addSublayer(titleLayer)
+        }
+
+        videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(
+            postProcessingAsVideoLayer: videoLayer,
+            in: parentLayer
+        )
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Memories-AI-Videos", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let outputURL = directory.appendingPathComponent("Memory-Titled-\(UUID().uuidString).mp4")
+        guard let session = AVAssetExportSession(
+            asset: composition,
+            presetName: AVAssetExportPresetHighestQuality
+        ) else {
+            throw TripReelVideoExportError.generatedClipFinishingFailed
+        }
+        session.outputURL = outputURL
+        session.outputFileType = .mp4
+        session.shouldOptimizeForNetworkUse = true
+        session.videoComposition = videoComposition
+        await withCheckedContinuation { continuation in
+            session.exportAsynchronously { continuation.resume() }
+        }
+        guard session.status == .completed else {
+            try? FileManager.default.removeItem(at: outputURL)
+            if session.status == .cancelled || Task.isCancelled { throw CancellationError() }
+            throw TripReelVideoExportError.generatedClipFinishingFailed
+        }
+        return outputURL
     }
 
     private func renderSilentVideo(

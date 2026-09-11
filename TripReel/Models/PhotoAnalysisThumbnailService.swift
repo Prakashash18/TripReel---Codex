@@ -11,6 +11,13 @@ struct PreparedPhotoThumbnail: @unchecked Sendable {
 
 protocol PhotoAnalysisThumbnailServing: Sendable {
     func prepare(asset: TripAsset) async throws -> PreparedPhotoThumbnail
+    func prepareVideoFrame(asset: TripAsset) async throws -> PreparedPhotoThumbnail
+}
+
+extension PhotoAnalysisThumbnailServing {
+    func prepareVideoFrame(asset: TripAsset) async throws -> PreparedPhotoThumbnail {
+        try await prepare(asset: asset)
+    }
 }
 
 enum PhotoAnalysisThumbnailError: LocalizedError {
@@ -37,6 +44,8 @@ enum PhotoAnalysisThumbnailError: LocalizedError {
 final class PhotoAnalysisThumbnailService: PhotoAnalysisThumbnailServing, @unchecked Sendable {
     static let maximumPixelSize = 512
     static let maximumJPEGBytes = CloudPhotoAnalysisClient.maximumThumbnailBytes
+    static let maximumVideoPixelSize = 1_024
+    static let maximumVideoJPEGBytes = 384 * 1_024
 
     private let imageManager: PHImageManager
 
@@ -45,32 +54,58 @@ final class PhotoAnalysisThumbnailService: PhotoAnalysisThumbnailServing, @unche
     }
 
     func prepare(asset: TripAsset) async throws -> PreparedPhotoThumbnail {
+        try await prepare(
+            asset: asset,
+            maximumPixelSize: Self.maximumPixelSize,
+            maximumJPEGBytes: Self.maximumJPEGBytes
+        )
+    }
+
+    func prepareVideoFrame(asset: TripAsset) async throws -> PreparedPhotoThumbnail {
+        try await prepare(
+            asset: asset,
+            maximumPixelSize: Self.maximumVideoPixelSize,
+            maximumJPEGBytes: Self.maximumVideoJPEGBytes
+        )
+    }
+
+    private func prepare(
+        asset: TripAsset,
+        maximumPixelSize: Int,
+        maximumJPEGBytes: Int
+    ) async throws -> PreparedPhotoThumbnail {
         try Task.checkCancellation()
 
         let cgImage: CGImage
         switch asset.source {
         case let .library(localIdentifier):
-            let image = try await requestLibraryImage(localIdentifier: localIdentifier)
-            cgImage = try Self.normalizedCGImage(from: image)
+            let image = try await requestLibraryImage(
+                localIdentifier: localIdentifier,
+                maximumPixelSize: maximumPixelSize
+            )
+            cgImage = try Self.normalizedCGImage(from: image, maximumPixelSize: maximumPixelSize)
         case let .imported(path):
-            cgImage = try await Self.fileThumbnail(path: path)
+            cgImage = try await Self.fileThumbnail(path: path, maximumPixelSize: maximumPixelSize)
         case let .bundled(name):
             guard let image = UIImage(named: name) else {
                 throw PhotoAnalysisThumbnailError.unavailable
             }
-            cgImage = try Self.normalizedCGImage(from: image)
+            cgImage = try Self.normalizedCGImage(from: image, maximumPixelSize: maximumPixelSize)
         }
 
         try Task.checkCancellation()
-        let jpegData = try [0.72, 0.56, 0.42]
+        let jpegData = try [0.78, 0.66, 0.54, 0.42]
             .lazy
             .map { try Self.encodeMetadataStrippedJPEG(cgImage, quality: $0) }
-            .first(where: { $0.count <= Self.maximumJPEGBytes })
+            .first(where: { $0.count <= maximumJPEGBytes })
         guard let jpegData else { throw PhotoAnalysisThumbnailError.tooLarge }
         return PreparedPhotoThumbnail(id: asset.id, cgImage: cgImage, jpegData: jpegData)
     }
 
-    private func requestLibraryImage(localIdentifier: String) async throws -> UIImage {
+    private func requestLibraryImage(
+        localIdentifier: String,
+        maximumPixelSize: Int
+    ) async throws -> UIImage {
         let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
         guard let asset = fetchResult.firstObject else {
             throw PhotoAnalysisThumbnailError.inaccessible
@@ -85,7 +120,10 @@ final class PhotoAnalysisThumbnailService: PhotoAnalysisThumbnailServing, @unche
                 try await Task.sleep(nanoseconds: delay)
             }
             do {
-                return try await requestLibraryThumbnail(asset: asset)
+                return try await requestLibraryThumbnail(
+                    asset: asset,
+                    maximumPixelSize: maximumPixelSize
+                )
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
@@ -95,7 +133,10 @@ final class PhotoAnalysisThumbnailService: PhotoAnalysisThumbnailServing, @unche
 
         try await Task.sleep(nanoseconds: 800_000_000)
         do {
-            return try await requestLibraryImageData(asset: asset)
+            return try await requestLibraryImageData(
+                asset: asset,
+                maximumPixelSize: maximumPixelSize
+            )
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -103,7 +144,10 @@ final class PhotoAnalysisThumbnailService: PhotoAnalysisThumbnailServing, @unche
         }
     }
 
-    private func requestLibraryThumbnail(asset: PHAsset) async throws -> UIImage {
+    private func requestLibraryThumbnail(
+        asset: PHAsset,
+        maximumPixelSize: Int
+    ) async throws -> UIImage {
         let requestState = PhotoKitImageRequestState(manager: imageManager)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -117,7 +161,7 @@ final class PhotoAnalysisThumbnailService: PhotoAnalysisThumbnailServing, @unche
 
                 let requestID = imageManager.requestImage(
                     for: asset,
-                    targetSize: CGSize(width: Self.maximumPixelSize, height: Self.maximumPixelSize),
+                    targetSize: CGSize(width: maximumPixelSize, height: maximumPixelSize),
                     contentMode: .aspectFit,
                     options: options
                 ) { image, info in
@@ -145,7 +189,10 @@ final class PhotoAnalysisThumbnailService: PhotoAnalysisThumbnailServing, @unche
         }
     }
 
-    private func requestLibraryImageData(asset: PHAsset) async throws -> UIImage {
+    private func requestLibraryImageData(
+        asset: PHAsset,
+        maximumPixelSize: Int
+    ) async throws -> UIImage {
         let requestState = PhotoKitImageRequestState(manager: imageManager)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -179,7 +226,7 @@ final class PhotoAnalysisThumbnailService: PhotoAnalysisThumbnailServing, @unche
                             [
                                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                                 kCGImageSourceCreateThumbnailWithTransform: true,
-                                kCGImageSourceThumbnailMaxPixelSize: Self.maximumPixelSize,
+                                kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize,
                                 kCGImageSourceShouldCacheImmediately: true
                             ] as CFDictionary
                           ) else {
@@ -195,7 +242,10 @@ final class PhotoAnalysisThumbnailService: PhotoAnalysisThumbnailServing, @unche
         }
     }
 
-    private static func fileThumbnail(path: String) async throws -> CGImage {
+    private static func fileThumbnail(
+        path: String,
+        maximumPixelSize: Int
+    ) async throws -> CGImage {
         try await Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             let url = URL(fileURLWithPath: path)
@@ -215,7 +265,10 @@ final class PhotoAnalysisThumbnailService: PhotoAnalysisThumbnailServing, @unche
         }.value
     }
 
-    private static func normalizedCGImage(from image: UIImage) throws -> CGImage {
+    private static func normalizedCGImage(
+        from image: UIImage,
+        maximumPixelSize: Int
+    ) throws -> CGImage {
         let pixelSize = CGSize(
             width: max(1, image.size.width * image.scale),
             height: max(1, image.size.height * image.scale)

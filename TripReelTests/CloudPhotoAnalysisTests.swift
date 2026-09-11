@@ -30,6 +30,39 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         }
     }
 
+    func testAIVideoRequestEncodesTwoDistinctMetadataFreeStoryFrames() throws {
+        let beginning = Data([0xFF, 0xD8, 0x01, 0xFF, 0xD9])
+        let ending = Data([0xFF, 0xD8, 0x02, 0xFF, 0xD9])
+
+        let body = try OpenRouterAIVideoClient.encodedGenerateBody(
+            for: AIVideoGenerationInput(
+                jpegFrames: [beginning, ending],
+                prompt: "Move naturally from the opening moment to the final shared smile."
+            )
+        )
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+
+        XCTAssertEqual(Set(json.keys), ["version", "imagesBase64", "prompt"])
+        XCTAssertEqual(json["version"] as? Int, 2)
+        XCTAssertEqual(
+            json["imagesBase64"] as? [String],
+            [beginning.base64EncodedString(), ending.base64EncodedString()]
+        )
+        XCTAssertNil(json["filename"])
+        XCTAssertNil(json["location"])
+
+        XCTAssertThrowsError(
+            try OpenRouterAIVideoClient.encodedGenerateBody(
+                for: AIVideoGenerationInput(
+                    jpegFrames: [beginning, beginning],
+                    prompt: "The two story anchors must be different moments."
+                )
+            )
+        ) { error in
+            XCTAssertEqual(error as? AIVideoGenerationError, .invalidInput)
+        }
+    }
+
     func testClientSendsOnlyTheBoundedThumbnailPayloadAndValidatesRetention() async throws {
         let response = """
         {
@@ -633,6 +666,46 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         XCTAssertEqual(storedRecord, .init(keyID: keyID, state: .registered))
     }
 
+    func testAppAttestBindsAIVideoAuthorizationToItsExactPathAndBody() async throws {
+        let keyID = Data(repeating: 0xA7, count: 32).base64EncodedString()
+        let challengeData = Data(repeating: 0x27, count: 32)
+        let challenge = try makeChallenge(data: challengeData)
+        let service = TestAppAttestService(keyIDs: [])
+        let backend = TestAppAttestBackend(
+            attestationChallenge: challenge,
+            assertionChallenge: challenge
+        )
+        let store = TestAppAttestKeyStore(
+            record: .init(keyID: keyID, state: .registered)
+        )
+        let authorizer = AppAttestCloudPhotoAnalysisAuthorizer(
+            service: service,
+            backend: backend,
+            keyStore: store,
+            environment: .production,
+            sleep: { _ in },
+            now: { Date(timeIntervalSince1970: 1_000) }
+        )
+        let body = Data(#"{"version":1,"imageBase64":"/9j/","prompt":"gentle motion"}"#.utf8)
+
+        let headers = try await authorizer.authorizationHeaders(
+            for: body,
+            path: "/v1/video/generate"
+        )
+
+        XCTAssertEqual(headers["Authorization"], "AppAttest \(keyID)")
+        let snapshot = await service.snapshot()
+        XCTAssertEqual(snapshot.assertions.count, 1)
+        XCTAssertEqual(
+            snapshot.assertions[0].clientDataHash,
+            expectedAssertionHash(
+                challenge: challengeData,
+                body: body,
+                path: "/v1/video/generate"
+            )
+        )
+    }
+
     func testAppAttestRetriesServerUnavailableUsingTheSameKeyAndHash() async throws {
         let keyID = Data(repeating: 0xB5, count: 32).base64EncodedString()
         let attestationChallenge = try makeChallenge(data: Data(repeating: 0x31, count: 32))
@@ -930,8 +1003,12 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         return Data(SHA256.hash(data: clientData))
     }
 
-    private func expectedAssertionHash(challenge: Data, body: Data) -> Data {
-        var clientData = Data("TripReel-App-Attest/v1\nassertion\nPOST\n/v1/analyze\n".utf8)
+    private func expectedAssertionHash(
+        challenge: Data,
+        body: Data,
+        path: String = "/v1/analyze"
+    ) -> Data {
+        var clientData = Data("TripReel-App-Attest/v1\nassertion\nPOST\n\(path)\n".utf8)
         clientData.append(challenge)
         clientData.append(Data(SHA256.hash(data: body)))
         return Data(SHA256.hash(data: clientData))

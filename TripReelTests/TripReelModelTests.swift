@@ -656,7 +656,7 @@ final class TripReelModelTests: XCTestCase {
             assets: assets,
             coverID: assets[0].id
         )
-        let photos = assets.map(makeReelPhoto)
+        let photos = assets.map { makeReelPhoto(from: $0) }
         let insights = Dictionary(uniqueKeysWithValues: assets.enumerated().map { index, asset in
             let isPeopleChapter = index >= 4
             return (
@@ -1382,6 +1382,65 @@ final class TripReelModelTests: XCTestCase {
             MemoryCollection.resolvedSelection(.local, available: []),
             .overseas
         )
+    }
+
+    func testAIVideoMomentRecommendationUsesSceneryForTheBeginningAndPeopleForTheEnding() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let assets = [
+            makeAsset("quiet", start: start, minutes: 0),
+            makeAsset("place", start: start, minutes: 10),
+            makeAsset("detail", start: start, minutes: 20),
+            makeAsset("friends", start: start, minutes: 30)
+        ]
+        let photos = assets.map(makeReelPhoto)
+        let insights: [String: MontagePhotoInsight] = [
+            "quiet": MontagePhotoInsight(
+                memoryScore: 0.45,
+                aestheticScore: 0.46,
+                contentKind: .moment
+            ),
+            "place": MontagePhotoInsight(
+                memoryScore: 0.87,
+                aestheticScore: 0.92,
+                contentKind: .scenery
+            ),
+            "detail": MontagePhotoInsight(
+                memoryScore: 0.62,
+                aestheticScore: 0.61,
+                contentKind: .food
+            ),
+            "friends": MontagePhotoInsight(
+                memoryScore: 0.91,
+                aestheticScore: 0.84,
+                contentKind: .people,
+                peopleCount: 5
+            )
+        ]
+
+        let recommendation = AIVideoMomentRecommender.recommend(
+            photos: photos,
+            insights: insights
+        )
+
+        XCTAssertEqual(recommendation.photoIDs, ["place", "friends"])
+        XCTAssertTrue(recommendation.isVisionBased)
+    }
+
+    func testAIVideoMomentRecommendationFallsBackToTheFirstAndLastFrames() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let photos = [
+            makeReelPhoto(from: makeAsset("first", start: start, minutes: 0)),
+            makeReelPhoto(from: makeAsset("middle", start: start, minutes: 5)),
+            makeReelPhoto(from: makeAsset("last", start: start, minutes: 10))
+        ]
+
+        let recommendation = AIVideoMomentRecommender.recommend(
+            photos: photos,
+            insights: [:]
+        )
+
+        XCTAssertEqual(recommendation.photoIDs, ["first", "last"])
+        XCTAssertFalse(recommendation.isVisionBased)
     }
 
     private func makeAsset(

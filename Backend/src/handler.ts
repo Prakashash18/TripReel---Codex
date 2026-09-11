@@ -7,6 +7,7 @@ import type {
   AppAttestChallengeResult,
   AppAttestDiagnostic,
   AppAttestOperationResult,
+  AppAttestProtectedPath,
   AppAttestPurpose,
   AuthorizeAnalysisInput,
   IssueChallengeInput,
@@ -23,6 +24,16 @@ import {
 import { analyzeWithOpenAI, ServiceProblem } from "./openai.ts";
 import { compareAICut } from "./comparison.ts";
 import { RequestProblem, validatePayload } from "./validation.ts";
+import {
+  OPENROUTER_VIDEO_MODEL,
+  VIDEO_MAX_BODY_BYTES,
+  downloadVideo,
+  pollVideo,
+  requireVideoConfiguration,
+  submitVideo,
+  validateVideoGenerateRequest,
+  validateVideoJobRequest,
+} from "./openrouter-video.ts";
 
 interface AppAttestShardStub {
   issueChallenge(input: IssueChallengeInput): Promise<AppAttestChallengeResult>;
@@ -44,6 +55,7 @@ export interface Env {
   ALLOWED_ORIGIN?: string;
   OPENAI_TIMEOUT_MS?: string;
   OPENAI_MODEL?: string;
+  OPENROUTER_API_KEY?: string;
   APP_ATTEST_APP_ID?: string;
   APP_ATTEST_ENVIRONMENT?: string;
   APP_ATTEST_ROUTING_SECRET?: string;
@@ -60,7 +72,20 @@ type Fetcher = typeof fetch;
 const ANALYZE_PATH = "/v1/analyze";
 const CHALLENGE_PATH = "/v1/app-attest/challenge";
 const REGISTER_PATH = "/v1/app-attest/register";
-const SUPPORTED_PATHS = new Set([ANALYZE_PATH, CHALLENGE_PATH, REGISTER_PATH]);
+const VIDEO_GENERATE_PATH = "/v1/video/generate";
+const VIDEO_STATUS_PATH = "/v1/video/status";
+const VIDEO_CONTENT_PATH = "/v1/video/content";
+const VIDEO_PATHS: ReadonlySet<AppAttestProtectedPath> = new Set([
+  VIDEO_GENERATE_PATH,
+  VIDEO_STATUS_PATH,
+  VIDEO_CONTENT_PATH,
+]);
+const SUPPORTED_PATHS = new Set([
+  ANALYZE_PATH,
+  CHALLENGE_PATH,
+  REGISTER_PATH,
+  ...VIDEO_PATHS,
+]);
 const MAX_APP_ATTEST_BODY_BYTES = 128 * 1024;
 const MAX_ASSERTION_HEADER_CHARACTERS = 32 * 1024;
 const APP_ATTEST_AUTH_PREFIX = "AppAttest ";
@@ -740,6 +765,7 @@ async function handleAnalyze(
       path: ANALYZE_PATH,
       bodyHash: await sha256(bytes),
       photoCount: payload.photos.length,
+      videoGenerationCount: 0,
       nowMs: Date.now(),
     });
   } catch (error) {
@@ -755,6 +781,144 @@ async function handleAnalyze(
     return failure;
   }
   return performAnalysis(payload, request, env, configuration, fetcher, origin);
+}
+
+async function handleVideo(
+  request: Request,
+  env: Env,
+  configuration: BaseConfiguration,
+  path: AppAttestProtectedPath,
+  origin: string | undefined,
+  fetcher: Fetcher,
+): Promise<Response> {
+  const videoConfiguration = requireVideoConfiguration(env);
+  const authorization = request.headers.get("authorization");
+  const hasBearer = configuration.authToken !== undefined &&
+    authorization?.startsWith("Bearer ") === true &&
+    await constantTimeTokenMatch(authorization, configuration.authToken);
+
+  let routedKey: RoutedKey | undefined;
+  let challenge: Uint8Array | undefined;
+  let assertionObject: Uint8Array | undefined;
+  if (!hasBearer) {
+    if (authorization?.startsWith(APP_ATTEST_AUTH_PREFIX) !== true) {
+      return errorResponse(401, "unauthorized", "Authentication is required.", origin, {
+        "www-authenticate": 'Bearer realm="tripreel", AppAttest realm="tripreel"',
+      });
+    }
+    const appAttest = requireAppAttestConfiguration(env);
+    routedKey = await routeKey(authorization.slice(APP_ATTEST_AUTH_PREFIX.length), appAttest);
+    await enforceRateLimit(appAttest.analyzeLimiter, `key:${routedKey.limiterKey}`);
+    const challengeValue = request.headers.get("x-tripreel-challenge");
+    const assertionValue = request.headers.get("x-tripreel-app-attest");
+    if (
+      challengeValue === null ||
+      assertionValue === null ||
+      assertionValue.length === 0 ||
+      assertionValue.length > MAX_ASSERTION_HEADER_CHARACTERS
+    ) {
+      throw new RequestProblem(400, "invalid_request", "Device authentication headers are invalid.");
+    }
+    try {
+      challenge = decodeBase64URL(challengeValue, 32);
+      assertionObject = decodeBase64URL(assertionValue);
+      if (assertionObject.byteLength === 0 || assertionObject.byteLength > 24 * 1024) {
+        throw new TypeError("invalid assertion length");
+      }
+    } catch {
+      throw new RequestProblem(400, "invalid_request", "Device authentication headers are invalid.");
+    }
+  }
+
+  const maximumBodyBytes = path === VIDEO_GENERATE_PATH ? VIDEO_MAX_BODY_BYTES : 8 * 1024;
+  const { value, bytes } = await readJSONWithBytes(request, maximumBodyBytes);
+  const generateInput = path === VIDEO_GENERATE_PATH
+    ? validateVideoGenerateRequest(value)
+    : undefined;
+  const jobInput = path === VIDEO_GENERATE_PATH
+    ? undefined
+    : validateVideoJobRequest(value);
+
+  // Even the local-development bearer path gets a non-reversible identity so
+  // its signed job token cannot be replayed after the credential changes.
+  const subject = routedKey?.limiterKey ?? encodeBase64URL(
+    await sha256(new TextEncoder().encode(configuration.authToken ?? "")),
+  );
+  if (routedKey !== undefined && challenge !== undefined && assertionObject !== undefined) {
+    let result: AppAttestOperationResult;
+    try {
+      result = await routedKey.stub.authorizeAnalysis({
+        keyID: routedKey.keyID,
+        challenge,
+        assertionObject,
+        method: "POST",
+        path,
+        bodyHash: await sha256(bytes),
+        photoCount: generateInput?.imagesBase64.length ?? 0,
+        videoGenerationCount: path === VIDEO_GENERATE_PATH ? 1 : 0,
+        nowMs: Date.now(),
+      });
+    } catch (error) {
+      result = {
+        ok: false,
+        code: "server_misconfigured",
+        diagnostic: diagnosticForRPC("video_assertion_rpc", error),
+      };
+    }
+    recordAppAttestDiagnostic(env, "video_assertion", result);
+    const failure = responseForStateResult(result, origin);
+    if (failure !== null) return failure;
+  }
+
+  if (path === VIDEO_GENERATE_PATH && generateInput !== undefined) {
+    const result = await submitVideo(
+      generateInput,
+      subject,
+      videoConfiguration,
+      fetcher,
+      request.signal,
+    );
+    return jsonResponse({
+      jobToken: result.jobToken,
+      model: OPENROUTER_VIDEO_MODEL,
+      status: result.status,
+      retention: {
+        memoriesStored: false,
+        providerTemporary: true,
+      },
+    }, 202, origin);
+  }
+  if (path === VIDEO_STATUS_PATH && jobInput !== undefined) {
+    const result = await pollVideo(
+      jobInput,
+      subject,
+      videoConfiguration,
+      fetcher,
+      request.signal,
+    );
+    return jsonResponse(result, 200, origin);
+  }
+  if (path === VIDEO_CONTENT_PATH && jobInput !== undefined) {
+    const upstream = await downloadVideo(
+      jobInput,
+      subject,
+      videoConfiguration,
+      fetcher,
+      request.signal,
+    );
+    const headers: Record<string, string> = {
+      "cache-control": "no-store, max-age=0",
+      "content-type": upstream.headers.get("content-type") ?? "video/mp4",
+      "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      ...corsHeaders(origin),
+    };
+    const length = upstream.headers.get("content-length");
+    if (length !== null) headers["content-length"] = length;
+    return new Response(upstream.body, { status: 200, headers });
+  }
+  throw new RequestProblem(404, "not_found", "Not found.");
 }
 
 export async function handleRequest(request: Request, env: Env, fetcher: Fetcher = fetch): Promise<Response> {
@@ -781,6 +945,16 @@ export async function handleRequest(request: Request, env: Env, fetcher: Fetcher
     }
     if (url.pathname === REGISTER_PATH) {
       return await handleRegistration(request, env, requireAppAttestConfiguration(env), responseOrigin);
+    }
+    if (VIDEO_PATHS.has(url.pathname as AppAttestProtectedPath)) {
+      return await handleVideo(
+        request,
+        env,
+        configuration,
+        url.pathname as AppAttestProtectedPath,
+        responseOrigin,
+        fetcher,
+      );
     }
     return await handleAnalyze(request, env, configuration, responseOrigin, fetcher);
   } catch (error) {

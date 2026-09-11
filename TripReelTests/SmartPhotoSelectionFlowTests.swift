@@ -399,7 +399,19 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(model.aiCutSnapshot).titleCards.contains(.place))
         XCTAssertEqual(model.aiCutSnapshot?.titleDrafts[.place]?.title, "People make the moment")
 
+        model.openAIVideoIntro(from: .aiCut)
+        XCTAssertEqual(model.screen, .aiVideoIntro)
+        XCTAssertEqual(model.aiVideoSelectedPhotos.count, 2)
+        XCTAssertEqual(Set(model.aiVideoSelectedPhotoIDs).count, 2)
+        XCTAssertTrue(model.aiVideoRecommendationIsVisionBased)
+        XCTAssertTrue(
+            model.aiCutSnapshot?.keptPhotos.contains(where: { $0.id == model.aiVideoSelectedPhoto?.id }) == true
+        )
+        model.navigateBack()
+        XCTAssertEqual(model.screen, .aiComparison)
+
         model.useAICut()
+        XCTAssertEqual(model.screen, .export)
         XCTAssertNil(model.smartSelectionSummary)
         XCTAssertTrue(model.visibleExcludedPhotos.isEmpty)
     }
