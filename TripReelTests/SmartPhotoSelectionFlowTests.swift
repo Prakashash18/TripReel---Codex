@@ -5,6 +5,25 @@ import XCTest
 
 @MainActor
 final class SmartPhotoSelectionFlowTests: XCTestCase {
+    func testPeopleStoryAIVideoPromptFitsTheSharedWireLimit() throws {
+        let prompt = TripReelModel.aiVideoPrompt(hasPeople: true, hasStoryPair: true)
+
+        XCTAssertLessThanOrEqual(prompt.count, OpenRouterAIVideoClient.maximumPromptCharacters)
+        XCTAssertTrue(prompt.contains("Preserve every face"))
+        XCTAssertTrue(prompt.contains("Start exactly on the first frame"))
+        XCTAssertNoThrow(
+            try OpenRouterAIVideoClient.encodedGenerateBody(
+                for: AIVideoGenerationInput(
+                    jpegFrames: [
+                        Data([0xFF, 0xD8, 0x01, 0xFF, 0xD9]),
+                        Data([0xFF, 0xD8, 0x02, 0xFF, 0xD9])
+                    ],
+                    prompt: prompt
+                )
+            )
+        )
+    }
+
     func testFirstCutBuildsOnDeviceWithoutConsentOrCloud() async throws {
         let preferences = makePreferences()
         defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }

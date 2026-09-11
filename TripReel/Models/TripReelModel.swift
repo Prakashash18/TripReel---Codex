@@ -2725,20 +2725,28 @@ final class TripReelModel: ObservableObject {
     }
 
     private static func aiVideoPrompt(for photos: [ReelPhoto]) -> String {
-        let peopleDirection = photos.contains(where: \.protectsPeople)
-            ? "Keep every face, body, expression, and identity faithful to the source. Use only subtle natural gestures."
-            : "Preserve the original subjects, objects, lighting, and composition."
-        let storyDirection = photos.count == 2
-            ? "Begin exactly with the first memory and resolve exactly on the second. Use a motivated cinematic transition rather than morphing people or objects."
-            : "Keep the source memory as the visual anchor throughout."
-        let openingDirection = photos.count == 2
-            ? "Animate these exact memories as a polished six-second vertical reel story."
-            : "Animate this exact memory as a polished four-second vertical reel shot."
+        aiVideoPrompt(
+            hasPeople: photos.contains(where: \.protectsPeople),
+            hasStoryPair: photos.count == 2
+        )
+    }
+
+    /// Kept as one bounded prompt because the app and Worker both reject more
+    /// than 600 characters before any image leaves the device.
+    static func aiVideoPrompt(hasPeople: Bool, hasStoryPair: Bool) -> String {
+        let opening = hasStoryPair
+            ? "Create a polished six-second 9:16 story. Start exactly on the first frame and finish exactly on the second."
+            : "Create a polished four-second 9:16 shot anchored to this exact frame."
+        let fidelity = hasPeople
+            ? "Preserve every face, body, expression, identity, and important object. Use only subtle natural gestures."
+            : "Preserve the subjects, objects, lighting, and composition."
+        let transition = hasStoryPair
+            ? "Connect them with motivated camera movement and subtle environmental motion; never morph people or objects."
+            : "Add subtle environmental motion and one confident camera move."
         return """
-        \(openingDirection) \(storyDirection) \(peopleDirection) \
-        Add restrained cinematic depth, natural environmental movement, and one confident camera move. \
-        Do not add or remove people or important objects. Do not create speech, logos, captions, or watermarks. \
-        Avoid morphing, warped hands, distorted faces, abrupt motion, and invented scene changes.
+        \(opening) \(fidelity) \(transition) \
+        Do not add or remove people or important objects. No speech, text, logos, or watermarks. \
+        Avoid warped hands, distorted faces, abrupt motion, and invented scenes.
         """
     }
 
