@@ -197,7 +197,9 @@ final class TripReelFlowUITests: XCTestCase {
         button(startingWith: "Allow & choose photos").tap()
 
         XCTAssertTrue(screen("ai-direction-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Choose photos & direction"].exists)
+        XCTAssertTrue(app.staticTexts["Edit photos & direction"].exists)
+        XCTAssertTrue(screen("ai-direction-expand").exists)
+        XCTAssertFalse(screen("ai-direction-dynamic").exists)
         XCTAssertTrue(
             app.staticTexts
                 .matching(NSPredicate(format: "label CONTAINS[c] %@", "small previews"))
@@ -205,6 +207,9 @@ final class TripReelFlowUITests: XCTestCase {
                 .exists
         )
         attachScreenshot(named: "AI photo and direction choices")
+
+        screen("ai-direction-expand").tap()
+        XCTAssertTrue(screen("ai-direction-dynamic").waitForExistence(timeout: 2))
 
         let photoPicker = button(startingWith: "Photos for AI")
         XCTAssertTrue(photoPicker.waitForExistence(timeout: 2))

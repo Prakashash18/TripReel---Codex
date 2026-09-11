@@ -119,4 +119,58 @@
 
 - Validate long 1080p exports, Photos saving, soundtrack muxing, App Attest, and pinch/drag editing on a physical iPhone/TestFlight build; the focused simulator checks do not replace real-device media and security validation.
 
-final result: passed — First Cut soundtrack playback and direct export pass the native build, supplied/native visual comparison, all 119 unit tests, and all 13 UI journeys
+prior result: passed — First Cut soundtrack playback and direct export passed the native build, supplied/native visual comparison, all 119 unit tests, and all 13 UI journeys.
+
+## September 11 AI recipe density update
+
+**Comparison target**
+
+- Source visual truth: `/tmp/codex-remote-attachments/01a06f8e-3baf-7df1-9a63-285792e8cab1/80C45482-651C-4A56-A558-E5BA163473F4/1-Photo-1.jpg`.
+- Source dimensions: 588 × 1280 pixels; supplied TestFlight capture with native system chrome.
+- Intended state: AI Director photo/direction screen immediately after permission, with the recommended recipe selected.
+- Rendered implementation screenshot: unavailable for this pass.
+- Intended logical viewport: current iPhone portrait layout; density normalization cannot be completed without a revised native capture.
+
+**Full-view and focused comparison evidence**
+
+- The source capture was opened at original resolution. Its main density issue is the five-card recipe list consuming the remaining viewport beneath the story field.
+- The implementation now defaults to one selected/recommended recipe card with a clear `Change` affordance. Expanding shows all five recipes; selecting one collapses the list again. The screen heading, card action, and selection sheet consistently use `Edit photos` language.
+- A post-change native screenshot could not be captured because CoreSimulatorService still aborts while loading the obsolete `/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 9.0.simruntime`. No device runtime was altered or deleted.
+- Focused visual comparison is blocked for the same reason; source compilation is not a substitute for rendered evidence.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: existing Instrument Serif and SF typography are unchanged; revised labels compile without truncation diagnostics, but rendered wrapping remains unverified.
+- Spacing and layout rhythm: the collapsed state removes four recipe cards by default and preserves the existing 11-point card rhythm; exact native spacing remains unverified.
+- Colors and visual tokens: existing cream, amber, glass, and semantic selection tokens are reused unchanged.
+- Image quality and asset fidelity: existing real photo previews and SF Symbols are unchanged; no new assets or placeholders were introduced.
+- Copy and content: `Choose photos & direction`, the card's `Choose`, and the sheet's `Choose photos` are now `Edit photos & direction`, `Edit photos`, and `Edit photos`.
+
+**Findings**
+
+- [P2] Revised native capture unavailable.
+  Location: AI Director photo/direction screen.
+  Evidence: the source TestFlight screenshot is available, but CoreSimulator cannot launch the updated build.
+  Impact: typography wrapping, compact-device spacing, and the expanded/collapsed transition cannot be visually certified in this environment.
+  Fix: capture the default collapsed state and expanded state from the next TestFlight build at the same device size, then compare both against the supplied screen.
+
+**Comparison history**
+
+1. The supplied screen showed all five full recipe cards by default and used `Choose` language for an editing action.
+2. The implementation now shows one recipe summary by default, exposes all recipes only after `Change`, collapses after selection, and uses `Edit photos` consistently. Strict app and UI-test source checks pass.
+3. Post-fix visual comparison is pending because no native runtime is available on this Mac.
+
+**Implementation Checklist**
+
+- [x] Collapse the full recipe list by default.
+- [x] Keep the selected/recommended recipe visible as the summary.
+- [x] Expand on `Change` and collapse after a selection.
+- [x] Rename the heading, card action, sheet title, and accessibility hint to `Edit photos`.
+- [x] Add UI-test coverage for the initial collapsed state and expansion.
+- [ ] Capture and compare the collapsed and expanded states in the next TestFlight build.
+
+**Follow-up Polish**
+
+- Confirm the longer `Edit photos` trailing label does not compress the selected-count copy on the smallest supported iPhone.
+
+final result: blocked

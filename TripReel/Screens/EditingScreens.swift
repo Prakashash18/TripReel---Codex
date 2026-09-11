@@ -192,7 +192,9 @@ struct FirstCutOptionsScreen: View {
 
 struct AICutDirectionScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsPhotoSelection = false
+    @State private var recipesExpanded = false
 
     var body: some View {
         ZStack {
@@ -202,7 +204,7 @@ struct AICutDirectionScreen: View {
                 VStack(alignment: .leading, spacing: 18) {
                     ScreenHeading(
                         eyebrow: "AI Director · permission granted",
-                        title: "Choose photos & direction"
+                        title: "Edit photos & direction"
                     )
                     .padding(.leading, 48)
                     .trEntrance(0, distance: 8)
@@ -215,20 +217,7 @@ struct AICutDirectionScreen: View {
                     storyContextEditor
                         .trEntrance(2, distance: 8)
 
-                    MetadataText(text: "Reel recipe", color: .white.opacity(0.52))
-                        .padding(.top, 2)
-
-                    LazyVStack(spacing: 11) {
-                        ForEach(AICutDirection.allCases) { direction in
-                            AICutDirectionCard(
-                                direction: direction,
-                                selected: model.selectedAICutDirection == direction,
-                                recommended: model.recommendedAICutDirection == direction
-                            ) {
-                                model.selectAICutDirection(direction)
-                            }
-                        }
-                    }
+                    recipePicker
 
                     Button("Create AI cut") {
                         model.continueWithAICutDirection()
@@ -259,6 +248,63 @@ struct AICutDirectionScreen: View {
                 .presentationBackground(TR.sheet)
         }
         .accessibilityIdentifier("ai-direction-screen")
+    }
+
+    private var activeDirection: AICutDirection {
+        model.selectedAICutDirection ?? model.recommendedAICutDirection
+    }
+
+    @ViewBuilder
+    private var recipePicker: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack {
+                MetadataText(text: "Reel recipe", color: .white.opacity(0.52))
+                Spacer()
+                if recipesExpanded {
+                    Button("Collapse") {
+                        withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                            recipesExpanded = false
+                        }
+                    }
+                    .font(TR.ui(11, weight: .semibold))
+                    .foregroundStyle(TR.accent)
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("ai-direction-collapse")
+                }
+            }
+
+            if recipesExpanded {
+                LazyVStack(spacing: 11) {
+                    ForEach(AICutDirection.allCases) { direction in
+                        AICutDirectionCard(
+                            direction: direction,
+                            selected: model.selectedAICutDirection == direction,
+                            recommended: model.recommendedAICutDirection == direction
+                        ) {
+                            model.selectAICutDirection(direction)
+                            withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                                recipesExpanded = false
+                            }
+                        }
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            } else {
+                AICutDirectionCard(
+                    direction: activeDirection,
+                    selected: true,
+                    recommended: model.recommendedAICutDirection == activeDirection,
+                    actionLabel: "Change"
+                ) {
+                    withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                        recipesExpanded = true
+                    }
+                }
+                .accessibilityIdentifier("ai-direction-expand")
+                .transition(.opacity)
+            }
+        }
+        .padding(.top, 2)
     }
 
     private var storyContextEditor: some View {
@@ -382,9 +428,10 @@ private struct AICutPhotoSelectionCard: View {
 
                 Spacer(minLength: 4)
 
-                Text("Choose")
+                Text("Edit photos")
                     .font(TR.ui(12, weight: .semibold))
                     .foregroundStyle(TR.accent)
+                    .fixedSize(horizontal: true, vertical: false)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(TR.accent.opacity(0.75))
@@ -395,7 +442,7 @@ private struct AICutPhotoSelectionCard: View {
         }
         .buttonStyle(TactileButtonStyle())
         .accessibilityLabel("Photos for AI, \(model.aiCutSelectedPhotoCount) selected")
-        .accessibilityHint("Choose which reduced photo previews may be sent")
+        .accessibilityHint("Edit which reduced photo previews may be sent")
         .accessibilityIdentifier("ai-photo-selection-card")
     }
 }
@@ -419,7 +466,7 @@ private struct AICutPhotoSelectionSheet: View {
             WarmBackground(variant: .cleanup)
 
             VStack(spacing: 0) {
-                SheetHeader(title: "Choose photos") { dismiss() }
+                SheetHeader(title: "Edit photos") { dismiss() }
                     .padding(.horizontal, 22)
                     .padding(.top, 20)
 
@@ -552,6 +599,7 @@ private struct AICutDirectionCard: View {
     let direction: AICutDirection
     let selected: Bool
     let recommended: Bool
+    var actionLabel: String? = nil
     let action: () -> Void
     @State private var animates = false
 
@@ -578,9 +626,19 @@ private struct AICutDirectionCard: View {
 
                 Spacer(minLength: 4)
 
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(selected ? TR.accent : .white.opacity(0.30))
+                if let actionLabel {
+                    HStack(spacing: 5) {
+                        Text(actionLabel)
+                            .font(TR.ui(11, weight: .semibold))
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .foregroundStyle(TR.accent)
+                } else {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(selected ? TR.accent : .white.opacity(0.30))
+                }
             }
             .foregroundStyle(TR.cream)
             .padding(14)
@@ -593,6 +651,7 @@ private struct AICutDirectionCard: View {
                 .compactMap { $0 }
                 .joined(separator: ", ")
         )
+        .accessibilityHint(actionLabel == nil ? "Selects this reel recipe" : "Shows all reel recipes")
         .accessibilityIdentifier("ai-direction-\(direction.rawValue)")
         .onAppear {
             guard !reduceMotion else { return }
