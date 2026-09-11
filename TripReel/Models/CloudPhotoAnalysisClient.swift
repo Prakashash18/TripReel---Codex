@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 enum CloudPhotoLocalSelection: String, Codable, Hashable, Sendable {
@@ -1056,6 +1057,19 @@ private struct CloudResponse: Decodable {
 struct AIVideoGenerationInput: Sendable {
     let jpegFrames: [Data]
     let prompt: String
+    /// Stable only inside the app and never encoded into the network request.
+    /// Its hash keeps retries resumable even if JPEG encoding differs slightly.
+    let localResumeIdentifier: String?
+
+    init(
+        jpegFrames: [Data],
+        prompt: String,
+        localResumeIdentifier: String? = nil
+    ) {
+        self.jpegFrames = jpegFrames
+        self.prompt = prompt
+        self.localResumeIdentifier = localResumeIdentifier
+    }
 }
 
 struct AIVideoGenerationProgress: Equatable, Sendable {
@@ -1079,6 +1093,7 @@ protocol AIVideoGenerationServing: Sendable {
 enum AIVideoGenerationError: LocalizedError, Equatable, Sendable {
     case notConfigured
     case invalidInput
+    case dailyLimitReached
     case providerBusy
     case providerRejected
     case generationFailed
@@ -1092,6 +1107,8 @@ enum AIVideoGenerationError: LocalizedError, Equatable, Sendable {
             "AI video is not configured yet. Your existing cut is unchanged."
         case .invalidInput:
             "These moments could not be prepared safely for AI video."
+        case .dailyLimitReached:
+            "You’ve reached today’s AI video safety limit. It resets automatically tomorrow."
         case .providerBusy:
             "Seedance is busy right now. Please wait a moment and try again."
         case .providerRejected:
@@ -1108,6 +1125,68 @@ enum AIVideoGenerationError: LocalizedError, Equatable, Sendable {
     }
 }
 
+struct AIVideoPendingJob: Codable, Equatable, Sendable {
+    let serviceIdentifier: String
+    let requestFingerprint: String
+    let jobToken: String
+    let expiresAt: Date
+}
+
+protocol AIVideoPendingJobStoring: Sendable {
+    func job(
+        serviceIdentifier: String,
+        requestFingerprint: String,
+        now: Date
+    ) async -> AIVideoPendingJob?
+    func save(_ job: AIVideoPendingJob) async
+    func remove(jobToken: String) async
+}
+
+/// The token contains no photo bytes and remains bound to this app installation
+/// by App Attest. Keeping it briefly lets an interrupted generation reconnect
+/// without submitting and charging for the same video a second time.
+actor UserDefaultsAIVideoPendingJobStore: AIVideoPendingJobStoring {
+    private static let storageKey = "Memories.PendingAIVideoJob.v1"
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func job(
+        serviceIdentifier: String,
+        requestFingerprint: String,
+        now: Date
+    ) -> AIVideoPendingJob? {
+        guard let data = defaults.data(forKey: Self.storageKey),
+              let job = try? JSONDecoder().decode(AIVideoPendingJob.self, from: data) else {
+            defaults.removeObject(forKey: Self.storageKey)
+            return nil
+        }
+        guard job.expiresAt > now else {
+            defaults.removeObject(forKey: Self.storageKey)
+            return nil
+        }
+        guard job.serviceIdentifier == serviceIdentifier,
+              job.requestFingerprint == requestFingerprint else {
+            return nil
+        }
+        return job
+    }
+
+    func save(_ job: AIVideoPendingJob) {
+        guard let data = try? JSONEncoder().encode(job) else { return }
+        defaults.set(data, forKey: Self.storageKey)
+    }
+
+    func remove(jobToken: String) {
+        guard let data = defaults.data(forKey: Self.storageKey),
+              let job = try? JSONDecoder().decode(AIVideoPendingJob.self, from: data),
+              job.jobToken == jobToken else { return }
+        defaults.removeObject(forKey: Self.storageKey)
+    }
+}
+
 /// Generates a short first-to-last-frame story through the Memories Worker.
 /// The OpenRouter credential never enters the app; App Attest signs every
 /// request and the Worker returns an opaque, device-bound job token.
@@ -1120,6 +1199,9 @@ final class OpenRouterAIVideoClient: AIVideoGenerationServing, @unchecked Sendab
     private let endpoints: Endpoints?
     private let session: URLSession
     private let authorizer: any CloudPhotoAnalysisAuthorizing
+    private let pendingJobStore: any AIVideoPendingJobStoring
+    private let sleep: @Sendable (Duration) async throws -> Void
+    private let now: @Sendable () -> Date
 
     convenience init(bundle: Bundle = .main) {
         var rawValue = bundle.object(
@@ -1169,18 +1251,27 @@ final class OpenRouterAIVideoClient: AIVideoGenerationServing, @unchecked Sendab
         self.init(
             analysisEndpoint: analysisEndpoint,
             session: session,
-            authorizer: authorizer
+            authorizer: authorizer,
+            pendingJobStore: UserDefaultsAIVideoPendingJobStore()
         )
     }
 
     init(
         analysisEndpoint: URL?,
         session: URLSession,
-        authorizer: any CloudPhotoAnalysisAuthorizing
+        authorizer: any CloudPhotoAnalysisAuthorizing,
+        pendingJobStore: any AIVideoPendingJobStoring = UserDefaultsAIVideoPendingJobStore(),
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { duration in
+            try await Task.sleep(for: duration)
+        },
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         endpoints = analysisEndpoint.flatMap(Endpoints.init)
         self.session = session
         self.authorizer = authorizer
+        self.pendingJobStore = pendingJobStore
+        self.sleep = sleep
+        self.now = now
         isConfigured = endpoints != nil && authorizer.isReady
     }
 
@@ -1192,6 +1283,8 @@ final class OpenRouterAIVideoClient: AIVideoGenerationServing, @unchecked Sendab
             throw AIVideoGenerationError.notConfigured
         }
         let generateBody = try Self.encodedGenerateBody(for: input)
+        let requestFingerprint = Self.requestFingerprint(for: input)
+        let serviceIdentifier = endpoints.generate.absoluteString
 
         let frameCount = input.jpegFrames.count
         progress(.init(
@@ -1200,68 +1293,95 @@ final class OpenRouterAIVideoClient: AIVideoGenerationServing, @unchecked Sendab
                 ? "Preparing two reduced previews…"
                 : "Preparing one reduced preview…"
         ))
-        let generatedData = try await sendJSON(
-            body: generateBody,
-            endpoint: endpoints.generate,
-            path: "/v1/video/generate"
+        let resumedJob = await pendingJobStore.job(
+            serviceIdentifier: serviceIdentifier,
+            requestFingerprint: requestFingerprint,
+            now: now()
         )
-        guard Self.hasExactKeys(generatedData, ["jobToken", "model", "status", "retention"]),
-              let response = try? JSONDecoder().decode(GenerateResponse.self, from: generatedData),
-              response.model == "bytedance/seedance-2.0",
-              response.status == .pending || response.status == .inProgress,
-              response.jobToken.range(
-                of: #"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$"#,
-                options: .regularExpression
-              ) != nil,
-              response.retention.memoriesStored == false,
-              response.retention.providerTemporary == true else {
-            throw AIVideoGenerationError.invalidResponse
+        let jobToken: String
+        if let resumedJob {
+            jobToken = resumedJob.jobToken
+            progress(.init(fraction: 0.14, status: "Picking up your video where you left off…"))
+        } else {
+            let generatedData = try await sendJSON(
+                body: generateBody,
+                endpoint: endpoints.generate,
+                path: "/v1/video/generate"
+            )
+            guard Self.hasExactKeys(generatedData, ["jobToken", "model", "status", "retention"]),
+                  let response = try? JSONDecoder().decode(GenerateResponse.self, from: generatedData),
+                  response.model == "bytedance/seedance-2.0",
+                  response.status == .pending || response.status == .inProgress,
+                  Self.isValidJobToken(response.jobToken),
+                  response.retention.memoriesStored == false,
+                  response.retention.providerTemporary == true else {
+                throw AIVideoGenerationError.invalidResponse
+            }
+            jobToken = response.jobToken
+            await pendingJobStore.save(AIVideoPendingJob(
+                serviceIdentifier: serviceIdentifier,
+                requestFingerprint: requestFingerprint,
+                jobToken: jobToken,
+                expiresAt: now().addingTimeInterval(29 * 60)
+            ))
         }
 
         progress(.init(fraction: 0.16, status: "Seedance is directing the motion…"))
-        let started = ContinuousClock.now
-        var pollCount = 0
-        while started.duration(to: .now) < .seconds(8 * 60) {
-            try Task.checkCancellation()
-            try await Task.sleep(for: .seconds(pollCount == 0 ? 12 : 24))
-            pollCount += 1
-            let statusBody = try JSONEncoder().encode(JobRequest(
-                version: 1,
-                jobToken: response.jobToken
-            ))
-            let statusData = try await sendJSON(
-                body: statusBody,
-                endpoint: endpoints.status,
-                path: "/v1/video/status"
-            )
-            guard Self.hasExactKeys(statusData, ["status", "progress"]),
-                  let status = try? JSONDecoder().decode(StatusResponse.self, from: statusData),
-                  status.progress.isFinite,
-                  (0...1).contains(status.progress) else {
-                throw AIVideoGenerationError.invalidResponse
-            }
-            switch status.status {
-            case .pending:
-                progress(.init(
-                    fraction: max(0.18, min(0.42, status.progress)),
-                    status: "Waiting for the director…"
+        do {
+            let started = ContinuousClock.now
+            var pollCount = 0
+            var pollImmediately = resumedJob != nil
+            while started.duration(to: .now) < .seconds(8 * 60) {
+                try Task.checkCancellation()
+                if pollImmediately {
+                    pollImmediately = false
+                } else {
+                    try await sleep(.seconds(pollCount == 0 ? 12 : 24))
+                }
+                pollCount += 1
+                let statusBody = try JSONEncoder().encode(JobRequest(
+                    version: 1,
+                    jobToken: jobToken
                 ))
-            case .inProgress:
-                progress(.init(
-                    fraction: max(0.42, min(0.91, status.progress)),
-                    status: "Animating movement and atmosphere…"
-                ))
-            case .completed:
-                progress(.init(fraction: 0.94, status: "Bringing your video back…"))
-                return try await download(
-                    jobToken: response.jobToken,
-                    endpoints: endpoints
+                let statusData = try await sendJSON(
+                    body: statusBody,
+                    endpoint: endpoints.status,
+                    path: "/v1/video/status"
                 )
-            case .failed, .cancelled, .expired:
-                throw AIVideoGenerationError.generationFailed
+                guard Self.hasExactKeys(statusData, ["status", "progress"]),
+                      let status = try? JSONDecoder().decode(StatusResponse.self, from: statusData),
+                      status.progress.isFinite,
+                      (0...1).contains(status.progress) else {
+                    throw AIVideoGenerationError.invalidResponse
+                }
+                switch status.status {
+                case .pending:
+                    progress(.init(
+                        fraction: max(0.18, min(0.42, status.progress)),
+                        status: "Waiting for the director…"
+                    ))
+                case .inProgress:
+                    progress(.init(
+                        fraction: max(0.42, min(0.91, status.progress)),
+                        status: "Animating movement and atmosphere…"
+                    ))
+                case .completed:
+                    progress(.init(fraction: 0.94, status: "Bringing your video back…"))
+                    let url = try await download(jobToken: jobToken, endpoints: endpoints)
+                    await pendingJobStore.remove(jobToken: jobToken)
+                    return url
+                case .failed, .cancelled, .expired:
+                    await pendingJobStore.remove(jobToken: jobToken)
+                    throw AIVideoGenerationError.generationFailed
+                }
             }
+            throw AIVideoGenerationError.timedOut
+        } catch let error as AIVideoGenerationError {
+            if error == .providerRejected || error == .generationFailed {
+                await pendingJobStore.remove(jobToken: jobToken)
+            }
+            throw error
         }
-        throw AIVideoGenerationError.timedOut
     }
 
     static func encodedGenerateBody(for input: AIVideoGenerationInput) throws -> Data {
@@ -1278,6 +1398,23 @@ final class OpenRouterAIVideoClient: AIVideoGenerationServing, @unchecked Sendab
             imagesBase64: input.jpegFrames.map { $0.base64EncodedString() },
             prompt: input.prompt
         ))
+    }
+
+    static func requestFingerprint(for input: AIVideoGenerationInput) -> String {
+        var hasher = SHA256()
+        hasher.update(data: Data("Memories-AI-Video/v1\0".utf8))
+        if let identifier = input.localResumeIdentifier, !identifier.isEmpty {
+            hasher.update(data: Data("local-selection\0".utf8))
+            hasher.update(data: Data(SHA256.hash(data: Data(identifier.utf8))))
+        } else {
+            hasher.update(data: Data("prepared-frames\0".utf8))
+            hasher.update(data: Data([UInt8(input.jpegFrames.count)]))
+            for frame in input.jpegFrames {
+                hasher.update(data: Data(SHA256.hash(data: frame)))
+            }
+        }
+        hasher.update(data: Data(SHA256.hash(data: Data(input.prompt.utf8))))
+        return Data(hasher.finalize()).base64EncodedString()
     }
 
     private func sendJSON(
@@ -1399,16 +1536,25 @@ final class OpenRouterAIVideoClient: AIVideoGenerationServing, @unchecked Sendab
     private static func error(statusCode: Int, body: Data) -> AIVideoGenerationError {
         let code = HTTPTripReelAppAttestBackendClient.errorCode(from: body)
         switch code {
+        case "video_generation_limit":
+            return .dailyLimitReached
         case "rate_limited", "upstream_rate_limited", "provider_busy":
             return .providerBusy
         case "content_policy", "provider_rejected", "invalid_image":
             return .providerRejected
-        case "generation_failed", "generation_cancelled", "generation_expired":
+        case "generation_failed", "generation_cancelled", "generation_expired", "invalid_job":
             return .generationFailed
         default:
             if statusCode == 429 { return .providerBusy }
             return statusCode >= 500 ? .generationFailed : .invalidResponse
         }
+    }
+
+    private static func isValidJobToken(_ value: String) -> Bool {
+        value.count <= 1_024 && value.range(
+            of: #"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$"#,
+            options: .regularExpression
+        ) != nil
     }
 
     private static let allowedAuthorizationHeaderNames: Set<String> = [

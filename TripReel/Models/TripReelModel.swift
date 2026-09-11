@@ -2648,7 +2648,8 @@ final class TripReelModel: ObservableObject {
                 let rawURL = try await generationService.generate(
                     AIVideoGenerationInput(
                         jpegFrames: preparedFrames.map(\.jpegData),
-                        prompt: prompt
+                        prompt: prompt,
+                        localResumeIdentifier: selectedPhotos.map(\.id).joined(separator: "\0")
                     )
                 ) { [weak self] update in
                     Task { @MainActor [weak self] in

@@ -11,6 +11,7 @@ import type {
   AppAttestPurpose,
   AuthorizeAnalysisInput,
   IssueChallengeInput,
+  RefundVideoGenerationInput,
   RegisterKeyInput,
 } from "./app-attest-state.ts";
 import {
@@ -39,6 +40,7 @@ interface AppAttestShardStub {
   issueChallenge(input: IssueChallengeInput): Promise<AppAttestChallengeResult>;
   registerKey(input: RegisterKeyInput): Promise<AppAttestOperationResult>;
   authorizeAnalysis(input: AuthorizeAnalysisInput): Promise<AppAttestOperationResult>;
+  refundVideoGeneration(input: RefundVideoGenerationInput): Promise<void>;
 }
 
 interface AppAttestShardNamespace {
@@ -488,6 +490,7 @@ function responseForStateResult(
     invalid_assertion: { status: 401, message: "Device assertion could not be verified." },
     counter_replay: { status: 409, message: "The device assertion was already used." },
     rate_limited: { status: 429, message: "The device has reached its analysis limit." },
+    video_generation_limit: { status: 429, message: "The device has reached its daily AI video limit." },
     server_misconfigured: { status: 500, message: "The service is not configured correctly." },
   };
   const definition = definitions[result.code] ?? definitions.server_misconfigured;
@@ -844,6 +847,7 @@ async function handleVideo(
   const subject = routedKey?.limiterKey ?? encodeBase64URL(
     await sha256(new TextEncoder().encode(configuration.authToken ?? "")),
   );
+  let reservedVideoGeneration = false;
   if (routedKey !== undefined && challenge !== undefined && assertionObject !== undefined) {
     let result: AppAttestOperationResult;
     try {
@@ -868,16 +872,38 @@ async function handleVideo(
     recordAppAttestDiagnostic(env, "video_assertion", result);
     const failure = responseForStateResult(result, origin);
     if (failure !== null) return failure;
+    reservedVideoGeneration = path === VIDEO_GENERATE_PATH;
   }
 
   if (path === VIDEO_GENERATE_PATH && generateInput !== undefined) {
-    const result = await submitVideo(
-      generateInput,
-      subject,
-      videoConfiguration,
-      fetcher,
-      request.signal,
-    );
+    let result: Awaited<ReturnType<typeof submitVideo>>;
+    try {
+      result = await submitVideo(
+        generateInput,
+        subject,
+        videoConfiguration,
+        fetcher,
+        request.signal,
+      );
+    } catch (error) {
+      const shouldRefund = error instanceof ServiceProblem && [
+        "upstream_rate_limited",
+        "upstream_unavailable",
+        "provider_rejected",
+      ].includes(error.code);
+      if (shouldRefund && reservedVideoGeneration && routedKey !== undefined) {
+        try {
+          await routedKey.stub.refundVideoGeneration({
+            keyID: routedKey.keyID,
+            nowMs: Date.now(),
+          });
+        } catch {
+          // Fail closed on spending: a failed refund may inconvenience one
+          // retry, but must never turn a provider error into extra allowance.
+        }
+      }
+      throw error;
+    }
     return jsonResponse({
       jobToken: result.jobToken,
       model: OPENROUTER_VIDEO_MODEL,

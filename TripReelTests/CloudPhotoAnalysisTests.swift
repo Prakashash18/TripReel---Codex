@@ -61,6 +61,147 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         ) { error in
             XCTAssertEqual(error as? AIVideoGenerationError, .invalidInput)
         }
+
+        let firstEncoding = AIVideoGenerationInput(
+            jpegFrames: [beginning, ending],
+            prompt: "Move naturally from the opening moment to the final shared smile.",
+            localResumeIdentifier: "first-photo\0last-photo"
+        )
+        let secondEncoding = AIVideoGenerationInput(
+            jpegFrames: [Data([0xFF, 0xD8, 0x03, 0xFF, 0xD9]), ending],
+            prompt: firstEncoding.prompt,
+            localResumeIdentifier: "first-photo\0last-photo"
+        )
+        XCTAssertEqual(
+            OpenRouterAIVideoClient.requestFingerprint(for: firstEncoding),
+            OpenRouterAIVideoClient.requestFingerprint(for: secondEncoding)
+        )
+    }
+
+    func testAIVideoRetryResumesTheSubmittedJobAfterLocalCancellation() async throws {
+        let requests = LockedRequestList()
+        let pendingJobs = TestAIVideoPendingJobStore()
+        let delays = TestAIVideoSleep()
+        let jobToken = "signed-job-token.valid-signature"
+
+        URLProtocolStub.handler = { request in
+            requests.append(request)
+            let path = try XCTUnwrap(request.url?.path)
+            let statusCode: Int
+            let contentType: String
+            let data: Data
+            switch path {
+            case "/v1/video/generate":
+                statusCode = 202
+                contentType = "application/json"
+                data = Data("""
+                {
+                  "jobToken":"\(jobToken)",
+                  "model":"bytedance/seedance-2.0",
+                  "status":"pending",
+                  "retention":{"memoriesStored":false,"providerTemporary":true}
+                }
+                """.utf8)
+            case "/v1/video/status":
+                statusCode = 200
+                contentType = "application/json"
+                data = Data(#"{"status":"completed","progress":1}"#.utf8)
+            case "/v1/video/content":
+                statusCode = 200
+                contentType = "video/mp4"
+                data = Data([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70])
+            default:
+                XCTFail("Unexpected AI-video path: \(path)")
+                throw URLError(.badURL)
+            }
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: request.url!,
+                statusCode: statusCode,
+                httpVersion: nil,
+                headerFields: [
+                    "Content-Type": contentType,
+                    "Content-Length": String(data.count)
+                ]
+            ))
+            return (response, data)
+        }
+
+        let client = OpenRouterAIVideoClient(
+            analysisEndpoint: URL(string: "https://analysis.example.test/v1/analyze"),
+            session: makeSession(),
+            authorizer: TestCloudAuthorizer(),
+            pendingJobStore: pendingJobs,
+            sleep: { duration in try await delays.sleep(for: duration) },
+            now: { Date(timeIntervalSince1970: 1_000) }
+        )
+        let input = AIVideoGenerationInput(
+            jpegFrames: [
+                Data([0xFF, 0xD8, 0x01, 0xFF, 0xD9]),
+                Data([0xFF, 0xD8, 0x02, 0xFF, 0xD9])
+            ],
+            prompt: "Move naturally from the opening moment to the final shared smile."
+        )
+
+        do {
+            _ = try await client.generate(input) { _ in }
+            XCTFail("The first local wait should be cancelled")
+        } catch is CancellationError {
+            // The remote job deliberately remains resumable.
+        }
+        let jobAfterCancellation = await pendingJobs.snapshot()
+        XCTAssertNotNil(jobAfterCancellation)
+
+        let progress = LockedAIVideoProgressList()
+        let resultURL = try await client.generate(input) { update in
+            progress.append(update)
+        }
+        defer { try? FileManager.default.removeItem(at: resultURL) }
+
+        XCTAssertEqual(
+            requests.values().compactMap { $0.url?.path },
+            ["/v1/video/generate", "/v1/video/status", "/v1/video/content"]
+        )
+        XCTAssertTrue(progress.values().contains {
+            $0.status == "Picking up your video where you left off…"
+        })
+        let jobAfterCompletion = await pendingJobs.snapshot()
+        XCTAssertNil(jobAfterCompletion)
+    }
+
+    func testAIVideoReportsTheDeviceDailyLimitSeparatelyFromProviderBusy() async {
+        URLProtocolStub.handler = { request in
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: request.url!,
+                statusCode: 429,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            ))
+            return (
+                response,
+                Data(#"{"error":{"code":"video_generation_limit","message":"Limit reached"}}"#.utf8)
+            )
+        }
+        let client = OpenRouterAIVideoClient(
+            analysisEndpoint: URL(string: "https://analysis.example.test/v1/analyze"),
+            session: makeSession(),
+            authorizer: TestCloudAuthorizer(),
+            pendingJobStore: TestAIVideoPendingJobStore(),
+            sleep: { _ in },
+            now: { Date(timeIntervalSince1970: 1_000) }
+        )
+
+        do {
+            _ = try await client.generate(AIVideoGenerationInput(
+                jpegFrames: [Data([0xFF, 0xD8, 0x01, 0xFF, 0xD9])],
+                prompt: "Give this real memory a gentle, natural sense of motion."
+            )) { _ in }
+            XCTFail("Expected the device generation limit")
+        } catch let error as AIVideoGenerationError {
+            XCTAssertEqual(error, .dailyLimitReached)
+            XCTAssertNotEqual(error, .providerBusy)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
     }
 
     func testClientSendsOnlyTheBoundedThumbnailPayloadAndValidatesRetention() async throws {
@@ -1308,6 +1449,59 @@ private final class LockedDataList: @unchecked Sendable {
             guard !items.isEmpty else { return nil }
             return items.removeFirst()
         }
+    }
+}
+
+private actor TestAIVideoPendingJobStore: AIVideoPendingJobStoring {
+    private var storedJob: AIVideoPendingJob?
+
+    func job(
+        serviceIdentifier: String,
+        requestFingerprint: String,
+        now: Date
+    ) -> AIVideoPendingJob? {
+        guard let storedJob,
+              storedJob.serviceIdentifier == serviceIdentifier,
+              storedJob.requestFingerprint == requestFingerprint,
+              storedJob.expiresAt > now else { return nil }
+        return storedJob
+    }
+
+    func save(_ job: AIVideoPendingJob) {
+        storedJob = job
+    }
+
+    func remove(jobToken: String) {
+        guard storedJob?.jobToken == jobToken else { return }
+        storedJob = nil
+    }
+
+    func snapshot() -> AIVideoPendingJob? {
+        storedJob
+    }
+}
+
+private actor TestAIVideoSleep {
+    private var shouldCancel = true
+
+    func sleep(for _: Duration) throws {
+        if shouldCancel {
+            shouldCancel = false
+            throw CancellationError()
+        }
+    }
+}
+
+private final class LockedAIVideoProgressList: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [AIVideoGenerationProgress] = []
+
+    func append(_ item: AIVideoGenerationProgress) {
+        lock.withLock { items.append(item) }
+    }
+
+    func values() -> [AIVideoGenerationProgress] {
+        lock.withLock { items }
     }
 }
 

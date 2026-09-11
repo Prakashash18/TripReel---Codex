@@ -1680,13 +1680,13 @@ struct AIVideoGeneratingScreen: View {
                 }
                 .padding(.horizontal, 34)
 
-                Button("Cancel") { model.cancelAIVideoGeneration() }
+                Button("Stop waiting") { model.cancelAIVideoGeneration() }
                     .buttonStyle(GlassButtonStyle())
                     .padding(.horizontal, 24)
-                    .accessibilityHint("Stops waiting in Memories. A submitted provider job may still finish")
+                    .accessibilityHint("Returns to your two moments. Trying again resumes this generation")
                     .accessibilityIdentifier("cancel-ai-video-button")
 
-                Text("Generation can take a few minutes. Cancelling after submission may not stop provider processing or cost.")
+                Text("Your submitted video keeps processing. Come back within 29 minutes to resume without starting over.")
                     .font(TR.ui(10))
                     .foregroundStyle(.white.opacity(0.38))
                     .multilineTextAlignment(.center)

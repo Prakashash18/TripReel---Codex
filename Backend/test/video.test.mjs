@@ -250,3 +250,82 @@ test("App Attest authorizes the exact AI-video operation before spending", async
   assert.equal(authorizationInput.bodyHash.byteLength, 32);
   assert.deepEqual(Buffer.from(authorizationInput.challenge), Buffer.alloc(32, 0x24));
 });
+
+test("refunds a reserved device generation when the provider rejects before creating a job", async () => {
+  const keyID = Buffer.alloc(32, 0x75).toString("base64");
+  const challenge = Buffer.alloc(32, 0x25).toString("base64url");
+  const assertion = Buffer.from([0xa2, 0x01, 0x03]).toString("base64url");
+  const refunds = [];
+  const stub = {
+    async authorizeAnalysis() {
+      return { ok: true };
+    },
+    async refundVideoGeneration(input) {
+      refunds.push(input);
+    },
+  };
+  const env = {
+    ...ENV,
+    APP_ATTEST_APP_ID: "GT9EAB8826.com.prakashash18.tripreel",
+    APP_ATTEST_ENVIRONMENT: "production",
+    APP_ATTEST_ALLOWED_VALIDATION_CATEGORIES: "2,3,4",
+    APP_ATTEST_MINIMUM_BUNDLE_VERSION: "1",
+    APP_ATTEST_SHARDS: { getByName: () => stub },
+    APP_ATTEST_ENROLL_LIMITER: { limit: async () => ({ success: true }) },
+    APP_ATTEST_ANALYZE_LIMITER: { limit: async () => ({ success: true }) },
+  };
+
+  const response = await handleRequest(
+    appAttestVideoRequest("/v1/video/generate", {
+      version: 2,
+      imagesBase64: [jpegBase64(), jpegBase64(720, 1_024)],
+      prompt: "Create gentle subject-safe motion with one restrained camera move.",
+    }, keyID, challenge, assertion),
+    env,
+    async () => new Response("busy", { status: 429 }),
+  );
+
+  assert.equal(response.status, 429);
+  assert.equal((await response.json()).error.code, "upstream_rate_limited");
+  assert.equal(refunds.length, 1);
+  assert.deepEqual(Buffer.from(refunds[0].keyID), Buffer.alloc(32, 0x75));
+  assert.equal(Number.isSafeInteger(refunds[0].nowMs), true);
+});
+
+test("returns a distinct daily video limit without calling the provider", async () => {
+  const keyID = Buffer.alloc(32, 0x76).toString("base64");
+  const stub = {
+    async authorizeAnalysis() {
+      return { ok: false, code: "video_generation_limit", retryAfter: 3_600 };
+    },
+  };
+  const env = {
+    ...ENV,
+    APP_ATTEST_APP_ID: "GT9EAB8826.com.prakashash18.tripreel",
+    APP_ATTEST_ENVIRONMENT: "production",
+    APP_ATTEST_ALLOWED_VALIDATION_CATEGORIES: "2,3,4",
+    APP_ATTEST_MINIMUM_BUNDLE_VERSION: "1",
+    APP_ATTEST_SHARDS: { getByName: () => stub },
+    APP_ATTEST_ENROLL_LIMITER: { limit: async () => ({ success: true }) },
+    APP_ATTEST_ANALYZE_LIMITER: { limit: async () => ({ success: true }) },
+  };
+  let providerCalls = 0;
+
+  const response = await handleRequest(
+    appAttestVideoRequest("/v1/video/generate", {
+      version: 2,
+      imagesBase64: [jpegBase64(), jpegBase64(720, 1_024)],
+      prompt: "Create gentle subject-safe motion with one restrained camera move.",
+    }, keyID, Buffer.alloc(32, 0x26).toString("base64url"), Buffer.from([1]).toString("base64url")),
+    env,
+    async () => {
+      providerCalls += 1;
+      return new Response();
+    },
+  );
+
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get("retry-after"), "3600");
+  assert.equal((await response.json()).error.code, "video_generation_limit");
+  assert.equal(providerCalls, 0);
+});

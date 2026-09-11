@@ -52,6 +52,11 @@ export interface AuthorizeAnalysisInput {
   nowMs: number;
 }
 
+export interface RefundVideoGenerationInput {
+  keyID: Uint8Array;
+  nowMs: number;
+}
+
 export type AppAttestStateFailureCode =
   | "key_not_registered"
   | "key_already_registered"
@@ -61,6 +66,7 @@ export type AppAttestStateFailureCode =
   | "invalid_assertion"
   | "counter_replay"
   | "rate_limited"
+  | "video_generation_limit"
   | "server_misconfigured";
 
 export interface AppAttestStateFailure {
@@ -113,7 +119,7 @@ const MAX_OUTSTANDING_CHALLENGES_PER_PURPOSE = 4;
 const KEY_RETENTION_MS = 180 * 24 * 60 * 60 * 1_000;
 const MAX_REQUESTS_PER_MINUTE = 30;
 const MAX_PHOTOS_PER_UTC_DAY = 1_000;
-const MAX_VIDEO_GENERATIONS_PER_UTC_DAY = 3;
+const MAX_VIDEO_GENERATIONS_PER_UTC_DAY = 5;
 const PROTECTED_PATHS: ReadonlySet<AppAttestProtectedPath> = new Set([
   "/v1/analyze",
   "/v1/video/generate",
@@ -726,7 +732,11 @@ export class AppAttestShard extends DurableObject<AppAttestStateEnv> {
         const retryAfter = Math.max(1, Math.ceil(((minuteBucket + 1) * 60_000 - input.nowMs) / 1_000));
         return stateFailure("rate_limited", retryAfter);
       }
-      if (dayLimited || videoDayLimited) {
+      if (videoDayLimited) {
+        const retryAfter = Math.max(1, Math.ceil(((utcDay + 1) * 86_400_000 - input.nowMs) / 1_000));
+        return stateFailure("video_generation_limit", retryAfter);
+      }
+      if (dayLimited) {
         const retryAfter = Math.max(1, Math.ceil(((utcDay + 1) * 86_400_000 - input.nowMs) / 1_000));
         return stateFailure("rate_limited", retryAfter);
       }
@@ -734,6 +744,32 @@ export class AppAttestShard extends DurableObject<AppAttestStateEnv> {
     });
     await this.scheduleNextAlarm();
     return result;
+  }
+
+  async refundVideoGeneration(input: RefundVideoGenerationInput): Promise<void> {
+    if (input.keyID.byteLength !== 32 || !isValidNow(input.nowMs)) {
+      return;
+    }
+    const utcDay = Math.floor(input.nowMs / 86_400_000);
+    this.ctx.storage.transactionSync(() => {
+      const currentKey = this.keyRow(input.keyID);
+      if (
+        currentKey?.status !== "active" ||
+        currentKey.utc_video_day !== utcDay ||
+        currentKey.day_video_generations <= 0
+      ) {
+        return;
+      }
+      this.ctx.storage.sql.exec(
+        `UPDATE app_attest_keys
+           SET day_video_generations = day_video_generations - 1,
+               last_seen_at_ms = ?
+         WHERE key_hash = ? AND utc_video_day = ? AND day_video_generations > 0`,
+        input.nowMs,
+        exactBuffer(input.keyID),
+        utcDay,
+      );
+    });
   }
 
   async alarm(): Promise<void> {
