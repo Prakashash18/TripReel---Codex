@@ -10,6 +10,9 @@ import { compareAICut, comparisonRevisionBrief } from "./comparison.ts";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 
+const INCOMPLETE_PLAN_REVISION_BRIEF =
+  "The previous structured response was incomplete or did not match the edit-plan schema. Return one complete plan that matches the schema exactly and uses only the supplied temporary IDs.";
+
 const INSTRUCTIONS = `You are TripReel's editorial assistant for a short travel film.
 
 You receive only privacy-safe thumbnail previews, each labeled with a temporary request ID. A photo preview is one still. A video preview is a left-to-right three-frame contact sheet for one short, locally selected source clip; its coarse context identifies it as video. Direct a coherent alternative edit using only visible evidence in those supplied previews.
@@ -334,7 +337,9 @@ export async function analyzeWithOpenAI(
   if (clientSignal?.aborted) controller.abort();
 
   try {
+    let candidateRequestCount = 0;
     const requestCandidate = async (revisionBrief?: string): Promise<AIEditPlan> => {
+      candidateRequestCount += 1;
       const response = await fetcher(OPENAI_RESPONSES_URL, {
         method: "POST",
         headers: {
@@ -362,6 +367,42 @@ export async function analyzeWithOpenAI(
             "upstream_rate_limited",
             "The analysis provider is temporarily rate limited.",
             safeRetryAfter(response),
+            response.status,
+          );
+        }
+        if (response.status === 401 || response.status === 403) {
+          throw new ServiceProblem(
+            502,
+            "upstream_authentication",
+            "The analysis provider could not authenticate the service.",
+            undefined,
+            response.status,
+          );
+        }
+        if ([400, 404, 409, 422].includes(response.status)) {
+          throw new ServiceProblem(
+            502,
+            "upstream_rejected",
+            "The analysis provider rejected the prepared request.",
+            undefined,
+            response.status,
+          );
+        }
+        if (response.status === 408 || response.status === 504) {
+          throw new ServiceProblem(
+            504,
+            "upstream_timeout",
+            "The analysis provider timed out.",
+            undefined,
+            response.status,
+          );
+        }
+        if (response.status >= 500) {
+          throw new ServiceProblem(
+            502,
+            "upstream_unavailable",
+            "The analysis provider is unavailable.",
+            undefined,
             response.status,
           );
         }
@@ -424,7 +465,19 @@ export async function analyzeWithOpenAI(
       return result;
     };
 
-    const firstPlan = await requestCandidate();
+    let firstPlan: AIEditPlan;
+    try {
+      firstPlan = await requestCandidate();
+    } catch (error) {
+      const elapsedMs = Date.now() - startedAt;
+      const canCorrectIncompletePlan =
+        error instanceof ServiceProblem &&
+        error.code === "invalid_upstream_response" &&
+        elapsedMs < timeoutMs * 0.52 &&
+        !controller.signal.aborted;
+      if (!canCorrectIncompletePlan) throw error;
+      firstPlan = await requestCandidate(INCOMPLETE_PLAN_REVISION_BRIEF);
+    }
     if (
       payload.version === 3 &&
       payload.baseline !== undefined &&
@@ -432,7 +485,12 @@ export async function analyzeWithOpenAI(
     ) {
       const firstComparison = compareAICut(payload.baseline, payload.photos, firstPlan);
       const elapsedMs = Date.now() - startedAt;
-      if (!firstComparison.materiallyDifferent && elapsedMs < timeoutMs * 0.52 && !controller.signal.aborted) {
+      if (
+        !firstComparison.materiallyDifferent &&
+        candidateRequestCount < 2 &&
+        elapsedMs < timeoutMs * 0.52 &&
+        !controller.signal.aborted
+      ) {
         try {
           const revisedPlan = await requestCandidate(comparisonRevisionBrief(firstComparison));
           if (revisedPlan.version === 3) {

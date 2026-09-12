@@ -10,6 +10,56 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         super.tearDown()
     }
 
+    func testAICutFailureExplainsWhereTheRequestStoppedAndWhatToDo() {
+        let offline = AICutFailure.from(URLError(.notConnectedToInternet))
+        XCTAssertEqual(offline.stage, "Before reaching OpenAI")
+        XCTAssertEqual(offline.title, "You’re offline")
+        XCTAssertEqual(offline.actionTitle, "Try Again")
+        XCTAssertEqual(offline.reference, "AI-OFFLINE")
+
+        let provider = AICutFailure.from(
+            CloudPhotoAnalysisError.server(
+                statusCode: 502,
+                code: "invalid_upstream_response"
+            )
+        )
+        XCTAssertEqual(provider.stage, "OpenAI response")
+        XCTAssertEqual(provider.title, "The AI edit was incomplete")
+        XCTAssertTrue(provider.message.contains("Memories rejected it safely"))
+        XCTAssertEqual(provider.reference, "AI-RESPONSE")
+
+        let staleRequest = AICutFailure.from(
+            CloudPhotoAnalysisError.server(
+                statusCode: 400,
+                code: "invalid_request"
+            )
+        )
+        XCTAssertEqual(staleRequest.stage, "Preparing the request")
+        XCTAssertEqual(staleRequest.title, "This selection needs refreshing")
+        XCTAssertEqual(staleRequest.actionTitle, "Review Moments")
+        XCTAssertEqual(staleRequest.reference, "AI-REQUEST")
+
+        let rejectedByOpenAI = AICutFailure.from(
+            CloudPhotoAnalysisError.server(
+                statusCode: 502,
+                code: "upstream_rejected"
+            )
+        )
+        XCTAssertEqual(rejectedByOpenAI.stage, "OpenAI request")
+        XCTAssertEqual(rejectedByOpenAI.actionTitle, "Review Moments")
+        XCTAssertEqual(rejectedByOpenAI.reference, "AI-OPENAI-REQUEST")
+
+        let secureCheck = AICutFailure.from(
+            CloudPhotoAnalysisError.server(
+                statusCode: 409,
+                code: "counter_replay"
+            )
+        )
+        XCTAssertEqual(secureCheck.stage, "Secure device check")
+        XCTAssertTrue(secureCheck.message.contains("Nothing was sent to OpenAI"))
+        XCTAssertEqual(secureCheck.reference, "AI-SECURE-CHECK")
+    }
+
     func testClientRejectsAnUnconfiguredEndpointWithoutNetworking() async {
         let client = CloudPhotoAnalysisClient(
             endpoint: nil,

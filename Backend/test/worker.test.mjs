@@ -593,9 +593,14 @@ test("requires authentication without reading private output or calling upstream
 });
 
 test("rejects malformed upstream plans and never relays upstream error bodies", async () => {
-  const malformed = await handleRequest(analyzeRequest(payload()), ENV, async () => openAISuccess({ prose: "Use p0" }));
+  let malformedFetchCalls = 0;
+  const malformed = await handleRequest(analyzeRequest(payload()), ENV, async () => {
+    malformedFetchCalls += 1;
+    return openAISuccess({ prose: "Use p0" });
+  });
   assert.equal(malformed.status, 502);
   assert.equal((await malformed.json()).error.code, "invalid_upstream_response");
+  assert.equal(malformedFetchCalls, 2);
 
   const sentinel = "PRIVATE_IMAGE_OR_PROMPT_MUST_NOT_ESCAPE";
   const dataPoints = [];
@@ -615,12 +620,55 @@ test("rejects malformed upstream plans and never relays upstream error bodies", 
   assert.doesNotMatch(await failed.text(), new RegExp(sentinel));
   assert.deepEqual(dataPoints[0].blobs, [
     "openai",
-    "upstream_error",
+    "upstream_rejected",
     "responses_api",
     "ServiceProblem",
     "provider_status_400",
   ]);
   assert.equal(JSON.stringify(dataPoints).includes(sentinel), false);
+});
+
+test("repairs one incomplete structured edit before asking the app to retry", async () => {
+  const upstreamBodies = [];
+  const response = await handleRequest(
+    analyzeRequest(payload()),
+    ENV,
+    async (_url, init) => {
+      upstreamBodies.push(JSON.parse(init.body));
+      return openAISuccess(upstreamBodies.length === 1 ? { prose: "Use p0" } : plan());
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(upstreamBodies.length, 2);
+  assert.match(
+    upstreamBodies[1].input[0].content.find(
+      (item) => item.type === "input_text" && /quality check/u.test(item.text),
+    ).text,
+    /previous structured response was incomplete/u,
+  );
+  assert.deepEqual((await response.json()).plan, plan());
+});
+
+test("classifies safe OpenAI status families without relaying provider details", async () => {
+  const cases = [
+    { providerStatus: 401, responseStatus: 502, code: "upstream_authentication" },
+    { providerStatus: 422, responseStatus: 502, code: "upstream_rejected" },
+    { providerStatus: 504, responseStatus: 504, code: "upstream_timeout" },
+    { providerStatus: 503, responseStatus: 502, code: "upstream_unavailable" },
+  ];
+
+  for (const item of cases) {
+    const response = await handleRequest(
+      analyzeRequest(payload()),
+      ENV,
+      async () => new Response("PRIVATE_PROVIDER_DETAIL", { status: item.providerStatus }),
+    );
+    assert.equal(response.status, item.responseStatus);
+    const body = await response.json();
+    assert.equal(body.error.code, item.code);
+    assert.equal(JSON.stringify(body).includes("PRIVATE_PROVIDER_DETAIL"), false);
+  }
 });
 
 test("records a bounded sanitized provider exception without request content", async () => {

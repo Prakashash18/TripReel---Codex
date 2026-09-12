@@ -754,24 +754,48 @@ struct AICutProcessingScreen: View {
 
                 processingArtwork
 
-                if let failure = model.aiCutFailureMessage {
+                if let failure = model.aiCutFailure {
                     VStack(spacing: 12) {
-                        MetadataText(text: "First Cut is safe", color: TR.keep)
-                        Text("AI couldn't create another cut")
+                        MetadataText(text: failure.stage, color: TR.accent)
+                        Text(failure.title)
                             .font(TR.display(34))
                             .multilineTextAlignment(.center)
-                        Text(failure)
+                        Text(failure.message)
                             .font(TR.ui(14))
                             .foregroundStyle(.white.opacity(0.62))
                             .multilineTextAlignment(.center)
                             .lineSpacing(4)
 
-                        Button("Try Again") { model.retryAICut() }
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: failure.symbol)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(TR.keep)
+                                .padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("What to do")
+                                    .font(TR.ui(11, weight: .semibold))
+                                    .foregroundStyle(TR.cream)
+                                Text(failure.suggestion)
+                                    .font(TR.ui(11))
+                                    .foregroundStyle(.white.opacity(0.52))
+                                    .lineSpacing(2)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(13)
+                        .glassCard(cornerRadius: 16)
+
+                        Button(failure.actionTitle) { model.recoverFromAICutFailure() }
                             .buttonStyle(CreamButtonStyle())
                             .accessibilityIdentifier("ai-cut-retry")
-                        Button("Keep First Cut") { model.cancelAICut() }
+                        Button(model.aiCutFallbackTitle) { model.leaveAICutFailure() }
                             .buttonStyle(GlassButtonStyle())
                             .accessibilityIdentifier("ai-cut-keep-after-failure")
+
+                        Text("Reference · \(failure.reference)")
+                            .font(TR.mono(8))
+                            .tracking(0.8)
+                            .foregroundStyle(.white.opacity(0.28))
                     }
                 } else {
                     VStack(spacing: 10) {
@@ -825,8 +849,8 @@ struct AICutProcessingScreen: View {
     private var processingArtwork: some View {
         AIPhotoTransferArtwork(
             photos: transferPhotos,
-            isSending: model.aiCutProgress >= 0.54,
-            isActive: model.aiCutFailureMessage == nil,
+            isSending: model.aiCutProgress >= 0.54 && model.aiCutFailure == nil,
+            isActive: model.aiCutFailure == nil,
             reduceMotion: reduceMotion
         )
         .frame(height: 205)
@@ -853,7 +877,7 @@ private struct AIPhotoTransferArtwork: View {
         GeometryReader { proxy in
             let routeY = proxy.size.height * 0.62
             let startX: CGFloat = 48
-            let destinationX = isSending ? proxy.size.width - 48 : proxy.size.width * 0.5
+            let destinationX = isSending && isActive ? proxy.size.width - 48 : proxy.size.width * 0.5
 
             ZStack {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -869,10 +893,16 @@ private struct AIPhotoTransferArtwork: View {
 
                 VStack(spacing: 3) {
                     MetadataText(
-                        text: isSending ? "Reduced previews · encrypted in transit" : "Preparing reduced previews",
-                        color: isSending ? TR.keep : TR.accent
+                        text: !isActive
+                            ? "Transfer stopped safely"
+                            : isSending ? "Reduced previews · encrypted in transit" : "Preparing reduced previews",
+                        color: !isActive ? TR.accent : isSending ? TR.keep : TR.accent
                     )
-                    Text(isSending ? "Sending copies securely to OpenAI" : "Original media remains on this iPhone")
+                    Text(
+                        !isActive
+                            ? "No new cut replaced your saved version"
+                            : isSending ? "Sending copies securely to OpenAI" : "Original media remains on this iPhone"
+                    )
                         .font(TR.ui(11, weight: .medium))
                         .foregroundStyle(.white.opacity(0.48))
                 }
@@ -905,7 +935,7 @@ private struct AIPhotoTransferArtwork: View {
                     detail: "GPT-5.6 Luna",
                     tint: TR.keep
                 )
-                .opacity(isSending ? 1 : 0.34)
+                .opacity(isSending && isActive ? 1 : 0.34)
                 .position(x: proxy.size.width - 48, y: routeY)
 
                 Image(systemName: "lock.fill")

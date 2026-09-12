@@ -1542,6 +1542,342 @@ struct AICutRecommendation: Identifiable, Hashable, Sendable {
     var id: Kind { kind }
 }
 
+enum AICutFailureRecovery: Hashable, Sendable {
+    case retry
+    case reviewMoments
+    case startAgain
+}
+
+/// A user-safe explanation of where an AI edit stopped. Raw provider messages,
+/// request bodies, photo identifiers and security details never reach the UI.
+struct AICutFailure: Hashable, Sendable {
+    let stage: String
+    let title: String
+    let message: String
+    let suggestion: String
+    let symbol: String
+    let actionTitle: String
+    let recovery: AICutFailureRecovery
+    let reference: String
+
+    static func from(_ error: Error) -> AICutFailure {
+        if let cloudError = error as? CloudPhotoAnalysisError {
+            return from(cloudError)
+        }
+        if let attestationError = error as? TripReelAppAttestError {
+            return secureCheckFailure(message: attestationError.errorDescription)
+        }
+        if let serviceError = error as? TripReelAppAttestServiceError {
+            return secureCheckFailure(message: serviceError.errorDescription)
+        }
+        if let urlError = urlError(from: error) {
+            return from(urlError)
+        }
+        if error is AICutPlanValidationError {
+            return incompleteAIResponse()
+        }
+        return AICutFailure(
+            stage: "Finishing on this iPhone",
+            title: "The edit stopped unexpectedly",
+            message: "No replacement was applied, and your saved cut is unchanged.",
+            suggestion: "Try once more. If it repeats, choose a different direction or fewer moments.",
+            symbol: "exclamationmark.arrow.triangle.2.circlepath",
+            actionTitle: "Try Again",
+            recovery: .retry,
+            reference: "AI-FINALIZE"
+        )
+    }
+
+    static let serviceNotReady = AICutFailure(
+        stage: "Before upload",
+        title: "AI Director isn’t ready",
+        message: "This build could not open the secure AI service. Nothing was sent.",
+        suggestion: "Install the latest TestFlight build, then start AI Director again.",
+        symbol: "icloud.slash",
+        actionTitle: "Start Again",
+        recovery: .startAgain,
+        reference: "AI-SETUP"
+    )
+
+    static let firstCutUnavailable = AICutFailure(
+        stage: "Before upload",
+        title: "The First Cut needs refreshing",
+        message: "Memories could not prepare the saved timeline for comparison. Nothing was sent.",
+        suggestion: "Return to the memory, play the First Cut, then start AI Director again.",
+        symbol: "arrow.clockwise",
+        actionTitle: "Start Again",
+        recovery: .startAgain,
+        reference: "AI-BASELINE"
+    )
+
+    static let directionUnavailable = AICutFailure(
+        stage: "Before upload",
+        title: "Choose a direction first",
+        message: "AI Director needs a recipe before it can create another cut. Nothing was sent.",
+        suggestion: "Return to the recipe screen and choose the kind of edit you want.",
+        symbol: "slider.horizontal.3",
+        actionTitle: "Choose Direction",
+        recovery: .reviewMoments,
+        reference: "AI-DIRECTION"
+    )
+
+    static let sourceUnavailable = AICutFailure(
+        stage: "Before upload",
+        title: "This memory needs refreshing",
+        message: "The original moments are no longer available to prepare another cut. Nothing was sent.",
+        suggestion: "Return to Memories and open this memory again.",
+        symbol: "photo.badge.exclamationmark",
+        actionTitle: "Start Again",
+        recovery: .startAgain,
+        reference: "AI-SOURCE"
+    )
+
+    static let selectionUnavailable = AICutFailure(
+        stage: "Preparing on this iPhone",
+        title: "These moments aren’t ready yet",
+        message: "Memories could not make privacy-safe previews from the current selection. Nothing was sent.",
+        suggestion: "Keep the app open and try again on a steady connection, or review the selected moments.",
+        symbol: "photo.stack",
+        actionTitle: "Review Moments",
+        recovery: .reviewMoments,
+        reference: "AI-PREVIEWS"
+    )
+
+    private static func from(_ error: CloudPhotoAnalysisError) -> AICutFailure {
+        switch error {
+        case .notConfigured, .invalidEndpoint:
+            return serviceNotReady
+        case .emptyRequest:
+            return selectionUnavailable
+        case .tooManyPhotos, .thumbnailTooLarge:
+            return AICutFailure(
+                stage: "Preparing on this iPhone",
+                title: "This selection is too large",
+                message: "Memories stopped before upload to protect the size and privacy limits.",
+                suggestion: "Select fewer moments, then create the AI cut again.",
+                symbol: "photo.on.rectangle.angled",
+                actionTitle: "Review Moments",
+                recovery: .reviewMoments,
+                reference: "AI-SELECTION"
+            )
+        case .invalidEphemeralIdentifier, .invalidStoryContext, .invalidBaseline:
+            return firstCutUnavailable
+        case .invalidResponse:
+            return incompleteAIResponse()
+        case let .server(statusCode, code):
+            return serverFailure(statusCode: statusCode, code: code)
+        }
+    }
+
+    private static func serverFailure(statusCode: Int, code: String?) -> AICutFailure {
+        switch code {
+        case "rate_limited", "upstream_rate_limited":
+            return AICutFailure(
+                stage: code == "upstream_rate_limited" ? "OpenAI" : "Secure AI service",
+                title: "AI Director is busy",
+                message: code == "upstream_rate_limited"
+                    ? "OpenAI temporarily could not accept another edit. Your saved cut is unchanged."
+                    : "This iPhone reached a temporary AI request limit. Your saved cut is unchanged.",
+                suggestion: "Wait about a minute, then try again once.",
+                symbol: "hourglass",
+                actionTitle: "Try Again",
+                recovery: .retry,
+                reference: code == "upstream_rate_limited" ? "AI-OPENAI-BUSY" : "AI-LIMIT"
+            )
+        case "upstream_timeout", "request_timeout":
+            return AICutFailure(
+                stage: "OpenAI",
+                title: "The edit took too long",
+                message: "OpenAI did not finish before the secure request expired. No replacement was applied.",
+                suggestion: "Try again on a steady connection, or select fewer moments for a faster edit.",
+                symbol: "clock.badge.exclamationmark",
+                actionTitle: "Try Again",
+                recovery: .retry,
+                reference: "AI-TIMEOUT"
+            )
+        case "upstream_rejected":
+            return AICutFailure(
+                stage: "OpenAI request",
+                title: "OpenAI couldn’t use this edit request",
+                message: "OpenAI rejected the prepared request before directing a new cut. Your saved cut is unchanged.",
+                suggestion: "Review the moments and try a smaller selection or a different direction.",
+                symbol: "slider.horizontal.3",
+                actionTitle: "Review Moments",
+                recovery: .reviewMoments,
+                reference: "AI-OPENAI-REQUEST"
+            )
+        case "upstream_authentication":
+            return AICutFailure(
+                stage: "Memories AI service",
+                title: "The AI service needs attention",
+                message: "OpenAI could not verify Memories’ server access. Nothing is wrong with your photos.",
+                suggestion: "Keep your saved cut and try AI Director again later.",
+                symbol: "key.horizontal",
+                actionTitle: "Start Again",
+                recovery: .startAgain,
+                reference: "AI-SERVICE-ACCESS"
+            )
+        case "upstream_unavailable":
+            return AICutFailure(
+                stage: "OpenAI",
+                title: "OpenAI is temporarily unavailable",
+                message: "OpenAI could not finish the request right now. Your saved cut is unchanged.",
+                suggestion: "Wait a moment, then try again once.",
+                symbol: "sparkles.rectangle.stack",
+                actionTitle: "Try Again",
+                recovery: .retry,
+                reference: "AI-OPENAI"
+            )
+        case "upstream_error":
+            return AICutFailure(
+                stage: "OpenAI",
+                title: "OpenAI couldn’t finish this edit",
+                message: "The AI service ended the request before returning a usable cut. Your saved cut is unchanged.",
+                suggestion: "Try again shortly. A different direction may also produce a cleaner result.",
+                symbol: "sparkles.rectangle.stack",
+                actionTitle: "Try Again",
+                recovery: .retry,
+                reference: "AI-OPENAI"
+            )
+        case "invalid_upstream_response":
+            return incompleteAIResponse()
+        case "invalid_attestation", "invalid_assertion", "counter_replay",
+             "challenge_used", "challenge_expired", "key_not_registered",
+             "unknown_key", "invalid_key", "authentication_unavailable", "unauthorized":
+            return secureCheckFailure(message: nil)
+        case "invalid_request", "invalid_baseline", "invalid_photo_context",
+             "invalid_image", "duplicate_photo_id", "body_too_large":
+            return AICutFailure(
+                stage: "Preparing the request",
+                title: "This selection needs refreshing",
+                message: "The secure service could not use the prepared timeline. No AI cut replaced your saved version.",
+                suggestion: "Review the moments and start the AI edit again.",
+                symbol: "arrow.clockwise",
+                actionTitle: "Review Moments",
+                recovery: .reviewMoments,
+                reference: "AI-REQUEST"
+            )
+        case "internal_error", "server_misconfigured":
+            return AICutFailure(
+                stage: "Memories AI service",
+                title: "The AI service needs attention",
+                message: "A server setting prevented this edit from completing. Nothing is wrong with your photos.",
+                suggestion: "You don’t need to change anything. Try again later.",
+                symbol: "wrench.and.screwdriver",
+                actionTitle: "Try Again",
+                recovery: .retry,
+                reference: "AI-SERVICE"
+            )
+        default:
+            return AICutFailure(
+                stage: statusCode >= 500 ? "Memories AI service" : "Secure request",
+                title: statusCode >= 500 ? "The AI service didn’t finish" : "The request needs refreshing",
+                message: "The service stopped this edit safely, so no replacement was applied.",
+                suggestion: statusCode >= 500
+                    ? "Try again shortly. If it repeats, keep the saved cut and return later."
+                    : "Review the selected moments and start the AI edit again.",
+                symbol: "exclamationmark.icloud",
+                actionTitle: statusCode >= 500 ? "Try Again" : "Review Moments",
+                recovery: statusCode >= 500 ? .retry : .reviewMoments,
+                reference: "AI-HTTP-\(statusCode)"
+            )
+        }
+    }
+
+    private static func incompleteAIResponse() -> AICutFailure {
+        AICutFailure(
+            stage: "OpenAI response",
+            title: "The AI edit was incomplete",
+            message: "OpenAI responded, but the result was missing part of the story, timing or photo plan. Memories rejected it safely.",
+            suggestion: "Try again, or choose a different direction. Your saved cut is unchanged.",
+            symbol: "doc.badge.ellipsis",
+            actionTitle: "Try Again",
+            recovery: .retry,
+            reference: "AI-RESPONSE"
+        )
+    }
+
+    private static func secureCheckFailure(message: String?) -> AICutFailure {
+        AICutFailure(
+            stage: "Secure device check",
+            title: "This request needs a fresh secure check",
+            message: message ?? "Apple’s device verification could not approve this AI request. Nothing was sent to OpenAI.",
+            suggestion: "Keep Memories open and try once more. If it repeats, force-quit and reopen the app.",
+            symbol: "checkmark.shield",
+            actionTitle: "Try Again",
+            recovery: .retry,
+            reference: "AI-SECURE-CHECK"
+        )
+    }
+
+    private static func from(_ error: URLError) -> AICutFailure {
+        switch error.code {
+        case .notConnectedToInternet, .dataNotAllowed, .internationalRoamingOff:
+            return AICutFailure(
+                stage: "Before reaching OpenAI",
+                title: "You’re offline",
+                message: "The secure preview upload could not start. Nothing was sent.",
+                suggestion: "Connect to Wi-Fi or mobile data, then try again.",
+                symbol: "wifi.slash",
+                actionTitle: "Try Again",
+                recovery: .retry,
+                reference: "AI-OFFLINE"
+            )
+        case .timedOut:
+            return AICutFailure(
+                stage: "Secure connection",
+                title: "The connection took too long",
+                message: "Memories did not receive the AI response in time. Your saved cut is unchanged.",
+                suggestion: "Try again on a steadier connection or with fewer moments.",
+                symbol: "clock.badge.exclamationmark",
+                actionTitle: "Try Again",
+                recovery: .retry,
+                reference: "AI-CONNECTION-TIMEOUT"
+            )
+        case .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+            return AICutFailure(
+                stage: "Secure connection",
+                title: "The connection was interrupted",
+                message: "Memories lost contact with the AI service before the edit returned. Your saved cut is unchanged.",
+                suggestion: "Check your connection and try again.",
+                symbol: "antenna.radiowaves.left.and.right.slash",
+                actionTitle: "Try Again",
+                recovery: .retry,
+                reference: "AI-CONNECTION"
+            )
+        case .cancelled:
+            return AICutFailure(
+                stage: "On this iPhone",
+                title: "The AI edit was cancelled",
+                message: "The request stopped before a new cut was applied.",
+                suggestion: "Try again whenever you’re ready.",
+                symbol: "xmark.circle",
+                actionTitle: "Try Again",
+                recovery: .retry,
+                reference: "AI-CANCELLED"
+            )
+        default:
+            return AICutFailure(
+                stage: "Secure connection",
+                title: "The AI service couldn’t be reached",
+                message: "The connection ended before a usable edit returned. Your saved cut is unchanged.",
+                suggestion: "Try again shortly on a steady connection.",
+                symbol: "network.slash",
+                actionTitle: "Try Again",
+                recovery: .retry,
+                reference: "AI-NETWORK"
+            )
+        }
+    }
+
+    private static func urlError(from error: Error) -> URLError? {
+        if let urlError = error as? URLError { return urlError }
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else { return nil }
+        return URLError(URLError.Code(rawValue: nsError.code))
+    }
+}
+
 private struct AICutCandidatePhoto: Sendable {
     let photo: ReelPhoto
     let localSelection: CloudPhotoLocalSelection
@@ -1610,7 +1946,7 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var aiCutComparison: AICutComparison?
     @Published private(set) var aiCutProgress = 0.0
     @Published private(set) var aiCutStatus = "Finding the strongest moments…"
-    @Published private(set) var aiCutFailureMessage: String?
+    @Published private(set) var aiCutFailure: AICutFailure?
     @Published private(set) var aiVideoSource: TripCutSource = .aiCut
     @Published private(set) var aiVideoSelectedPhotoIDs: [String] = []
     @Published private(set) var aiVideoRecommendedPhotoIDs: [String] = []
@@ -1692,6 +2028,12 @@ final class TripReelModel: ObservableObject {
 
     private static let cloudPreferenceKey = "tripreel.cloud-photo-analysis-preference.v1"
     private static let welcomeCompletedKey = "memories.welcome-completed.v1"
+
+    var aiCutFailureMessage: String? { aiCutFailure?.message }
+
+    var aiCutFallbackTitle: String {
+        aiCutSnapshot == nil ? "Keep First Cut" : "Use Previous AI Cut"
+    }
 
     init(
         arguments: [String] = ProcessInfo.processInfo.arguments,
@@ -2496,7 +2838,7 @@ final class TripReelModel: ObservableObject {
     }
 
     func openAICutDirections() {
-        aiCutFailureMessage = nil
+        aiCutFailure = nil
         selectedAICutDirection = recommendedAICutDirection
         resetAICutPhotoSelection()
         aiCutConsentGranted = false
@@ -2536,22 +2878,17 @@ final class TripReelModel: ObservableObject {
         aiCutTask?.cancel()
         let generation = UUID()
         aiCutGeneration = generation
-        aiCutFailureMessage = nil
-        aiCutSnapshot = nil
-        aiCutSummary = nil
-        aiCutRecommendations = []
-        aiCutDiagnosis = nil
-        aiCutComparison = nil
+        aiCutFailure = nil
         aiCutProgress = 0
         aiCutStatus = "Finding the strongest moments…"
         go(.aiProcessing, direction: .forward)
 
         guard cloudPhotoAnalysis.isConfigured else {
-            aiCutFailureMessage = "AI couldn't create another cut right now. Your First Cut is still ready."
+            aiCutFailure = .serviceNotReady
             return
         }
         guard let firstCutSnapshot else {
-            aiCutFailureMessage = "Your First Cut needs to be ready before creating another version."
+            aiCutFailure = .firstCutUnavailable
             return
         }
 
@@ -2563,11 +2900,11 @@ final class TripReelModel: ObservableObject {
         }
 
         guard let direction = selectedAICutDirection else {
-            aiCutFailureMessage = "Choose a direction before creating another cut. Your First Cut is unchanged."
+            aiCutFailure = .directionUnavailable
             return
         }
         guard let sourceTrip = activeAnalysisTrip ?? selectedTrip else {
-            aiCutFailureMessage = "The original memory moments aren't available for another cut. Your First Cut is unchanged."
+            aiCutFailure = .sourceUnavailable
             return
         }
         let sourceAssets = sourceTrip.assets
@@ -2593,7 +2930,7 @@ final class TripReelModel: ObservableObject {
         }
 
         guard !candidates.isEmpty else {
-            aiCutFailureMessage = "There aren't enough privacy-safe previews for another cut. Your First Cut is unchanged."
+            aiCutFailure = .selectionUnavailable
             return
         }
 
@@ -2648,7 +2985,7 @@ final class TripReelModel: ObservableObject {
                   !Task.isCancelled,
                   !wireInputs.isEmpty else {
                 if self.aiCutGeneration == generation {
-                    self.aiCutFailureMessage = "The selected previews aren't available right now. Your First Cut is still ready."
+                    self.aiCutFailure = .selectionUnavailable
                 }
                 return
             }
@@ -2692,27 +3029,43 @@ final class TripReelModel: ObservableObject {
             } catch {
                 guard self.aiCutGeneration == generation else { return }
                 self.aiCutTask = nil
-                let localizedMessage = (error as? any LocalizedError)?.errorDescription?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                self.aiCutFailureMessage = localizedMessage?.isEmpty == false
-                    ? localizedMessage
-                    : "AI couldn't create another cut right now. Your First Cut is still ready."
+                self.aiCutFailure = .from(error)
             }
         }
     }
 
     func cancelAICut() {
+        let returnScreen: AppScreen = aiCutSnapshot == nil ? .firstCutOptions : .aiComparison
         aiCutGeneration = UUID()
         aiCutTask?.cancel()
         aiCutTask = nil
-        aiCutFailureMessage = nil
+        aiCutFailure = nil
         aiCutProgress = 0
         aiCutConsentGranted = false
-        go(.firstCutOptions, direction: .backward)
+        go(returnScreen, direction: .backward)
     }
 
     func retryAICut() {
         beginAICut()
+    }
+
+    func recoverFromAICutFailure() {
+        guard let aiCutFailure else { return }
+        switch aiCutFailure.recovery {
+        case .retry:
+            retryAICut()
+        case .reviewMoments:
+            self.aiCutFailure = nil
+            go(.aiDirection, direction: .backward)
+        case .startAgain:
+            self.aiCutFailure = nil
+            aiCutConsentGranted = false
+            go(.firstCutOptions, direction: .backward)
+        }
+    }
+
+    func leaveAICutFailure() {
+        cancelAICut()
     }
 
     func useAICut() {
@@ -2943,7 +3296,7 @@ final class TripReelModel: ObservableObject {
     }
 
     func tryAnotherAICut() {
-        aiCutFailureMessage = nil
+        aiCutFailure = nil
         selectedAICutDirection = recommendedAICutDirection
         go(.aiDirection, direction: .backward)
     }
@@ -4348,7 +4701,7 @@ final class TripReelModel: ObservableObject {
         aiCutRecommendations = []
         aiCutDiagnosis = nil
         aiCutComparison = nil
-        aiCutFailureMessage = nil
+        aiCutFailure = nil
         aiCutProgress = 0
         aiVideoGenerationID = UUID()
         aiVideoTask?.cancel()
@@ -4860,7 +5213,7 @@ final class TripReelModel: ObservableObject {
         aiCutRecommendations = []
         aiCutDiagnosis = nil
         aiCutComparison = nil
-        aiCutFailureMessage = nil
+        aiCutFailure = nil
         aiCutProgress = 0
         selectedAICutPhotoIDs = []
         aiCutStoryContext = ""

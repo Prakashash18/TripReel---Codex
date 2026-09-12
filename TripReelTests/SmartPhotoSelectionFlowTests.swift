@@ -237,6 +237,51 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         XCTAssertEqual(model.photos, first.photos)
     }
 
+    func testFailedReplacementKeepsTheLastSuccessfulAICutRecoverable() async throws {
+        let preferences = makePreferences()
+        defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
+        let cloud = CloudAnalysisSpy(failureCallNumbers: [2])
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: StubPhotoLibraryForSelection(),
+            cloudPhotoAnalysis: cloud,
+            photoAnalysisThumbnails: ThumbnailStub(),
+            nativePhotoIntelligence: NativeIntelligenceStub(),
+            preferenceStore: preferences
+        )
+
+        model.requestBuild(trip: makeTrip(count: 3))
+        try await waitUntil { model.screen == .building }
+        model.go(.firstCutOptions)
+        model.openAICutDirections()
+        model.useCloudEnhancement()
+        model.selectAICutDirection(.dynamic)
+        model.continueWithAICutDirection()
+        try await waitUntil { model.screen == .aiComparison }
+
+        let successfulCut = try XCTUnwrap(model.aiCutSnapshot)
+        model.tryAnotherAICut()
+        model.selectAICutDirection(.calm)
+        model.continueWithAICutDirection()
+        try await waitUntil { model.aiCutFailure != nil }
+
+        XCTAssertEqual(model.screen, .aiProcessing)
+        XCTAssertEqual(model.aiCutSnapshot, successfulCut)
+        XCTAssertEqual(model.aiCutFailure?.stage, "OpenAI response")
+        XCTAssertEqual(model.aiCutFailure?.title, "The AI edit was incomplete")
+        XCTAssertEqual(model.aiCutFallbackTitle, "Use Previous AI Cut")
+
+        model.recoverFromAICutFailure()
+        try await waitUntil { model.screen == .aiComparison && model.aiCutFailure == nil }
+
+        let callCount = await cloud.observedCallCount()
+        XCTAssertEqual(callCount, 3)
+        XCTAssertEqual(model.screen, .aiComparison)
+        XCTAssertNotNil(model.aiCutSnapshot)
+        XCTAssertNil(model.aiCutFailure)
+    }
+
     func testMetadataScreenshotIsExcludedWithoutPreparingOrUploadingIt() async throws {
         let preferences = makePreferences()
         preferences.set("enabled", forKey: "tripreel.cloud-photo-analysis-preference.v1")
@@ -629,10 +674,16 @@ private actor CloudAnalysisSpy: CloudPhotoAnalysisServing {
     private(set) var baselines: [CloudFirstCutInput?] = []
     private(set) var editorialContexts: [[CloudPhotoEditorialContext?]] = []
     private let fails: Bool
+    private let failureCallNumbers: Set<Int>
 
-    init(isConfigured: Bool = true, fails: Bool = false) {
+    init(
+        isConfigured: Bool = true,
+        fails: Bool = false,
+        failureCallNumbers: Set<Int> = []
+    ) {
         self.isConfigured = isConfigured
         self.fails = fails
+        self.failureCallNumbers = failureCallNumbers
     }
 
     func createEditPlan(
@@ -674,7 +725,9 @@ private actor CloudAnalysisSpy: CloudPhotoAnalysisServing {
         storyContexts.append(storyContext)
         baselines.append(baseline)
         editorialContexts.append(photos.map(\.context))
-        if fails { throw CloudPhotoAnalysisError.invalidResponse }
+        if fails || failureCallNumbers.contains(callCount) {
+            throw CloudPhotoAnalysisError.invalidResponse
+        }
         return AICutEditPlan(
             version: baseline == nil ? 2 : 3,
             direction: direction,
