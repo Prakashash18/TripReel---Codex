@@ -33,7 +33,7 @@ struct TripReelPrivacyPolicyView: View {
                         )
                         section(
                             "Purchases",
-                            "Apple processes payments. RevenueCat receives an anonymous app user identifier and purchase or subscription status so Memories can unlock longer reels and HD export across your devices. RevenueCat never receives your photos, previews, films, titles, or location data. You can restore eligible purchases from the upgrade screen."
+                            "Apple processes payments. RevenueCat receives an anonymous app user identifier and purchase or subscription status so Memories can unlock full HD exports. RevenueCat never receives your photos, previews, films, titles, or location data. Pro subscriptions can be restored; a one-story pass is a consumable whose memory unlock is retained on the purchasing device."
                         )
                         section(
                             "Your choices",

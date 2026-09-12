@@ -1618,10 +1618,63 @@ struct FreeExportStoryDecision: Hashable, Sendable {
     let source: FreeExportEndingSource
 }
 
-/// Finds a complete late-story beat instead of shortening a reel to a fixed
-/// duration. The AI may nominate a beat, but the device enforces a narrow,
-/// creator-friendly tail so an unsafe suggestion can never hide too much.
+/// Builds a short trailer from strong beats across the whole story. This is a
+/// separate edit, not a percentage of the paid film or a blunt tail trim.
 enum FreeExportStoryPlanner {
+    static func previewPhotos(
+        from photos: [ReelPhoto],
+        titleCards: [MontageTitleCard],
+        textOverlays: [MontageTextOverlay],
+        insights: [String: MontagePhotoInsight],
+        preferredEndPhotoID: String?
+    ) -> [ReelPhoto] {
+        guard photos.count > 2 else { return photos }
+
+        let targetCount = min(5, max(3, Int(ceil(Double(photos.count) * 0.18))))
+        let overlayPhotoIDs = Set(textOverlays.map(\.photoID))
+        let chapterAnchors = Set(titleCards.compactMap(\.afterPhotoID))
+        var selectedIndices = Set<Int>()
+
+        // Pick one standout from each chronological chapter. The result still
+        // reads beginning-to-end, while quality and relevance decide the shot.
+        for segment in 0..<targetCount {
+            let lower = segment * photos.count / targetCount
+            let upper = max(lower + 1, (segment + 1) * photos.count / targetCount)
+            let range = lower..<min(upper, photos.count)
+            let best = range.max { left, right in
+                previewScore(
+                    photos[left],
+                    index: left,
+                    insights: insights,
+                    overlayPhotoIDs: overlayPhotoIDs,
+                    chapterAnchors: chapterAnchors,
+                    preferredEndPhotoID: preferredEndPhotoID,
+                    isFinalSegment: segment == targetCount - 1
+                ) < previewScore(
+                    photos[right],
+                    index: right,
+                    insights: insights,
+                    overlayPhotoIDs: overlayPhotoIDs,
+                    chapterAnchors: chapterAnchors,
+                    preferredEndPhotoID: preferredEndPhotoID,
+                    isFinalSegment: segment == targetCount - 1
+                )
+            }
+            if let best { selectedIndices.insert(best) }
+        }
+
+        return selectedIndices.sorted().map { index in
+            var photo = photos[index]
+            // A Memory Preview should feel intentionally brisk even when the
+            // full edit contains long holds or video excerpts.
+            let sourceDuration = photo.durationSeconds ?? 1.45
+            photo.durationSeconds = photo.isVideo
+                ? min(max(sourceDuration, 1.4), 2.2)
+                : min(max(sourceDuration, 1.15), 1.55)
+            return photo
+        }
+    }
+
     static func decide(
         photos: [ReelPhoto],
         titleCards: [MontageTitleCard],
@@ -1748,6 +1801,29 @@ enum FreeExportStoryPlanner {
         return score
     }
 
+    private static func previewScore(
+        _ photo: ReelPhoto,
+        index: Int,
+        insights: [String: MontagePhotoInsight],
+        overlayPhotoIDs: Set<String>,
+        chapterAnchors: Set<String>,
+        preferredEndPhotoID: String?,
+        isFinalSegment: Bool
+    ) -> Double {
+        let insight = insights[photo.id] ?? MontagePhotoInsight()
+        var score = (0.58 * insight.memoryScore) + (0.34 * insight.aestheticScore)
+        if insight.contentKind == .people { score += 0.18 }
+        score += min(0.12, Double(insight.peopleCount) * 0.03)
+        if photo.isVideo { score += 0.16 }
+        if overlayPhotoIDs.contains(photo.id) { score += 0.10 }
+        if chapterAnchors.contains(photo.id) { score += 0.06 }
+        if photo.isSimilar { score -= 0.24 }
+        if isFinalSegment, photo.id == preferredEndPhotoID { score += 0.55 }
+        // Stable tie breaker; earlier beats win inside each chapter.
+        score -= Double(index) * 0.000_001
+        return score
+    }
+
     private static func sceneSignature(_ insight: MontagePhotoInsight) -> Set<String> {
         Set(insight.classifications.prefix(3).map {
             $0.identifier.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
@@ -1769,7 +1845,6 @@ private struct PreparedExportContent: Sendable {
     let titleCards: [MontageTitleCard]
     let textOverlays: [MontageTextOverlay]
     let durationSeconds: Double
-    let storyDecision: FreeExportStoryDecision?
 }
 
 enum TripCutSource: String, Equatable, Sendable {
@@ -2612,32 +2687,15 @@ final class TripReelModel: ObservableObject {
     }
 
     var freeExportEndingBadge: String {
-        guard !freeExportIsFullLength else { return "FREE · FULL LENGTH · WATERMARKED" }
-        let source = preparedExportContent(for: .standard).storyDecision?.source
-        return source == .aiDirector
-            ? "FREE · AI ENDING · WATERMARKED"
-            : "FREE · SMART ENDING · WATERMARKED"
+        "FREE · MEMORY PREVIEW · WATERMARKED"
     }
 
     var freeExportEndingSummary: String {
-        guard !freeExportIsFullLength else {
-            return "Your whole film fits in Free Reel. Pro adds 1080p and removes the watermark."
-        }
         let count = fullStoryExclusiveMomentCount
-        let additional = count > 0
-            ? " Full Story adds " + String(count) + " more moment"
-                + (count == 1 ? "" : "s") + " (+\(fullStoryExtraDurationText))."
-            : " Full Story keeps the complete ending (+\(fullStoryExtraDurationText))."
-        let source = preparedExportContent(for: .standard).storyDecision?.source
-        let opening = source == .aiDirector
-            ? "AI Director chose a complete stopping beat at \(freeExportDurationText)."
-            : "Free Reel ends on a complete story beat at \(freeExportDurationText)."
-        return opening + additional
-    }
-
-    var freeExportEndingReason: String {
-        preparedExportContent(for: .standard).storyDecision?.reason
-            ?? "Ends on a complete story beat."
+        guard count > 0 else {
+            return "Your Memory Preview is ready. Full Story adds 1080p and removes the watermark."
+        }
+        return "Your free \(freeExportDurationText) preview uses \(freeExportMomentCount) standout moments. Full Story keeps all \(keptCount)."
     }
 
     var freeExportMomentCount: Int {
@@ -2668,6 +2726,10 @@ final class TripReelModel: ObservableObject {
                 fullStoryHighlightScore(for: $0) > fullStoryHighlightScore(for: $1)
             }.prefix(3)
         )
+    }
+
+    var exportStoryID: String {
+        selectedTrip?.id ?? "memory-" + keptPhotos.map(\.id).joined(separator: "-")
     }
 
     var activeExportDurationText: String {
@@ -5601,42 +5663,24 @@ final class TripReelModel: ObservableObject {
                 photos: fullPhotos,
                 titleCards: fullTitleCards,
                 textOverlays: textOverlays,
-                durationSeconds: filmDurationSeconds,
-                storyDecision: nil
+                durationSeconds: filmDurationSeconds
             )
         }
 
-        let decision = FreeExportStoryPlanner.decide(
-            photos: fullPhotos,
+        let freePhotos = FreeExportStoryPlanner.previewPhotos(
+            from: fullPhotos,
             titleCards: fullTitleCards,
             textOverlays: textOverlays,
             insights: activePhotoInsights,
-            preferredEndPhotoID: freePreviewEndPhotoID,
-            preferredReason: freePreviewReason
+            preferredEndPhotoID: freePreviewEndPhotoID
         )
-        guard let endPhotoID = decision.endPhotoID,
-              let endIndex = fullPhotos.firstIndex(where: { $0.id == endPhotoID }),
-              endIndex < fullPhotos.count - 1 else {
-            return PreparedExportContent(
-                photos: fullPhotos,
-                titleCards: fullTitleCards,
-                textOverlays: textOverlays,
-                durationSeconds: filmDurationSeconds,
-                storyDecision: decision
-            )
-        }
-
-        // Preserve the real edit exactly and end after the chosen moment. A
-        // chapter card stays only when its anchor is inside this cut; the full
-        // ending card belongs to Full Story unless the entire film is present.
-        let freePhotos = Array(fullPhotos.prefix(endIndex + 1))
         let includedPhotoIDs = Set(freePhotos.map(\.id))
         let freeTitleCards = fullTitleCards.filter { card in
             switch card.kind {
             case .opening:
                 true
             case .place:
-                card.afterPhotoID.map(includedPhotoIDs.contains) ?? (freePhotos.count > 1)
+                false
             case .ending:
                 false
             }
@@ -5649,8 +5693,7 @@ final class TripReelModel: ObservableObject {
             photos: freePhotos,
             titleCards: freeTitleCards,
             textOverlays: freeTextOverlays,
-            durationSeconds: totalDuration,
-            storyDecision: decision
+            durationSeconds: totalDuration
         )
     }
 

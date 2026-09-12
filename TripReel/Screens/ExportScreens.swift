@@ -160,16 +160,17 @@ struct ExportScreen: View {
                 VStack(spacing: 14) {
                     ExportOptionCard(
                         source: model.previewSource(at: 0),
-                        title: "Free Reel",
-                        subtitle: model.freeExportIsFullLength
-                            ? "9:16 · 720p · \(model.freeExportDurationText) complete"
-                            : "9:16 · 720p · \(model.freeExportDurationText) story cut",
+                        title: "Memory Preview",
+                        subtitle: "9:16 · 720p · \(model.freeExportDurationText)",
                         badge: model.freeExportEndingBadge,
                         badgeColor: TR.keep,
                         watermark: true,
                         accessibilityID: "export-standard"
                     ) {
-                        model.requestExport(.standard, isPremium: purchases.isPremium)
+                        model.requestExport(
+                            .standard,
+                            isPremium: purchases.hasFullExportAccess(for: model.exportStoryID)
+                        )
                     }
 
                     ExportOptionCard(
@@ -177,7 +178,7 @@ struct ExportScreen: View {
                             ?? model.previewSource(at: 2),
                         title: "Full Story",
                         subtitle: "9:16 · 1080p · \(model.filmDurationText) complete",
-                        badge: "MEMORIES PRO · NO WATERMARK",
+                        badge: "FULL LENGTH · NO WATERMARK",
                         badgeColor: TR.accent,
                         highlighted: true,
                         showsChevron: true,
@@ -185,7 +186,10 @@ struct ExportScreen: View {
                         highlightText: fullStoryTeaserText,
                         accessibilityID: "export-hd"
                     ) {
-                        model.requestExport(.highDefinition, isPremium: purchases.isPremium)
+                        model.requestExport(
+                            .highDefinition,
+                            isPremium: purchases.hasFullExportAccess(for: model.exportStoryID)
+                        )
                     }
 
                     Text("Both export as vertical videos ready for Instagram, TikTok or Photos.")
@@ -327,7 +331,7 @@ private struct FullStoryHighlightStrip: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                MetadataText(text: "Only in Full Story", color: TR.accent)
+                MetadataText(text: "Full Story adds", color: TR.accent)
                 Text(text)
                     .font(TR.ui(12, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.82))
@@ -341,7 +345,7 @@ private struct FullStoryHighlightStrip: View {
                 .foregroundStyle(TR.accent)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Only in Full Story. \(text)")
+        .accessibilityLabel("Full Story adds \(text)")
         .accessibilityIdentifier("full-story-highlight")
     }
 }
@@ -387,7 +391,10 @@ private struct ProjectFormatSheet: View {
 
                     Button {
                         dismiss()
-                        model.requestExport(.capCut, isPremium: purchases.isPremium)
+                        model.requestExport(
+                            .capCut,
+                            isPremium: purchases.hasFullExportAccess(for: model.exportStoryID)
+                        )
                     } label: {
                         Label("Render MP4 for CapCut", systemImage: "play.rectangle.fill")
                             .frame(maxWidth: .infinity)
@@ -604,26 +611,18 @@ struct PaywallScreen: View {
                 .ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 18) {
-                    Spacer(minLength: 190)
+                VStack(alignment: .leading, spacing: 14) {
+                    Spacer(minLength: 150)
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        MetadataText(text: "Memories Pro", color: TR.accent)
-                        Text("Export the full story")
+                    VStack(alignment: .leading, spacing: 8) {
+                        MetadataText(
+                            text: "FULL STORY · \(model.keptMediaSummary.uppercased()) · \(model.filmDurationText)",
+                            color: TR.accent
+                        )
+                        Text("Keep every moment")
                             .font(TR.display(38))
                             .tracking(-0.5)
                             .fixedSize(horizontal: false, vertical: true)
-
-                        HStack(spacing: 8) {
-                            metricPill(symbol: "photo.on.rectangle.angled", text: model.keptMediaSummary)
-                            metricPill(symbol: "clock", text: model.filmDurationText)
-                        }
-
-                        Text(paywallSummary)
-                            .font(TR.ui(14, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.76))
-                            .lineSpacing(4)
-                            .accessibilityIdentifier("paywall-free-summary")
                     }
 
                     if !model.fullStoryHighlightPhotos.isEmpty,
@@ -641,28 +640,24 @@ struct PaywallScreen: View {
                         .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
                     }
 
-                    HStack(spacing: 12) {
-                        benefit(symbol: "film.stack", title: "Longer films")
-                        benefit(symbol: "sparkles.rectangle.stack", title: "1080p")
-                        benefit(symbol: "drop.triangle", title: "No watermark")
-                    }
+                    Label("1080p · No watermark", systemImage: "sparkles.rectangle.stack")
+                        .font(TR.ui(13, weight: .semibold))
+                        .foregroundStyle(TR.accent)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .accessibilityIdentifier("paywall-free-summary")
 
                     if purchases.isConfigured {
                         if purchases.isLoading && purchases.packages.isEmpty {
                             HStack(spacing: 10) {
                                 ProgressView().tint(TR.accent)
-                                Text("Loading subscription options…")
+                                Text("Loading export options…")
                                     .font(TR.ui(13))
                                     .foregroundStyle(.white.opacity(0.62))
                             }
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.vertical, 20)
                         } else {
-                            VStack(spacing: 9) {
-                                ForEach(purchases.packages, id: \.identifier) { package in
-                                    packageRow(package)
-                                }
-                            }
+                            purchaseOptions
                         }
                     } else {
                         configurationNotice
@@ -688,29 +683,31 @@ struct PaywallScreen: View {
                         }
                     }
 
-                    Button {
-                        buySelectedPackage()
-                    } label: {
-                        HStack(spacing: 9) {
-                            if purchases.isPurchasing {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .tint(TR.ink)
+                    if selectedPackage != nil {
+                        Button {
+                            buySelectedPackage()
+                        } label: {
+                            HStack(spacing: 9) {
+                                if purchases.isPurchasing {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .tint(TR.ink)
+                                }
+                                Text(purchases.isPurchasing ? "Connecting to App Store…" : purchaseButtonTitle)
+                                    .frame(maxWidth: .infinity)
                             }
-                            Text(purchases.isPurchasing ? "Connecting to App Store…" : "Unlock full story")
-                                .frame(maxWidth: .infinity)
                         }
+                        .buttonStyle(CreamButtonStyle())
+                        .disabled(purchases.isPurchasing)
+                        .accessibilityIdentifier("purchase-full-story")
                     }
-                    .buttonStyle(CreamButtonStyle())
-                    .disabled(selectedPackage == nil || purchases.isPurchasing)
-                    .accessibilityIdentifier("purchase-memories-pro")
 
                     Button {
                         model.exportFreeVersionInsteadOfUpgrading()
                     } label: {
                         VStack(spacing: 3) {
-                            Text("Export free version")
-                            Text("\(model.freeExportDurationText) · complete story beat · 720p · watermark")
+                            Text("Export free preview")
+                            Text("\(model.freeExportDurationText) · Watermarked")
                                 .font(TR.ui(11, weight: .medium))
                                 .foregroundStyle(.white.opacity(0.58))
                         }
@@ -720,21 +717,25 @@ struct PaywallScreen: View {
                     .disabled(purchases.isPurchasing)
                     .accessibilityIdentifier("export-free-from-paywall")
 
-                    Button("Restore purchases") {
-                        restorePurchases()
+                    if purchases.isConfigured {
+                        Button("Restore Pro") {
+                            restorePurchases()
+                        }
+                        .font(TR.ui(13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .frame(maxWidth: .infinity)
+                        .disabled(purchases.isPurchasing)
+                        .buttonStyle(.plain)
                     }
-                    .font(TR.ui(13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.62))
-                    .frame(maxWidth: .infinity)
-                    .disabled(!purchases.isConfigured || purchases.isPurchasing)
-                    .buttonStyle(.plain)
 
                     VStack(spacing: 7) {
-                        Text("Subscriptions renew automatically unless cancelled at least 24 hours before the current period ends. Manage or cancel in your Apple ID settings.")
-                            .font(TR.ui(10))
-                            .foregroundStyle(.white.opacity(0.38))
-                            .multilineTextAlignment(.center)
-                            .lineSpacing(2)
+                        if selectedPackage != nil {
+                            Text(purchaseTermsText)
+                                .font(TR.ui(10))
+                                .foregroundStyle(.white.opacity(0.38))
+                                .multilineTextAlignment(.center)
+                                .lineSpacing(2)
+                        }
 
                         HStack(spacing: 18) {
                             Button("Privacy") { showsPrivacyPolicy = true }
@@ -769,36 +770,9 @@ struct PaywallScreen: View {
         .accessibilityIdentifier("paywall-screen")
     }
 
-    private func metricPill(symbol: String, text: String) -> some View {
-        Label(text, systemImage: symbol)
-            .font(TR.ui(12, weight: .semibold))
-            .foregroundStyle(TR.cream)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 8)
-            .background(.white.opacity(0.09))
-            .clipShape(Capsule())
-    }
-
-    private func benefit(symbol: String, title: String) -> some View {
-        VStack(spacing: 7) {
-            Image(systemName: symbol)
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(TR.accent)
-            Text(title)
-                .font(TR.ui(11, weight: .semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .background(.white.opacity(0.07))
-        .overlay(RoundedRectangle(cornerRadius: 15).stroke(.white.opacity(0.12), lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
-    }
-
     private func packageRow(_ package: Package) -> some View {
         let isSelected = selectedPackage?.identifier == package.identifier
-        let isAnnual = package.packageType == .annual
+        let isStoryPass = purchases.isStoryPass(package)
         return Button {
             withAnimation(TRMotion.selection) {
                 selectedPackageID = package.identifier
@@ -806,16 +780,15 @@ struct PaywallScreen: View {
         } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(package.memoriesDisplayName)
+                    Text(isStoryPass ? "Export this story" : "Memories Pro · \(package.memoriesDisplayName)")
                         .font(TR.ui(16, weight: .semibold))
-                    Text(package.memoriesPriceDetail)
+                    Text(isStoryPass
+                        ? "One full export · \(package.localizedPriceString)"
+                        : "Unlimited full exports · \(package.memoriesPriceDetail)")
                         .font(TR.ui(12))
                         .foregroundStyle(.white.opacity(0.62))
                 }
                 Spacer()
-                if isAnnual {
-                    MetadataText(text: "BEST VALUE", color: TR.accent)
-                }
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 20, weight: .medium))
                     .foregroundStyle(isSelected ? TR.accent : .white.opacity(0.28))
@@ -831,23 +804,26 @@ struct PaywallScreen: View {
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
     }
 
-    private var configurationNotice: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Purchases aren't available yet", systemImage: "cart.badge.questionmark")
-                .font(TR.ui(14, weight: .semibold))
-            Text("You can still export the free \(model.freeExportDurationText) version below.")
-                .font(TR.ui(12))
-                .foregroundStyle(.white.opacity(0.58))
-                .lineSpacing(3)
+    @ViewBuilder
+    private var purchaseOptions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let storyPass = purchases.storyPassPackage {
+                packageRow(storyPass)
+            }
+
+            if let annual = purchases.proPackages.first(where: { $0.packageType == .annual })
+                ?? purchases.proPackages.first {
+                packageRow(annual)
+            }
+
         }
-        .padding(15)
-        .background(.white.opacity(0.07))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.13), lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private var paywallSummary: String {
-        model.freeExportEndingSummary
+    private var configurationNotice: some View {
+        Label("Full export is temporarily unavailable", systemImage: "exclamationmark.circle")
+            .font(TR.ui(12, weight: .medium))
+            .foregroundStyle(.white.opacity(0.58))
+            .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private var fullStoryTeaserText: String {
@@ -862,15 +838,30 @@ struct PaywallScreen: View {
         guard selectedPackageID == nil || !purchases.packages.contains(where: { $0.identifier == selectedPackageID }) else {
             return
         }
-        selectedPackageID = purchases.packages.first(where: { $0.packageType == .annual })?.identifier
+        selectedPackageID = purchases.storyPassPackage?.identifier
+            ?? purchases.proPackages.first(where: { $0.packageType == .annual })?.identifier
             ?? purchases.packages.first?.identifier
+    }
+
+    private var purchaseButtonTitle: String {
+        guard let selectedPackage else { return "Choose an option" }
+        return purchases.isStoryPass(selectedPackage)
+            ? "Export this story"
+            : "Start Memories Pro"
+    }
+
+    private var purchaseTermsText: String {
+        guard let selectedPackage, !purchases.isStoryPass(selectedPackage) else {
+            return "The story pass is a one-time purchase for this memory."
+        }
+        return "Subscriptions renew automatically unless cancelled at least 24 hours before the current period ends. Manage or cancel in your Apple ID settings."
     }
 
     private func buySelectedPackage() {
         guard let package = selectedPackage else { return }
         Task {
-            if await purchases.purchase(package) {
-                resumeIfPremium()
+            if await purchases.purchase(package, unlockingStoryID: model.exportStoryID) {
+                resumeIfUnlocked()
             }
         }
     }
@@ -884,7 +875,11 @@ struct PaywallScreen: View {
     }
 
     private func resumeIfPremium() {
-        guard purchases.isPremium, !didResumeExport else { return }
+        resumeIfUnlocked()
+    }
+
+    private func resumeIfUnlocked() {
+        guard purchases.hasFullExportAccess(for: model.exportStoryID), !didResumeExport else { return }
         didResumeExport = true
         model.resumePendingExportAfterPurchase()
     }

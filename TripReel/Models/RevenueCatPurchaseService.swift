@@ -64,6 +64,7 @@ enum ExportAccessPolicy {
 @MainActor
 final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDelegate {
     static let defaultEntitlementIdentifier = "memories_pro"
+    static let defaultStoryPassPackageIdentifier = "story_pass"
 
     @Published private(set) var isConfigured = false
     @Published private(set) var isPremium = false
@@ -73,18 +74,23 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
     @Published private(set) var message: String?
 
     let entitlementIdentifier: String
+    let storyPassPackageIdentifier: String
 
     private let apiKey: String?
+    private let defaults: UserDefaults
+    private let unlockedStoriesKey = "memories.unlocked-export-story-ids"
 
     override convenience init() {
         self.init(bundle: .main)
     }
 
-    init(bundle: Bundle) {
+    init(bundle: Bundle, defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-qaPremium") {
             apiKey = nil
             entitlementIdentifier = Self.defaultEntitlementIdentifier
+            storyPassPackageIdentifier = Self.defaultStoryPassPackageIdentifier
             super.init()
             isPremium = true
             return
@@ -97,6 +103,10 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
         )
         apiKey = configuredKey
         entitlementIdentifier = Self.defaultEntitlementIdentifier
+        storyPassPackageIdentifier = Self.configurationValue(
+            key: "REVENUECAT_STORY_PASS_PACKAGE_ID",
+            bundle: bundle
+        ) ?? Self.defaultStoryPassPackageIdentifier
         super.init()
 
         guard let configuredKey else { return }
@@ -128,15 +138,15 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
             apply(resolvedCustomerInfo)
             packages = Self.sortedPackages(from: resolvedOfferings.current)
             message = packages.isEmpty
-                ? "No subscription options are available for this build yet."
+                ? "No export options are available for this build yet."
                 : nil
         } catch {
-            message = "Subscriptions couldn't be loaded. Check your connection and try again."
+            message = "Export options couldn't be loaded. Check your connection and try again."
         }
     }
 
     @discardableResult
-    func purchase(_ package: Package) async -> Bool {
+    func purchase(_ package: Package, unlockingStoryID storyID: String? = nil) async -> Bool {
         guard isConfigured, !isPurchasing else { return false }
         isPurchasing = true
         message = nil
@@ -146,6 +156,10 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
             let result = try await Purchases.shared.purchase(package: package)
             apply(result.customerInfo)
             if result.userCancelled { return false }
+            if isStoryPass(package), let storyID {
+                unlockStory(storyID)
+                return true
+            }
             if !isPremium {
                 message = "The purchase completed, but Memories Pro is not active yet. Try Restore Purchases."
             }
@@ -180,6 +194,26 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
         message = nil
     }
 
+    var storyPassPackage: Package? {
+        packages.first(where: isStoryPass)
+    }
+
+    var proPackages: [Package] {
+        packages.filter { !isStoryPass($0) }
+    }
+
+    func hasFullExportAccess(for storyID: String) -> Bool {
+        isPremium || unlockedStoryIDs.contains(storyID)
+    }
+
+    func isStoryPass(_ package: Package) -> Bool {
+        if package.identifier == storyPassPackageIdentifier { return true }
+        let productID = package.storeProduct.productIdentifier.lowercased()
+        return package.packageType == .custom
+            && productID.contains("story")
+            && (productID.contains("pass") || productID.contains("export"))
+    }
+
     nonisolated func purchases(_ purchases: Purchases, receivedUpdated customerInfo: CustomerInfo) {
         Task { @MainActor [weak self] in
             self?.apply(customerInfo)
@@ -188,6 +222,16 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
 
     private func apply(_ customerInfo: CustomerInfo) {
         isPremium = customerInfo.entitlements.active[entitlementIdentifier]?.isActive == true
+    }
+
+    private var unlockedStoryIDs: Set<String> {
+        Set(defaults.stringArray(forKey: unlockedStoriesKey) ?? [])
+    }
+
+    private func unlockStory(_ storyID: String) {
+        var unlocked = unlockedStoryIDs
+        unlocked.insert(storyID)
+        defaults.set(Array(unlocked).sorted(), forKey: unlockedStoriesKey)
     }
 
     private static func configurationValue(key: String, bundle: Bundle) -> String? {

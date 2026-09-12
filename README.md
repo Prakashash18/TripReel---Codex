@@ -47,17 +47,17 @@ Before building for TestFlight, enable the App Attest and In-App Purchase capabi
 
 ## RevenueCat and exports
 
-Previewing and editing are free. A standard 720p watermarked export is free when the finished reel has no more than 24 moments and is no longer than 30 seconds. Crossing either limit opens Memories Pro; 1080p without a watermark is also Pro. The pending export automatically resumes after a successful purchase or restore.
+Previewing and editing the complete reel are free. The free export is a separate 720p watermarked **Memory Preview**: an on-device planner selects three to five high-quality, relevant moments across the story and gives them brisk trailer pacing. A full-length 1080p export without a watermark can be unlocked once for that memory with a consumable Story Pass, or across all memories with Memories Pro. The pending export automatically resumes after a successful purchase or eligible restore.
 
-Create a RevenueCat project for the iOS app, add products in App Store Connect, attach them to an offering, and grant them the entitlement `memories_pro`. Add the **public iOS SDK key** as the `REVENUECAT_PUBLIC_SDK_KEY` build setting for the TripReel app target. RevenueCat's public SDK key is designed to ship in the app; never use a RevenueCat secret API key there. Prices and package periods are read from the current RevenueCat offering, so they stay localized and are not hard-coded in Swift.
+Create a RevenueCat project for the iOS app, add products in App Store Connect, and put them in the current offering. Subscription products grant the entitlement `memories_pro`; the consumable Story Pass must not grant an entitlement. Add the **public iOS SDK key** as the `REVENUECAT_PUBLIC_SDK_KEY` build setting for the TripReel app target. RevenueCat's public SDK key is designed to ship in the app; never use a RevenueCat secret API key there. Prices and package periods are read from the current RevenueCat offering, so they stay localized and are not hard-coded in Swift.
 
 Required dashboard setup before a TestFlight purchase test:
 
-1. Create the subscription products in App Store Connect and finish their price, localization, tax, and review metadata.
-2. Connect the App Store app to RevenueCat, import those products, and attach every paid product to the `memories_pro` entitlement.
-3. Put the packages in RevenueCat's **current offering**. The app prefers an annual package, then falls back to the first available package.
+1. Create the subscription products and a consumable Story Pass product in App Store Connect; finish their price, localization, tax, and review metadata.
+2. Connect the App Store app to RevenueCat. Attach only subscriptions to the `memories_pro` entitlement. Do not attach the consumable to an entitlement.
+3. Put the products in RevenueCat's **current offering**. Use a custom package identifier of `story_pass` for the consumable. If you use another identifier, set `REVENUECAT_STORY_PASS_PACKAGE_ID` in the app target's Build Settings. The paywall prefers Story Pass, followed by annual Pro.
 4. Copy RevenueCat's **public iOS SDK key** into the target's `REVENUECAT_PUBLIC_SDK_KEY` Build Setting for both Debug and Release, then commit that public value so Xcode Cloud receives it.
-5. Upload a new TestFlight build. Purchases there use Apple's sandbox accounts; **Restore purchases** refreshes the same entitlement.
+5. Upload a new TestFlight build. Purchases there use Apple's sandbox accounts; **Restore purchases** refreshes Pro subscriptions. Story Pass is a consumable and its per-memory unlock is retained locally on the purchasing device.
 
 For a local Debug smoke test only, `TRIPREEL_DEVELOPMENT_AUTH_TOKEN` may be set in an unshared Xcode Run environment. It must match the Worker's development bearer token and is read at runtime; it is never available in Release/TestFlight builds. Without that local override, a Debug build on a supported physical iPhone uses App Attest too. Debug may override `TRIPREEL_PHOTO_ANALYSIS_ENDPOINT` at runtime when testing another deployment.
 

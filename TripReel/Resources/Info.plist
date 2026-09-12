@@ -32,6 +32,8 @@
 	<true/>
 	<key>REVENUECAT_PUBLIC_SDK_KEY</key>
 	<string>$(REVENUECAT_PUBLIC_SDK_KEY)</string>
+	<key>REVENUECAT_STORY_PASS_PACKAGE_ID</key>
+	<string>$(REVENUECAT_STORY_PASS_PACKAGE_ID)</string>
 	<key>TRIPREEL_PHOTO_ANALYSIS_ENDPOINT</key>
 	<string>$(TRIPREEL_PHOTO_ANALYSIS_ENDPOINT)</string>
 	<key>UIAppFonts</key>

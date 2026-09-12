@@ -184,12 +184,11 @@ final class TripReelFlowUITests: XCTestCase {
         launchApp(at: "paywall")
 
         XCTAssertTrue(screen("paywall-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Export the full story"].exists)
+        XCTAssertTrue(app.staticTexts["Keep every moment"].exists)
         XCTAssertTrue(screen("paywall-free-summary").exists)
         XCTAssertTrue(screen("full-story-highlight").exists)
         let freeExport = screen("export-free-from-paywall")
         XCTAssertTrue(freeExport.exists)
-        XCTAssertTrue(app.buttons["Restore purchases"].exists)
 
         freeExport.tap()
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))

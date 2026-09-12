@@ -1080,14 +1080,10 @@ final class TripReelModelTests: XCTestCase {
         let expectedFirstID = try XCTUnwrap(model.keptPhotos.first?.id)
 
         XCTAssertLessThan(model.freeExportDurationSeconds, model.filmDurationSeconds)
-        XCTAssertGreaterThanOrEqual(model.freeExportMomentCount, 31)
+        XCTAssertEqual(model.freeExportMomentCount, 5)
         XCTAssertLessThan(model.freeExportMomentCount, model.keptCount)
-        XCTAssertGreaterThanOrEqual(model.fullStoryExclusiveMomentCount, 1)
-        XCTAssertLessThanOrEqual(model.fullStoryExclusiveMomentCount, 5)
+        XCTAssertEqual(model.fullStoryExclusiveMomentCount, 31)
         XCTAssertFalse(model.fullStoryHighlightPhotos.isEmpty)
-        let expectedPhotoIDs = Array(
-            model.keptPhotos.prefix(model.freeExportMomentCount)
-        ).map(\.id)
 
         model.requestExport(.standard, isPremium: false)
         for _ in 0..<100 where model.screen != .done {
@@ -1098,8 +1094,9 @@ final class TripReelModelTests: XCTestCase {
         let recordedRequest = await exporter.lastRequest
         let request = try XCTUnwrap(recordedRequest)
         XCTAssertEqual(request.quality, .standard)
-        XCTAssertEqual(request.photos.map(\.id), expectedPhotoIDs)
         XCTAssertEqual(request.photos.first?.id, expectedFirstID)
+        XCTAssertEqual(request.photos.count, 5)
+        XCTAssertNotEqual(request.photos.map(\.id), Array(model.keptPhotos.prefix(5)).map(\.id))
         XCTAssertFalse(request.titleCards.contains(where: { $0.kind == .ending }))
         let duration = MontageTimelineBuilder.make(
             photos: request.photos,
@@ -1805,6 +1802,37 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(decision.endPhotoID, photos[9].id)
         XCTAssertEqual(decision.reason, "The first payoff lands here.")
         XCTAssertEqual(decision.source, .aiDirector)
+    }
+
+    func testMemoryPreviewSelectsStrongMomentsAcrossTheWholeStory() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let photos = (0..<12).map {
+            makeReelPhoto(from: makeAsset("trailer-\($0)", start: start, minutes: $0))
+        }
+        let strongIndices = [1, 5, 9]
+        let insights = Dictionary(uniqueKeysWithValues: photos.enumerated().map { index, photo in
+            (
+                photo.id,
+                MontagePhotoInsight(
+                    memoryScore: strongIndices.contains(index) ? 0.98 : 0.12,
+                    aestheticScore: strongIndices.contains(index) ? 0.94 : 0.18,
+                    contentKind: strongIndices.contains(index) ? .people : .moment,
+                    peopleCount: strongIndices.contains(index) ? 3 : 0
+                )
+            )
+        })
+
+        let preview = FreeExportStoryPlanner.previewPhotos(
+            from: photos,
+            titleCards: [],
+            textOverlays: [],
+            insights: insights,
+            preferredEndPhotoID: nil
+        )
+
+        XCTAssertEqual(preview.map(\.id), strongIndices.map { photos[$0].id })
+        XCTAssertEqual(preview.count, 3)
+        XCTAssertLessThan(preview.last?.durationSeconds ?? 99, 2)
     }
 
     func testFreeExportPlannerRejectsAnAICutThatWouldHideTooMuch() throws {
