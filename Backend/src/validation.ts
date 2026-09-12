@@ -4,6 +4,7 @@ import {
   FIRST_CUT_TITLE_KINDS,
   LIMITS,
   LOCAL_SELECTIONS,
+  MEDIA_KINDS,
   MONTAGE_LOOKS,
   MOTIONS,
   MOTION_INTENSITIES,
@@ -14,6 +15,7 @@ import {
   REQUEST_VERSIONS,
   SOUNDTRACK_IDS,
   TITLE_STYLES,
+  VIDEO_MOTION_BANDS,
   type AICutDirection,
   type FirstCutInput,
   type FirstCutTitleKind,
@@ -63,12 +65,29 @@ function cleanPlainText(value: unknown, maximum: number, allowEmpty = false): st
 }
 
 function validatePhotoContext(value: unknown, photoIndex: number): PhotoEditorialContext {
+  const legacyKeys = [
+    "captureIndex", "dayIndex", "timeGap", "orientation", "contentKind",
+    "peopleCount", "memory", "aesthetic", "similarityGroup", "sceneLabels",
+  ] as const;
+  const mixedMediaKeys = [
+    ...legacyKeys,
+    "mediaKind", "clipDurationSeconds", "hasOriginalAudio", "videoMotion",
+  ] as const;
+  if (!isRecord(value)) {
+    throw new RequestProblem(400, "invalid_photo_context", `photos[${photoIndex}].context is invalid.`);
+  }
+  // The production Worker is deployed before the matching iOS build. Keep the
+  // prior photo-only context valid during that rollout, while still rejecting
+  // unknown keys and normalizing it to the new contract.
+  const hasMixedMediaContext = hasExactKeys(value, mixedMediaKeys);
+  const hasLegacyPhotoContext = hasExactKeys(value, legacyKeys);
+  const mediaKind = hasMixedMediaContext ? value.mediaKind : "photo";
+  const clipDurationSeconds = hasMixedMediaContext ? value.clipDurationSeconds : 0;
+  const hasOriginalAudio = hasMixedMediaContext ? value.hasOriginalAudio : false;
+  const videoMotion = hasMixedMediaContext ? value.videoMotion : "still";
+
   if (
-    !isRecord(value) ||
-    !hasExactKeys(value, [
-      "captureIndex", "dayIndex", "timeGap", "orientation", "contentKind",
-      "peopleCount", "memory", "aesthetic", "similarityGroup", "sceneLabels",
-    ]) ||
+    (!hasMixedMediaContext && !hasLegacyPhotoContext) ||
     !Number.isInteger(value.captureIndex) || Number(value.captureIndex) < 0 || Number(value.captureIndex) > 100_000 ||
     !Number.isInteger(value.dayIndex) || Number(value.dayIndex) < 0 || Number(value.dayIndex) > 365 ||
     !PHOTO_TIME_GAPS.includes(value.timeGap as PhotoTimeGap) ||
@@ -77,6 +96,17 @@ function validatePhotoContext(value: unknown, photoIndex: number): PhotoEditoria
     !Number.isInteger(value.peopleCount) || Number(value.peopleCount) < 0 || Number(value.peopleCount) > 20 ||
     !PHOTO_SCORE_BANDS.includes(value.memory as PhotoScoreBand) ||
     !PHOTO_SCORE_BANDS.includes(value.aesthetic as PhotoScoreBand) ||
+    !MEDIA_KINDS.includes(mediaKind as never) ||
+    typeof clipDurationSeconds !== "number" || !Number.isFinite(clipDurationSeconds) ||
+    Number(clipDurationSeconds) < 0 || Number(clipDurationSeconds) > 4 ||
+    typeof hasOriginalAudio !== "boolean" ||
+    !VIDEO_MOTION_BANDS.includes(videoMotion as never) ||
+    (mediaKind === "photo" && (
+      Number(clipDurationSeconds) !== 0 || hasOriginalAudio !== false || videoMotion !== "still"
+    )) ||
+    (mediaKind === "video" && (
+      Number(clipDurationSeconds) < 0.8
+    )) ||
     typeof value.similarityGroup !== "string" || !SIMILARITY_GROUP_PATTERN.test(value.similarityGroup) ||
     !Array.isArray(value.sceneLabels) || value.sceneLabels.length > LIMITS.maxSceneLabels ||
     !value.sceneLabels.every((label) => typeof label === "string" && SCENE_LABEL_PATTERN.test(label))
@@ -94,6 +124,10 @@ function validatePhotoContext(value: unknown, photoIndex: number): PhotoEditoria
     aesthetic: value.aesthetic as PhotoScoreBand,
     similarityGroup: value.similarityGroup,
     sceneLabels: value.sceneLabels as string[],
+    mediaKind: mediaKind as PhotoEditorialContext["mediaKind"],
+    clipDurationSeconds: Number(clipDurationSeconds),
+    hasOriginalAudio: hasOriginalAudio as boolean,
+    videoMotion: videoMotion as PhotoEditorialContext["videoMotion"],
   };
 }
 

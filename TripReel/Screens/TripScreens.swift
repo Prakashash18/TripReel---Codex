@@ -78,7 +78,7 @@ struct TripsScreen: View {
                             VStack(spacing: 12) {
                                 ProgressView()
                                     .tint(TR.accent)
-                                Text("Looking through \(model.libraryPhotoCount) accessible photos…")
+                                Text("Looking through \(model.libraryPhotoCount) accessible moments…")
                                     .font(TR.ui(13))
                                     .foregroundStyle(.white.opacity(0.58))
                             }
@@ -182,8 +182,8 @@ struct TripsScreen: View {
                 .font(TR.display(22))
                 .foregroundStyle(TR.cream)
             Text(isShowingLocalMemories
-                 ? "Local memories appear after Memories recognizes a familiar area and a compact day with six or more photos."
-                 : "Pull down to scan again, or pick the photos that matter yourself.")
+                 ? "Local memories appear after Memories recognizes a familiar area and a compact day with six or more moments."
+                 : "Pull down to scan again, or pick the moments that matter yourself.")
                 .font(TR.ui(12))
                 .foregroundStyle(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
@@ -229,7 +229,7 @@ private struct TripRow: View {
                             .lineLimit(1)
                     }
 
-                    Text("\(trip.dates) · \(trip.photoCount) PHOTOS")
+                    Text("\(trip.dates) · \(trip.mediaCountText.uppercased())")
                         .lineLimit(1)
                         .minimumScaleFactor(0.78)
                         .font(TR.mono(10))
@@ -248,7 +248,7 @@ private struct TripRow: View {
         }
         .buttonStyle(TactileButtonStyle())
         .accessibilityLabel(
-            [storyTitle, locationContext, trip.dates, "\(trip.photoCount) photos"]
+            [storyTitle, locationContext, trip.dates, trip.mediaCountText]
                 .compactMap { $0 }
                 .joined(separator: ", ")
         )
@@ -281,7 +281,7 @@ struct EmptyTripsScreen: View {
                     }
                     .opacity(0.55)
 
-                    Text("We couldn't find a clear memory yet. Pick the photos that matter, or add more moments and scan again.")
+                    Text("We couldn't find a clear memory yet. Pick the photos and videos that matter, or add more moments and scan again.")
                         .font(TR.display(21))
                         .foregroundStyle(.white.opacity(0.86))
                         .multilineTextAlignment(.center)
@@ -294,7 +294,7 @@ struct EmptyTripsScreen: View {
                 Spacer()
 
                 VStack(spacing: 15) {
-                    Button("Pick photos manually") {
+                    Button("Pick moments manually") {
                         showPicker = true
                     }
                     .buttonStyle(CreamButtonStyle())
@@ -302,7 +302,7 @@ struct EmptyTripsScreen: View {
                         isPresented: $showPicker,
                         selection: $pickerItems,
                         maxSelectionCount: 0,
-                        matching: .images,
+                        matching: .any(of: [.images, .videos]),
                         preferredItemEncoding: .current,
                         photoLibrary: .shared()
                     )
@@ -381,7 +381,7 @@ struct BuildingScreen: View {
                     .padding(.bottom, 10)
                     .trEntrance(2, distance: 8)
 
-                Text("\(model.buildCount) of \(model.photos.count) photos placed")
+                Text("\(model.buildCount) of \(model.photos.count) moments placed")
                     .font(TR.ui(15))
                     .foregroundStyle(.white.opacity(0.61))
                     .contentTransition(.numericText())

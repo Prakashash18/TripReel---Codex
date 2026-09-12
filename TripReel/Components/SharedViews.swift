@@ -1,4 +1,5 @@
 import AVFAudio
+import AVFoundation
 import ImageIO
 import Photos
 import SwiftUI
@@ -196,7 +197,7 @@ struct MontageView: View {
             source: photo.source,
             label: photo.label,
             aspectRatio: photo.aspectRatio,
-            frameStyle: MontageFrameResolver.resolve(
+            frameStyle: photo.isVideo ? .fullBleed : MontageFrameResolver.resolve(
                 planned: photo.frameStyle,
                 aspectRatio: photo.aspectRatio,
                 index: photoIndex,
@@ -208,7 +209,11 @@ struct MontageView: View {
             usesAutomaticPeopleFraming: photo.usesAutomaticPeopleFraming,
             cropScale: photo.cropScale,
             cropOffsetX: photo.cropOffsetX,
-            cropOffsetY: photo.cropOffsetY
+            cropOffsetY: photo.cropOffsetY,
+            mediaKind: photo.mediaKind,
+            videoStartSeconds: photo.videoStartSeconds,
+            videoDurationSeconds: photo.durationSeconds ?? secondsPerSlide,
+            playsOriginalAudio: photo.hasOriginalAudio
         )
     }
 
@@ -563,6 +568,12 @@ private struct MontageSlide {
     let cropScale: Double
     let cropOffsetX: Double
     let cropOffsetY: Double
+    let mediaKind: LibraryMediaKind
+    let videoStartSeconds: Double
+    let videoDurationSeconds: Double
+    let playsOriginalAudio: Bool
+
+    var isVideo: Bool { mediaKind == .video }
 }
 
 private struct MontagePhotoWaitingArtwork: View {
@@ -733,14 +744,29 @@ private struct MontageSlideArtwork: View {
     }
 
     private func fullBleed(size: CGSize) -> some View {
-        PhotoAssetView(
-            source: slide.source,
-            label: showLabel ? slide.label : nil,
-            contentScale: fullBleedScale * CGFloat(slide.cropScale),
-            contentOffset: combinedOffset(in: size),
-            samplingScale: CGFloat(slide.cropScale) * (1 + 0.085 * amplitude),
-            onLoadStateChange: onLoadStateChange
-        )
+        Group {
+            if slide.isVideo {
+                VideoAssetClipView(
+                    source: slide.source,
+                    startSeconds: slide.videoStartSeconds,
+                    durationSeconds: slide.videoDurationSeconds,
+                    label: showLabel ? slide.label : nil,
+                    contentScale: CGFloat(slide.cropScale),
+                    contentOffset: cropOffset(in: size),
+                    playsAudio: slide.playsOriginalAudio,
+                    onLoadStateChange: onLoadStateChange
+                )
+            } else {
+                PhotoAssetView(
+                    source: slide.source,
+                    label: showLabel ? slide.label : nil,
+                    contentScale: fullBleedScale * CGFloat(slide.cropScale),
+                    contentOffset: combinedOffset(in: size),
+                    samplingScale: CGFloat(slide.cropScale) * (1 + 0.085 * amplitude),
+                    onLoadStateChange: onLoadStateChange
+                )
+            }
+        }
     }
 
     private func portraitMatte(size: CGSize) -> some View {
@@ -980,6 +1006,306 @@ private struct MontageMotionPlaybackKey: Hashable {
     let frameStyle: MontageFrameStyle?
     let motionStyle: MontageMotionStyle?
     let reduceMotion: Bool
+}
+
+private struct VideoAssetClipView: View {
+    let source: PhotoSource
+    let startSeconds: Double
+    let durationSeconds: Double
+    let label: String?
+    let contentScale: CGFloat
+    let contentOffset: CGSize
+    let playsAudio: Bool
+    let onLoadStateChange: ((PhotoAssetLoadState) -> Void)?
+
+    @StateObject private var loader = MontageVideoClipLoader()
+
+    private var requestKey: MontageVideoClipKey? {
+        guard case .bundled = source else {
+            return MontageVideoClipKey(
+                source: source,
+                startMilliseconds: Int((max(0, startSeconds) * 1_000).rounded()),
+                durationMilliseconds: Int((max(0.8, durationSeconds) * 1_000).rounded()),
+                playsAudio: playsAudio
+            )
+        }
+        return nil
+    }
+
+    var body: some View {
+        ZStack {
+            if let player = loader.player {
+                MontagePlayerSurface(player: player)
+                    .scaleEffect(max(1, contentScale))
+                    .offset(contentOffset)
+            } else {
+                videoPlaceholder
+            }
+
+            if let label {
+                HStack(spacing: 6) {
+                    Image(systemName: "video.fill")
+                    Text(label)
+                }
+                .font(TR.mono(9, weight: .semibold))
+                .tracking(0.8)
+                .foregroundStyle(.white.opacity(0.76))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(.black.opacity(0.52))
+                .clipShape(Capsule())
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .padding(16)
+            }
+        }
+        .clipped()
+        .task(id: requestKey) {
+            guard let requestKey else {
+                loader.cancel()
+                return
+            }
+            await loader.load(requestKey)
+        }
+        .onDisappear { loader.cancel() }
+        .onChange(of: loader.loadState, initial: true) { _, state in
+            onLoadStateChange?(state)
+        }
+        .accessibilityLabel(label.map { "Video clip, \($0)" } ?? "Video clip")
+    }
+
+    @ViewBuilder
+    private var videoPlaceholder: some View {
+        switch source {
+        case .library:
+            PhotoAssetView(source: source)
+                .overlay(.black.opacity(0.12))
+        case .imported, .bundled:
+            ZStack {
+                Color.black
+                Image(systemName: "video.fill")
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundStyle(.white.opacity(0.42))
+            }
+        }
+    }
+}
+
+private struct MontageVideoClipKey: Hashable, Sendable {
+    let source: PhotoSource
+    let startMilliseconds: Int
+    let durationMilliseconds: Int
+    let playsAudio: Bool
+}
+
+@MainActor
+private final class MontageVideoClipLoader: ObservableObject {
+    @Published private(set) var player: AVPlayer?
+    @Published private(set) var loadState: PhotoAssetLoadState = .loading(progress: nil)
+
+    private static let manager = PHCachingImageManager()
+    private var task: Task<Void, Never>?
+    private var activeKey: MontageVideoClipKey?
+
+    func load(_ key: MontageVideoClipKey) async {
+        if activeKey == key, player != nil { return }
+        cancel()
+        activeKey = key
+        loadState = .loading(progress: nil)
+
+        task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let asset = try await Self.requestAsset(
+                    source: key.source,
+                    progress: { [weak self] value in
+                        Task { @MainActor [weak self] in
+                            guard self?.activeKey == key else { return }
+                            self?.loadState = .loading(progress: value)
+                        }
+                    }
+                )
+                try Task.checkCancellation()
+                guard self.activeKey == key else { return }
+                let item = AVPlayerItem(asset: asset)
+                let start = CMTime(
+                    seconds: Double(key.startMilliseconds) / 1_000,
+                    preferredTimescale: 600
+                )
+                let duration = CMTime(
+                    seconds: Double(key.durationMilliseconds) / 1_000,
+                    preferredTimescale: 600
+                )
+                item.forwardPlaybackEndTime = CMTimeAdd(start, duration)
+                let player = AVPlayer(playerItem: item)
+                player.actionAtItemEnd = .pause
+                player.volume = key.playsAudio ? 0.78 : 0
+                await player.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero)
+                guard !Task.isCancelled, self.activeKey == key else { return }
+                self.player = player
+                self.loadState = .ready
+                player.play()
+            } catch is CancellationError {
+                return
+            } catch {
+                guard self.activeKey == key else { return }
+                self.player = nil
+                self.loadState = .failed
+            }
+        }
+        await task?.value
+    }
+
+    func cancel() {
+        task?.cancel()
+        task = nil
+        player?.pause()
+        player = nil
+        activeKey = nil
+        loadState = .loading(progress: nil)
+    }
+
+    private static func requestAsset(
+        source: PhotoSource,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> AVAsset {
+        switch source {
+        case let .imported(path):
+            let url = URL(fileURLWithPath: path)
+            guard FileManager.default.isReadableFile(atPath: url.path) else {
+                throw PhotoAnalysisThumbnailError.inaccessible
+            }
+            return AVURLAsset(url: url)
+        case .bundled:
+            throw PhotoAnalysisThumbnailError.inaccessible
+        case let .library(identifier):
+            return try await requestLibraryAsset(identifier: identifier, progress: progress)
+        }
+    }
+
+    private static func requestLibraryAsset(
+        identifier: String,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> AVAsset {
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil)
+        guard let photoAsset = result.firstObject, photoAsset.mediaType == .video else {
+            throw PhotoAnalysisThumbnailError.inaccessible
+        }
+        let state = MontageVideoAssetRequestState(manager: manager)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                state.install(continuation: continuation)
+                let options = PHVideoRequestOptions()
+                options.deliveryMode = .automatic
+                options.version = .current
+                options.isNetworkAccessAllowed = true
+                options.progressHandler = { value, _, _, _ in
+                    progress(min(0.99, max(0, value)))
+                }
+                let requestID = manager.requestAVAsset(
+                    forVideo: photoAsset,
+                    options: options
+                ) { asset, _, info in
+                    if (info?[PHImageCancelledKey] as? Bool) == true {
+                        state.finish(.failure(CancellationError()))
+                    } else if let error = info?[PHImageErrorKey] as? Error {
+                        state.finish(.failure(error))
+                    } else if let asset {
+                        state.finish(.success(asset))
+                    } else {
+                        state.finish(.failure(PhotoAnalysisThumbnailError.unavailable))
+                    }
+                }
+                state.install(requestID: requestID)
+            }
+        } onCancel: {
+            state.cancel()
+        }
+    }
+}
+
+private struct MontagePlayerSurface: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> MontagePlayerView {
+        let view = MontagePlayerView()
+        view.player = player
+        return view
+    }
+
+    func updateUIView(_ uiView: MontagePlayerView, context: Context) {
+        uiView.player = player
+    }
+
+    static func dismantleUIView(_ uiView: MontagePlayerView, coordinator: Void) {
+        uiView.player = nil
+    }
+}
+
+private final class MontagePlayerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    var player: AVPlayer? {
+        get { playerLayer.player }
+        set {
+            playerLayer.player = newValue
+            playerLayer.videoGravity = .resizeAspectFill
+        }
+    }
+}
+
+private final class MontageVideoAssetRequestState: @unchecked Sendable {
+    private let lock = NSLock()
+    private let manager: PHImageManager
+    private var continuation: CheckedContinuation<AVAsset, Error>?
+    private var requestID = PHInvalidImageRequestID
+    private var completed = false
+
+    init(manager: PHImageManager) { self.manager = manager }
+
+    func install(continuation: CheckedContinuation<AVAsset, Error>) {
+        lock.lock()
+        if completed {
+            lock.unlock()
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func install(requestID: PHImageRequestID) {
+        lock.lock()
+        if completed {
+            lock.unlock()
+            manager.cancelImageRequest(requestID)
+            return
+        }
+        self.requestID = requestID
+        lock.unlock()
+    }
+
+    func finish(_ result: Result<AVAsset, Error>) {
+        lock.lock()
+        guard !completed else { lock.unlock(); return }
+        completed = true
+        let continuation = continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
+    }
+
+    func cancel() {
+        lock.lock()
+        guard !completed else { lock.unlock(); return }
+        completed = true
+        let continuation = continuation
+        self.continuation = nil
+        let requestID = requestID
+        lock.unlock()
+        if requestID != PHInvalidImageRequestID { manager.cancelImageRequest(requestID) }
+        continuation?.resume(throwing: CancellationError())
+    }
 }
 
 private struct PhotoSourceImage: View {
@@ -1372,22 +1698,21 @@ private final class PhotoAssetImageLoader: ObservableObject {
         fileTask?.cancel()
         fileTask = Task { [weak self] in
             let decoded = await Task.detached(priority: .userInitiated) {
-                guard !Task.isCancelled,
-                      let source = CGImageSourceCreateWithURL(
-                        URL(fileURLWithPath: path) as CFURL,
-                        [kCGImageSourceShouldCache: false] as CFDictionary
-                      ) else {
-                    return nil as DecodedPhotoImage?
-                }
-                let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-                let sourceWidth = properties?[kCGImagePropertyPixelWidth] as? Int ?? key.pixelWidth
-                let sourceHeight = properties?[kCGImagePropertyPixelHeight] as? Int ?? key.pixelHeight
-                let target = Self.displayTargetSize(
-                    sourcePixelWidth: sourceWidth,
-                    sourcePixelHeight: sourceHeight,
-                    key: key
-                )
-                guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(
+                guard !Task.isCancelled else { return nil as DecodedPhotoImage? }
+                let url = URL(fileURLWithPath: path)
+                if let source = CGImageSourceCreateWithURL(
+                    url as CFURL,
+                    [kCGImageSourceShouldCache: false] as CFDictionary
+                ) {
+                    let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+                    let sourceWidth = properties?[kCGImagePropertyPixelWidth] as? Int ?? key.pixelWidth
+                    let sourceHeight = properties?[kCGImagePropertyPixelHeight] as? Int ?? key.pixelHeight
+                    let target = Self.displayTargetSize(
+                        sourcePixelWidth: sourceWidth,
+                        sourcePixelHeight: sourceHeight,
+                        key: key
+                    )
+                    if let thumbnail = CGImageSourceCreateThumbnailAtIndex(
                         source,
                         0,
                         [
@@ -1396,13 +1721,29 @@ private final class PhotoAssetImageLoader: ObservableObject {
                             kCGImageSourceShouldCacheImmediately: true,
                             kCGImageSourceThumbnailMaxPixelSize: Int(max(target.width, target.height).rounded(.up))
                         ] as CFDictionary
-                      ) else {
-                    return nil as DecodedPhotoImage?
+                    ) {
+                        return DecodedPhotoImage(
+                            image: UIImage(cgImage: thumbnail),
+                            sourcePixelWidth: sourceWidth,
+                            sourcePixelHeight: sourceHeight
+                        )
+                    }
                 }
+
+                // A permission-free PhotosPicker video is an ordinary local
+                // movie file. Extract one small poster on-device so every grid
+                // can display it without a special video-only component.
+                let asset = AVURLAsset(url: url)
+                let generator = AVAssetImageGenerator(asset: asset)
+                generator.appliesPreferredTrackTransform = true
+                generator.maximumSize = CGSize(width: 1_920, height: 1_920)
+                guard let generated = try? await generator.image(
+                    at: CMTime(seconds: 0.12, preferredTimescale: 600)
+                ) else { return nil as DecodedPhotoImage? }
                 return DecodedPhotoImage(
-                    image: UIImage(cgImage: thumbnail),
-                    sourcePixelWidth: sourceWidth,
-                    sourcePixelHeight: sourceHeight
+                    image: UIImage(cgImage: generated.image),
+                    sourcePixelWidth: generated.image.width,
+                    sourcePixelHeight: generated.image.height
                 )
             }.value
 
@@ -1700,12 +2041,16 @@ final class LocalSoundtrackPlayer: ObservableObject {
     private var player: AVAudioPlayer?
     private var activeTrackID: String?
 
-    func play(track: MusicTrack?) {
+    func play(track: MusicTrack?, volume: Float = 0.82) {
         guard let track, let resourceName = track.resourceName else {
             stop()
             return
         }
-        if activeTrackID == track.id, isPlaying { return }
+        let safeVolume = min(1, max(0, volume))
+        if activeTrackID == track.id, isPlaying {
+            player?.volume = safeVolume
+            return
+        }
 
         stop(deactivateSession: false)
         errorMessage = nil
@@ -1721,7 +2066,7 @@ final class LocalSoundtrackPlayer: ObservableObject {
             try session.setActive(true)
             let player = try AVAudioPlayer(contentsOf: url)
             player.numberOfLoops = -1
-            player.volume = 0.82
+            player.volume = safeVolume
             player.prepareToPlay()
             guard player.play() else { throw SoundtrackError.couldNotStart }
             self.player = player
@@ -1734,15 +2079,16 @@ final class LocalSoundtrackPlayer: ObservableObject {
         }
     }
 
-    func toggle(track: MusicTrack?) {
+    func toggle(track: MusicTrack?, volume: Float = 0.82) {
         if let player, isPlaying {
             player.pause()
             isPlaying = false
         } else if let player, activeTrackID == track?.id {
+            player.volume = min(1, max(0, volume))
             player.play()
             isPlaying = player.isPlaying
         } else {
-            play(track: track)
+            play(track: track, volume: volume)
         }
     }
 

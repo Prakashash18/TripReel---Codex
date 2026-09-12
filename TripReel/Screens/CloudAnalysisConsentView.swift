@@ -63,7 +63,7 @@ struct CloudAnalysisConsentView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Not now")
-            .accessibilityHint("Closes without sharing any photo preview")
+            .accessibilityHint("Closes without sharing any preview")
             .accessibilityIdentifier("cloud-analysis-close")
         }
     }
@@ -80,12 +80,12 @@ struct CloudAnalysisConsentView: View {
             }
             .accessibilityHidden(true)
 
-            Text("Before AI sees your photos")
+            Text("Before AI sees your moments")
                 .font(TR.display(36))
                 .tracking(-0.4)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("With your permission, Memories sends small previews of the photos you choose to OpenAI’s GPT-5.6 Luna to create another cut.")
+            Text("With your permission, Memories sends small photo previews or sampled video frames you choose to OpenAI’s GPT-5.6 Luna.")
                 .font(TR.ui(15))
                 .foregroundStyle(.white.opacity(0.76))
                 .lineSpacing(4)
@@ -107,14 +107,14 @@ struct CloudAnalysisConsentView: View {
         VStack(spacing: 0) {
             essentialRow(
                 symbol: "checkmark.circle",
-                title: "Choose the photos next",
+                title: "Choose the moments next",
                 detail: "Nothing is selected or sent on this screen."
             )
             Divider().overlay(.white.opacity(0.10)).padding(.leading, 56)
             essentialRow(
                 symbol: "photo.on.rectangle",
                 title: "Previews, not originals",
-                detail: "No filenames, dates, locations or Photos IDs."
+                detail: "Full videos, sound, filenames, dates and locations stay private."
             )
             Divider().overlay(.white.opacity(0.10)).padding(.leading, 56)
             essentialRow(
@@ -184,14 +184,14 @@ struct CloudAnalysisConsentView: View {
         VStack(spacing: 10) {
             Button(
                 cloudServiceAvailable
-                    ? (isSettings ? "Allow cloud enhancement" : "Allow & choose photos")
+                    ? (isSettings ? "Allow cloud enhancement" : "Allow & choose moments")
                     : "AI Director unavailable",
                 action: onUseCloudEnhancement
             )
             .buttonStyle(CreamButtonStyle())
             .disabled(!cloudServiceAvailable)
             .opacity(cloudServiceAvailable ? 1 : 0.55)
-            .accessibilityHint("Gives permission, then lets you choose which previews may be sent")
+            .accessibilityHint("Gives permission, then lets you choose which photo previews or sampled video frames may be sent")
             .accessibilityIdentifier("cloud-analysis-accept")
 
             Button("Not now", action: onKeepOnDevice)
@@ -200,7 +200,7 @@ struct CloudAnalysisConsentView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
                 .buttonStyle(.plain)
-                .accessibilityHint("Closes without sharing any photo preview")
+                .accessibilityHint("Closes without sharing any preview")
                 .accessibilityIdentifier("cloud-analysis-decline")
 
             Button("Memories privacy policy") { showsPrivacyPolicy = true }

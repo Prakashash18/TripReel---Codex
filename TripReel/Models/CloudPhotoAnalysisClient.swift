@@ -34,6 +34,17 @@ enum CloudPhotoContentKind: String, Codable, Hashable, Sendable {
     case moment
 }
 
+enum CloudMediaKind: String, Codable, Hashable, Sendable {
+    case photo
+    case video
+}
+
+enum CloudVideoMotionBand: String, Codable, Hashable, Sendable {
+    case still
+    case gentle
+    case active
+}
+
 /// Coarse editorial signals produced on-device. This deliberately contains no
 /// timestamps, coordinates, filenames, OCR text, faces, or stable Photos IDs.
 struct CloudPhotoEditorialContext: Codable, Hashable, Sendable {
@@ -47,6 +58,10 @@ struct CloudPhotoEditorialContext: Codable, Hashable, Sendable {
     let aesthetic: CloudPhotoScoreBand
     let similarityGroup: String
     let sceneLabels: [String]
+    let mediaKind: CloudMediaKind
+    let clipDurationSeconds: Double
+    let hasOriginalAudio: Bool
+    let videoMotion: CloudVideoMotionBand
 }
 
 struct CloudPhotoAnalysisInput: Sendable {
@@ -969,6 +984,15 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
         return (0...100_000).contains(context.captureIndex)
             && (0...365).contains(context.dayIndex)
             && (0...20).contains(context.peopleCount)
+            && context.clipDurationSeconds.isFinite
+            && (0...4).contains(context.clipDurationSeconds)
+            && (
+                (context.mediaKind == .video && context.clipDurationSeconds >= 0.8)
+                    || (context.mediaKind == .photo
+                        && context.clipDurationSeconds == 0
+                        && !context.hasOriginalAudio
+                        && context.videoMotion == .still)
+            )
             && context.similarityGroup.range(of: groupPattern, options: .regularExpression) != nil
             && context.sceneLabels.count <= 3
             && context.sceneLabels.allSatisfy {

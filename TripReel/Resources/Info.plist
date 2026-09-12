@@ -25,9 +25,9 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Memories saves the photo stories you create to your photo library.</string>
+	<string>Memories saves the films you create to your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Memories uses accessible photos, dates, and locations on your device to find meaningful moments and build stories. Originals are deleted only when you explicitly confirm Cleanup.</string>
+	<string>Memories uses accessible photos, videos, dates, and locations on your device to find meaningful moments and build stories. Originals are deleted only when you explicitly confirm Cleanup.</string>
 	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
 	<true/>
 	<key>REVENUECAT_PUBLIC_SDK_KEY</key>

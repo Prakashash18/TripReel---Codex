@@ -32,7 +32,7 @@ struct ExportScreen: View {
 
             VStack(spacing: 0) {
                 ScreenHeading(
-                    eyebrow: "\(model.keptCount) photos · \(model.filmDurationText)",
+                    eyebrow: "\(model.keptMediaSummary) · \(model.filmDurationText)",
                     title: "Export your film",
                     size: 38
                 )
@@ -48,7 +48,7 @@ struct ExportScreen: View {
                     ExportOptionCard(
                         source: model.previewSource(at: 0),
                         title: "Standard",
-                        subtitle: "720p · watermarked",
+                        subtitle: "9:16 · 720p · watermarked",
                         badge: standardNeedsPro ? "PRO · FULL LENGTH" : "FREE",
                         badgeColor: standardNeedsPro ? TR.accent : TR.keep,
                         watermark: true,
@@ -60,7 +60,7 @@ struct ExportScreen: View {
                     ExportOptionCard(
                         source: model.previewSource(at: 2),
                         title: "HD",
-                        subtitle: "1080p · no watermark",
+                        subtitle: "9:16 · 1080p · no watermark",
                         badge: "PRO",
                         badgeColor: TR.accent,
                         highlighted: true,
@@ -473,7 +473,7 @@ struct PaywallScreen: View {
                             .fixedSize(horizontal: false, vertical: true)
 
                         HStack(spacing: 8) {
-                            metricPill(symbol: "photo.on.rectangle.angled", text: "\(requirement.photoCount) photos")
+                            metricPill(symbol: "photo.on.rectangle.angled", text: model.keptMediaSummary)
                             metricPill(symbol: "clock", text: model.filmDurationText)
                         }
 
@@ -482,7 +482,7 @@ struct PaywallScreen: View {
                             .foregroundStyle(.white.opacity(0.76))
                             .lineSpacing(4)
 
-                        Text("Free exports include up to \(requirement.freePhotoLimit) photos and \(durationText(requirement.freeDurationLimit)). Previewing and editing stay free.")
+                        Text("Free exports include up to \(requirement.freePhotoLimit) moments and \(durationText(requirement.freeDurationLimit)). Previewing and editing stay free.")
                             .font(TR.ui(12))
                             .foregroundStyle(.white.opacity(0.54))
                             .lineSpacing(3)

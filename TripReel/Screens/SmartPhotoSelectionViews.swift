@@ -173,7 +173,7 @@ struct PhotoAnalysisProgressOverlay: View {
             value: currentAsset?.id
         )
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Analyzing photos, \(Int(progress * 100)) percent")
+        .accessibilityLabel("Analyzing moments, \(Int(progress * 100)) percent")
         .accessibilityIdentifier("smart-photo-analysis-progress")
     }
 
@@ -243,6 +243,19 @@ private struct ProcessingPhotoCard: View {
         GeometryReader { proxy in
             ZStack {
                 PhotoAssetView(source: asset.source)
+
+                if asset.isVideo {
+                    Label("VIDEO", systemImage: "play.fill")
+                        .font(TR.mono(8, weight: .semibold))
+                        .tracking(0.7)
+                        .foregroundStyle(TR.cream)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.62))
+                        .clipShape(Capsule())
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        .padding(12)
+                }
 
                 LinearGradient(
                     colors: [.clear, .black.opacity(0.08), .black.opacity(0.60)],
@@ -345,11 +358,11 @@ struct SmartSelectionReviewView: View {
             WarmBackground(variant: .cleanup)
 
             VStack(spacing: 0) {
-                SheetHeader(title: "More Photos") { dismiss() }
+                SheetHeader(title: "More Moments") { dismiss() }
                     .padding(.horizontal, 22)
                     .padding(.top, 20)
 
-                Text("Memories kept these photos out of the automatic cut. Nothing was deleted. Add back anything that matters to you.")
+                Text("Memories kept these moments out of the automatic cut. Nothing was deleted. Add back anything that matters to you.")
                     .font(TR.ui(13))
                     .foregroundStyle(.white.opacity(0.62))
                     .lineSpacing(4)
@@ -488,9 +501,20 @@ struct SmartSelectionReviewView: View {
 
     private func excludedRow(_ excluded: SmartExcludedPhoto) -> some View {
         HStack(spacing: 13) {
-            PhotoAssetView(source: excluded.asset.source)
-                .frame(width: 70, height: 70)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            ZStack(alignment: .bottomTrailing) {
+                PhotoAssetView(source: excluded.asset.source)
+                if excluded.asset.isVideo {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(TR.cream)
+                        .frame(width: 24, height: 24)
+                        .background(.black.opacity(0.66))
+                        .clipShape(Circle())
+                        .padding(6)
+                }
+            }
+            .frame(width: 70, height: 70)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             VStack(alignment: .leading, spacing: 5) {
                 Label(excluded.reason.title, systemImage: excluded.reason.symbol)
@@ -515,7 +539,7 @@ struct SmartSelectionReviewView: View {
                     .padding(.vertical, 9)
                     .background(.white.opacity(0.07))
                     .clipShape(Capsule())
-                    .accessibilityLabel("Photo is not ready yet")
+                    .accessibilityLabel("Moment is not ready yet")
             } else {
                 Button("Include") {
                     withAnimation(reduceMotion ? .easeInOut(duration: 0.16) : TRMotion.cardDismiss) {
@@ -530,7 +554,7 @@ struct SmartSelectionReviewView: View {
                 .background(TR.cream)
                 .clipShape(Capsule())
                 .buttonStyle(TactileButtonStyle(pressedScale: 0.94))
-                .accessibilityLabel("Include \(excluded.asset.filename.isEmpty ? "photo" : excluded.asset.filename)")
+                .accessibilityLabel("Include \(excluded.asset.filename.isEmpty ? "moment" : excluded.asset.filename)")
             }
         }
         .padding(10)

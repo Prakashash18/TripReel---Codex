@@ -13,6 +13,19 @@ struct FirstWatchScreen: View {
         model.musicTrack(withID: firstCut?.selectedTrackID)
     }
 
+    private var firstCutMediaSummary: String {
+        let moments = firstCut?.keptPhotos ?? model.keptPhotos
+        let videoCount = moments.filter(\.isVideo).count
+        return Trip.mediaCountText(
+            photoCount: moments.count - videoCount,
+            videoCount: videoCount
+        )
+    }
+
+    private var soundtrackVolume: Float {
+        (firstCut?.keptPhotos ?? model.keptPhotos).contains(where: \.isVideo) ? 0.42 : 0.82
+    }
+
     var body: some View {
         ZStack {
             MontageView(
@@ -51,7 +64,7 @@ struct FirstWatchScreen: View {
                         PlaybackProgressBar()
                         HStack {
                             MetadataText(
-                                text: "\(firstCut?.keptPhotos.count ?? model.keptCount) photos",
+                                text: firstCutMediaSummary,
                                 color: .white.opacity(0.65)
                             )
                             Spacer()
@@ -76,7 +89,7 @@ struct FirstWatchScreen: View {
         }
         .overlay(alignment: .topTrailing) {
             Button {
-                soundtrack.toggle(track: firstCutTrack)
+                soundtrack.toggle(track: firstCutTrack, volume: soundtrackVolume)
             } label: {
                 Image(systemName: soundtrack.isPlaying ? "speaker.wave.2.fill" : "speaker.slash.fill")
                     .font(.system(size: 13, weight: .semibold))
@@ -97,7 +110,7 @@ struct FirstWatchScreen: View {
             .accessibilityIdentifier("first-watch-audio")
         }
         .task(id: firstCutTrack?.id) {
-            soundtrack.play(track: firstCutTrack)
+            soundtrack.play(track: firstCutTrack, volume: soundtrackVolume)
         }
         .onDisappear {
             soundtrack.stop()
@@ -136,7 +149,7 @@ struct FirstCutOptionsScreen: View {
                     } label: {
                         VStack(spacing: 3) {
                             Label("Improve with AI", systemImage: "sparkles")
-                            Text("Let AI reconsider safe More Photos and direct another cut")
+                            Text("Let AI reconsider safe moments and direct another cut")
                                 .font(TR.ui(10))
                                 .foregroundStyle(TR.ink.opacity(0.58))
                         }
@@ -152,7 +165,7 @@ struct FirstCutOptionsScreen: View {
                     } label: {
                         VStack(spacing: 3) {
                             Text("Edit Myself")
-                            Text("Change photos, framing, titles, music and pace")
+                            Text("Change moments, framing, titles, music and pace")
                                 .font(TR.ui(10))
                                 .foregroundStyle(.white.opacity(0.52))
                         }
@@ -205,7 +218,7 @@ struct AICutDirectionScreen: View {
                 VStack(alignment: .leading, spacing: 18) {
                     ScreenHeading(
                         eyebrow: "AI Director · permission granted",
-                        title: "Edit photos & direction"
+                        title: "Edit moments & direction"
                     )
                     .padding(.leading, 48)
                     .trEntrance(0, distance: 8)
@@ -417,19 +430,19 @@ private struct AICutPhotoSelectionCard: View {
                 .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Photos for AI")
+                    Text("Moments for AI")
                         .font(TR.ui(15, weight: .semibold))
                     Text("\(model.aiCutSelectedPhotoCount) selected · max \(model.aiCutPhotoSelectionLimit)")
                         .font(TR.ui(11))
                         .foregroundStyle(.white.opacity(0.56))
-                    Text("Only these previews are shared")
+                    Text("Photos or sampled video frames only")
                         .font(TR.ui(10, weight: .medium))
                         .foregroundStyle(TR.keep.opacity(0.82))
                 }
 
                 Spacer(minLength: 4)
 
-                Text("Edit photos")
+                Text("Edit moments")
                     .font(TR.ui(12, weight: .semibold))
                     .foregroundStyle(TR.accent)
                     .fixedSize(horizontal: true, vertical: false)
@@ -442,8 +455,8 @@ private struct AICutPhotoSelectionCard: View {
             .glassCard(cornerRadius: 18, highlighted: true)
         }
         .buttonStyle(TactileButtonStyle())
-        .accessibilityLabel("Photos for AI, \(model.aiCutSelectedPhotoCount) selected")
-        .accessibilityHint("Edit which reduced photo previews may be sent")
+        .accessibilityLabel("Moments for AI, \(model.aiCutSelectedPhotoCount) selected")
+        .accessibilityHint("Edit which reduced photo previews or sampled video frames may be sent")
         .accessibilityIdentifier("ai-photo-selection-card")
     }
 }
@@ -467,7 +480,7 @@ private struct AICutPhotoSelectionSheet: View {
             WarmBackground(variant: .cleanup)
 
             VStack(spacing: 0) {
-                SheetHeader(title: "Edit photos") { dismiss() }
+                SheetHeader(title: "Edit moments") { dismiss() }
                     .padding(.horizontal, 22)
                     .padding(.top, 20)
 
@@ -513,7 +526,7 @@ private struct AICutPhotoSelectionSheet: View {
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
                 if selectionIsFull {
-                    Text("Deselect one photo to choose another")
+                    Text("Deselect one moment to choose another")
                         .font(TR.ui(11))
                         .foregroundStyle(.white.opacity(0.52))
                 } else {
@@ -583,12 +596,29 @@ private struct AICutPhotoSelectionSheet: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                         .padding(7)
                 }
+
+                if option.photo.isVideo {
+                    Label("CLIP", systemImage: "play.fill")
+                        .font(TR.mono(8, weight: .semibold))
+                        .tracking(0.6)
+                        .foregroundStyle(TR.cream)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 5)
+                        .background(.black.opacity(0.66))
+                        .clipShape(Capsule())
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        .padding(7)
+                }
             }
             .opacity(canSelect ? 1 : 0.42)
             .aspectRatio(1, contentMode: .fit)
         }
         .buttonStyle(TactileButtonStyle(pressedScale: 0.96))
-        .accessibilityLabel(option.localSelection == .firstCut ? "First Cut photo" : "More Photos photo")
+        .accessibilityLabel(
+            option.localSelection == .firstCut
+                ? "First Cut \(option.photo.isVideo ? "video clip" : "photo")"
+                : "More Moments \(option.photo.isVideo ? "video clip" : "photo")"
+        )
         .accessibilityValue(selected ? "Selected" : "Not selected")
         .accessibilityHint(canSelect ? "Double tap to toggle" : "Deselect another photo first")
         .accessibilityIdentifier("ai-photo-\(option.id)")
@@ -842,7 +872,7 @@ private struct AIPhotoTransferArtwork: View {
                         text: isSending ? "Reduced previews · encrypted in transit" : "Preparing reduced previews",
                         color: isSending ? TR.keep : TR.accent
                     )
-                    Text(isSending ? "Sending copies securely to OpenAI" : "Original photos remain on this iPhone")
+                    Text(isSending ? "Sending copies securely to OpenAI" : "Original media remains on this iPhone")
                         .font(TR.ui(11, weight: .medium))
                         .foregroundStyle(.white.opacity(0.48))
                 }
@@ -919,8 +949,8 @@ private struct AIPhotoTransferArtwork: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             isSending
-                ? "Sending selected reduced preview copies securely to OpenAI GPT-5.6 Luna. Original photos stay on this iPhone."
-                : "Preparing reduced preview copies on this iPhone. Original photos stay on this iPhone."
+                ? "Sending selected photo previews or sampled video frames securely to OpenAI GPT-5.6 Luna. Original media stays on this iPhone."
+                : "Preparing reduced previews on this iPhone. Original media stays on this iPhone."
         )
         .accessibilityIdentifier("ai-transfer-artwork")
     }
@@ -929,6 +959,17 @@ private struct AIPhotoTransferArtwork: View {
         PhotoAssetView(source: photo.source)
             .frame(width: 48, height: 62)
             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(alignment: .bottomTrailing) {
+                if photo.isVideo {
+                    Image(systemName: "film.fill")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(TR.cream)
+                        .frame(width: 18, height: 18)
+                        .background(.black.opacity(0.68))
+                        .clipShape(Circle())
+                        .padding(4)
+                }
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .stroke(.white.opacity(0.30), lineWidth: 1)
@@ -1012,6 +1053,10 @@ struct AICutComparisonScreen: View {
         "\(previewSource.rawValue)-\(previewTrack?.id ?? "none")"
     }
 
+    private var previewSoundtrackVolume: Float {
+        snapshot?.keptPhotos.contains(where: \.isVideo) == true ? 0.42 : 0.82
+    }
+
     private var storyRecommendation: AICutRecommendation? {
         model.aiCutRecommendations.first { $0.kind == .story }
     }
@@ -1093,7 +1138,7 @@ struct AICutComparisonScreen: View {
 
                     if let previewTrack {
                         Button {
-                            soundtrack.toggle(track: previewTrack)
+                            soundtrack.toggle(track: previewTrack, volume: previewSoundtrackVolume)
                         } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: soundtrack.isPlaying ? "speaker.wave.2.fill" : "speaker.slash.fill")
@@ -1192,7 +1237,7 @@ struct AICutComparisonScreen: View {
         }
         .animation(reduceMotion ? nil : TRMotion.selection, value: previewSource)
         .task(id: audioTaskID) {
-            soundtrack.play(track: previewTrack)
+            soundtrack.play(track: previewTrack, volume: previewSoundtrackVolume)
         }
         .onDisappear { soundtrack.stop() }
         .accessibilityIdentifier("ai-comparison-screen")
@@ -1839,6 +1884,7 @@ struct CutScreen: View {
                             CircleIconButton(symbol: "xmark", tint: TR.cut, disabled: locked) {
                                 sendCard(cut: true)
                             }
+                            .accessibilityLabel(model.currentPhoto.isVideo ? "Cut video clip" : "Cut photo")
 
                             Button("Undo") {
                                 withAnimation(
@@ -1863,6 +1909,7 @@ struct CutScreen: View {
                             CircleIconButton(symbol: "checkmark", tint: TR.keep, disabled: locked) {
                                 sendCard(cut: false)
                             }
+                            .accessibilityLabel(model.currentPhoto.isVideo ? "Keep video clip" : "Keep photo")
                         }
 
                         Text("Choose what stays in this film. Nothing is deleted.")
@@ -1909,6 +1956,19 @@ struct CutScreen: View {
             .foregroundStyle(.white.opacity(0.72))
             .frame(maxHeight: .infinity, alignment: .bottom)
             .padding(18)
+
+            if model.currentPhoto.isVideo {
+                Label("VIDEO", systemImage: "play.fill")
+                    .font(TR.mono(9, weight: .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(TR.cream)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 7)
+                    .background(.black.opacity(0.60))
+                    .clipShape(Capsule())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(15)
+            }
 
             if model.currentPhoto.isSimilar {
                 HStack(spacing: 7) {
@@ -1982,7 +2042,9 @@ struct CutScreen: View {
                     }
                 }
         )
-        .accessibilityLabel("Photo \(model.currentPhotoIndex + 1) of \(model.photos.count)")
+        .accessibilityLabel(
+            "\(model.currentPhoto.isVideo ? "Video clip" : "Photo") \(model.currentPhotoIndex + 1) of \(model.photos.count)"
+        )
         .accessibilityHint("Swipe left to cut or right to keep")
     }
 
@@ -2064,7 +2126,7 @@ struct PaceScreen: View {
 
             VStack(spacing: 0) {
                 ScreenHeading(
-                    eyebrow: "\(model.keptCount) photos in the cut",
+                    eyebrow: "\(model.keptMediaSummary) in the cut",
                     title: "Set the pace"
                 )
                 .padding(.horizontal, 26)
@@ -2092,7 +2154,7 @@ struct PaceScreen: View {
                         .animation(reduceMotion ? nil : TRMotion.scrub, value: model.pace)
 
                         HStack(alignment: .firstTextBaseline) {
-                            Text(String(format: "%.1fs per photo", model.secondsPerPhoto))
+                            Text(String(format: "%.1fs base pace", model.secondsPerPhoto))
                                 .font(TR.ui(13))
                                 .foregroundStyle(.white.opacity(0.57))
                             Spacer()
@@ -2128,7 +2190,7 @@ struct PaceScreen: View {
                     }
                     .buttonStyle(CreamButtonStyle())
 
-                    Button("Advanced · per-photo timing") {
+                    Button("Advanced · per-moment timing") {
                         showAdvanced = true
                     }
                     .font(TR.ui(13, weight: .medium))
@@ -2158,7 +2220,7 @@ private struct AdvancedTimingSheet: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
-                SheetHeader(title: "Per-photo timing") { dismiss() }
+                SheetHeader(title: "Per-moment timing") { dismiss() }
 
                 ForEach(Array(model.keptPhotos.prefix(4))) { photo in
                     HStack(spacing: 14) {
@@ -2242,13 +2304,13 @@ struct SecondWatchScreen: View {
                 .environmentObject(model)
         }
         .task(id: model.selectedTrackID) {
-            soundtrack.play(track: model.selectedTrack)
+            soundtrack.play(track: model.selectedTrack, volume: model.previewSoundtrackVolume)
         }
         .onChange(of: showFullPreview) { _, isShowing in
             if isShowing {
                 soundtrack.stop()
             } else {
-                soundtrack.play(track: model.selectedTrack)
+                soundtrack.play(track: model.selectedTrack, volume: model.previewSoundtrackVolume)
             }
         }
         .onDisappear {
@@ -2268,7 +2330,7 @@ struct SecondWatchScreen: View {
                 VStack(spacing: 4) {
                     MetadataText(text: "FILM STUDIO · \(model.tripShortPlace)", color: .white.opacity(0.82))
                         .accessibilityIdentifier("second-watch-screen")
-                    Text("\(model.keptCount) photos · \(model.filmDurationText)\(trackSuffix)")
+                    Text("\(model.keptMediaSummary) · \(model.filmDurationText)\(trackSuffix)")
                         .font(TR.ui(11))
                         .foregroundStyle(.white.opacity(0.53))
                 }
@@ -2339,7 +2401,7 @@ struct SecondWatchScreen: View {
                         Spacer()
 
                         Button {
-                            soundtrack.toggle(track: model.selectedTrack)
+                            soundtrack.toggle(track: model.selectedTrack, volume: model.previewSoundtrackVolume)
                         } label: {
                             Image(systemName: soundtrack.isPlaying ? "speaker.wave.2.fill" : "speaker.slash.fill")
                                 .font(.system(size: 12, weight: .semibold))
@@ -2403,7 +2465,7 @@ struct SecondWatchScreen: View {
     private var studioToolDock: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                studioTool("Photos", symbol: "photo.stack", identifier: "studio-tool-photos") {
+                studioTool("Moments", symbol: "photo.stack", identifier: "studio-tool-photos") {
                     model.editPhotoSelection()
                 }
                 studioTool("Crop", symbol: "crop.rotate", identifier: "studio-tool-framing") {
@@ -2671,7 +2733,7 @@ private struct FullFilmPreview: View {
                             symbol: soundtrack.isPlaying ? "speaker.wave.2.fill" : "speaker.slash.fill",
                             label: soundtrack.isPlaying ? "Pause soundtrack" : "Play soundtrack"
                         ) {
-                            soundtrack.toggle(track: model.selectedTrack)
+                            soundtrack.toggle(track: model.selectedTrack, volume: model.previewSoundtrackVolume)
                         }
                         .disabled(model.selectedTrack == nil)
                         .opacity(model.selectedTrack == nil ? 0.46 : 1)
@@ -2681,7 +2743,7 @@ private struct FullFilmPreview: View {
 
                     VStack(spacing: 6) {
                         MetadataText(text: "FULL FILM PREVIEW", color: .white.opacity(0.66))
-                        Text("\(model.keptCount) photos · \(model.filmDurationText)\(trackSuffix)")
+                        Text("\(model.keptMediaSummary) · \(model.filmDurationText)\(trackSuffix)")
                             .font(TR.ui(12, weight: .medium))
                             .foregroundStyle(.white.opacity(0.72))
                         Text("Tap anywhere to hide controls")
@@ -2696,7 +2758,7 @@ private struct FullFilmPreview: View {
             }
         }
         .task(id: model.selectedTrackID) {
-            soundtrack.play(track: model.selectedTrack)
+            soundtrack.play(track: model.selectedTrack, volume: model.previewSoundtrackVolume)
         }
         .task(id: controlsVisible) {
             guard controlsVisible, !voiceOverEnabled else { return }
@@ -2761,9 +2823,9 @@ private struct PhotoEditorSheet: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 17) {
-                SheetHeader(title: "Framing & motion") { dismiss() }
+                SheetHeader(title: "Frame & trim") { dismiss() }
 
-                Text("Memories starts with an on-device face and subject-aware crop. Pinch to zoom, drag to reframe, then fine-tune only the shots that need it.")
+                Text("Photos use a face-aware crop. Videos start on the strongest locally detected moment. Pinch to reframe, then adjust only what needs it.")
                     .font(TR.ui(12))
                     .foregroundStyle(.white.opacity(0.56))
                     .lineSpacing(4)
@@ -2772,10 +2834,14 @@ private struct PhotoEditorSheet: View {
                     editorPreview(photo)
                     photoStrip
                     frameControls(photo)
-                    motionControls(photo)
+                    if photo.isVideo {
+                        videoMotionNotice(photo)
+                    } else {
+                        motionControls(photo)
+                    }
                     timingControls(photo)
 
-                    Button("Reset this photo to Auto") {
+                    Button(photo.isVideo ? "Reset this clip to Auto" : "Reset this photo to Auto") {
                         withAnimation(reduceMotion ? nil : TRMotion.selection) {
                             model.resetPhotoEdit(id: photo.id)
                         }
@@ -2788,9 +2854,9 @@ private struct PhotoEditorSheet: View {
                     .padding(.vertical, 8)
                 } else {
                     ContentUnavailableView(
-                        "No photos in this cut",
+                        "No moments in this cut",
                         systemImage: "photo.on.rectangle.angled",
-                        description: Text("Keep a photo to edit its framing and motion.")
+                        description: Text("Keep a photo or video to edit it.")
                     )
                     .foregroundStyle(TR.cream)
                 }
@@ -2869,6 +2935,17 @@ private struct PhotoEditorSheet: View {
                         } label: {
                             PhotoAssetView(source: photo.source)
                                 .frame(width: 54, height: 54)
+                                .overlay(alignment: .bottomTrailing) {
+                                    if photo.isVideo {
+                                        Image(systemName: "play.fill")
+                                            .font(.system(size: 8, weight: .bold))
+                                            .foregroundStyle(TR.ink)
+                                            .frame(width: 18, height: 18)
+                                            .background(TR.accent)
+                                            .clipShape(Circle())
+                                            .padding(4)
+                                    }
+                                }
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                                         .stroke(
@@ -2934,25 +3011,97 @@ private struct PhotoEditorSheet: View {
         }
     }
 
+    private func videoMotionNotice(_ photo: ReelPhoto) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: photo.hasOriginalAudio ? "waveform" : "video.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(TR.keep)
+                .frame(width: 34, height: 34)
+                .background(TR.keep.opacity(0.12))
+                .clipShape(Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Natural motion")
+                    .font(TR.ui(12, weight: .semibold))
+                    .foregroundStyle(TR.cream)
+                Text(photo.hasOriginalAudio
+                    ? "Original sound is mixed beneath the soundtrack."
+                    : "This clip brings movement without artificial zooming.")
+                    .font(TR.ui(10))
+                    .foregroundStyle(.white.opacity(0.50))
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(.white.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
     private func timingControls(_ photo: ReelPhoto) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                MetadataText(text: "TIME ON SCREEN", color: .white.opacity(0.43))
+                MetadataText(
+                    text: photo.isVideo ? "CLIP LENGTH" : "TIME ON SCREEN",
+                    color: .white.opacity(0.43)
+                )
                 Spacer()
                 Text(String(format: "%.1fs", model.duration(for: photo)))
                     .font(TR.mono(12))
                     .foregroundStyle(TR.accent)
             }
-            Slider(
-                value: Binding(
-                    get: { model.duration(for: selectedPhoto ?? photo) },
-                    set: { model.setPhotoDuration($0, forPhotoID: photo.id) }
-                ),
-                in: 0.6...4,
-                step: 0.1
-            )
-            .tint(TR.accent)
+            let durationRange = (photo.isVideo ? 0.8 : 0.6)...maxDuration(for: photo)
+            if durationRange.upperBound > durationRange.lowerBound {
+                Slider(
+                    value: Binding(
+                        get: { model.duration(for: selectedPhoto ?? photo) },
+                        set: { model.setPhotoDuration($0, forPhotoID: photo.id) }
+                    ),
+                    in: durationRange,
+                    step: 0.1
+                )
+                .tint(TR.accent)
+            } else if photo.isVideo {
+                Text("This short video uses the full clip.")
+                    .font(TR.ui(10))
+                    .foregroundStyle(.white.opacity(0.48))
+            }
+
+            if photo.isVideo {
+                HStack {
+                    MetadataText(text: "MOMENT IN ORIGINAL", color: .white.opacity(0.43))
+                    Spacer()
+                    Text(videoRangeText(photo))
+                        .font(TR.mono(11))
+                        .foregroundStyle(.white.opacity(0.62))
+                }
+                let maximumStart = maxVideoStart(for: photo)
+                if maximumStart > 0.05 {
+                    Slider(
+                        value: Binding(
+                            get: { selectedPhoto?.videoStartSeconds ?? photo.videoStartSeconds },
+                            set: { model.setVideoStart($0, forPhotoID: photo.id) }
+                        ),
+                        in: 0...maximumStart,
+                        step: 0.1
+                    )
+                    .tint(TR.keep)
+                }
+            }
         }
+    }
+
+    private func maxDuration(for photo: ReelPhoto) -> Double {
+        guard photo.isVideo else { return 4 }
+        return max(0.8, min(4, photo.sourceDurationSeconds - photo.videoStartSeconds))
+    }
+
+    private func maxVideoStart(for photo: ReelPhoto) -> Double {
+        max(0, photo.sourceDurationSeconds - model.duration(for: photo))
+    }
+
+    private func videoRangeText(_ photo: ReelPhoto) -> String {
+        let current = selectedPhoto ?? photo
+        let end = min(current.sourceDurationSeconds, current.videoStartSeconds + model.duration(for: current))
+        return String(format: "%.1f–%.1fs", current.videoStartSeconds, end)
     }
 
     private func editorChip(
@@ -3609,7 +3758,7 @@ private struct MusicSheet: View {
 
     private var beatNote: String {
         guard model.selectedTrackID != nil else { return "Pick a track first" }
-        return model.cutToBeat ? "Photos land on the downbeat" : "Photos keep your pace"
+        return model.cutToBeat ? "Moments land on the downbeat" : "Moments keep your pace"
     }
 
     private func trackRow(_ track: MusicTrack) -> some View {

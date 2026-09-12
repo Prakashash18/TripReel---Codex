@@ -465,6 +465,14 @@ final class TripReelModelTests: XCTestCase {
                 source: .imported("/tmp/temporary-import.jpg"),
                 creationDate: start.addingTimeInterval(3),
                 filename: "IMG_4.JPG"
+            ),
+            TripAsset(
+                id: "cut-library-video",
+                source: .library("cut-library-video"),
+                creationDate: start.addingTimeInterval(4),
+                filename: "IMG_5.MOV",
+                mediaKind: .video,
+                sourceDurationSeconds: 5
             )
         ]
         let trip = Trip(
@@ -477,7 +485,12 @@ final class TripReelModelTests: XCTestCase {
             coverID: assets[0].id
         )
         model.startBuild(trip: trip)
-        model.cutPhotoIDs = ["cut-library-one", "cut-library-two", "temporary-import"]
+        model.cutPhotoIDs = [
+            "cut-library-one",
+            "cut-library-two",
+            "temporary-import",
+            "cut-library-video"
+        ]
 
         XCTAssertEqual(
             Set(model.cleanupCandidatePhotos.map(\.id)),
@@ -960,7 +973,7 @@ final class TripReelModelTests: XCTestCase {
         }
 
         XCTAssertEqual(model.screen, .export)
-        XCTAssertEqual(model.exportErrorTitle, "A photo needs a little longer")
+        XCTAssertEqual(model.exportErrorTitle, "A moment needs a little longer")
         XCTAssertTrue(model.exportCanRetryPhotoDownload)
         XCTAssertTrue(model.exportErrorMessage?.contains("kept every edit safe") == true)
 

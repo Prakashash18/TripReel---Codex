@@ -93,8 +93,8 @@ final class PhotoLibraryService: NSObject, PhotoLibraryServing, PHPhotoLibraryCh
         }
     }
 
-    /// Fetches every non-hidden image visible under the current full or
-    /// limited-library authorization, including burst and synced sources.
+    /// Fetches every non-hidden photo and video visible under the current full
+    /// or limited-library authorization, including burst and synced sources.
     func fetchAllPhotos() async -> [PhotoMetadata] {
         await withCheckedContinuation { continuation in
             queue.async { [weak self] in
@@ -103,7 +103,7 @@ final class PhotoLibraryService: NSObject, PhotoLibraryServing, PHPhotoLibraryCh
                     return
                 }
 
-                let result = PHAsset.fetchAssets(with: .image, options: Self.fetchOptions())
+                let result = PHAsset.fetchAssets(with: Self.fetchOptions())
                 self.fullFetchResult = result
                 continuation.resume(returning: Self.metadata(from: result))
             }
@@ -214,7 +214,9 @@ final class PhotoLibraryService: NSObject, PhotoLibraryServing, PHPhotoLibraryCh
         photos.reserveCapacity(result.count)
 
         result.enumerateObjects { asset, _, _ in
+            guard asset.mediaType == .image || asset.mediaType == .video else { return }
             let coordinate = validCoordinate(from: asset.location)
+            let mediaKind: LibraryMediaKind = asset.mediaType == .video ? .video : .photo
             photos.append(
                 PhotoMetadata(
                     id: asset.localIdentifier,
@@ -226,7 +228,9 @@ final class PhotoLibraryService: NSObject, PhotoLibraryServing, PHPhotoLibraryCh
                     filename: "",
                     pixelWidth: asset.pixelWidth,
                     pixelHeight: asset.pixelHeight,
-                    isScreenshot: asset.mediaSubtypes.contains(.photoScreenshot)
+                    isScreenshot: asset.mediaSubtypes.contains(.photoScreenshot),
+                    mediaKind: mediaKind,
+                    durationSeconds: asset.duration
                 )
             )
         }

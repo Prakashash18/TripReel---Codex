@@ -20,6 +20,28 @@ final class TripGroupingTests: XCTestCase {
         ).isEmpty)
     }
 
+    func testVideoMomentsParticipateInMemoryGroupingAndKeepDuration() throws {
+        var input = photos(prefix: "mixed", count: 14, hours: 20, coordinate: .singapore)
+        input.append(PhotoMetadata(
+            id: "mixed-video",
+            creationDate: origin.addingTimeInterval(10 * 60 * 60),
+            coordinate: .singapore,
+            filename: "moment.mov",
+            pixelWidth: 1_080,
+            pixelHeight: 1_920,
+            isScreenshot: false,
+            mediaKind: .video,
+            durationSeconds: 12.4
+        ))
+
+        let trip = try XCTUnwrap(TripDetector.detect(in: input, calendar: utcCalendar).first)
+        let video = try XCTUnwrap(trip.photos.first { $0.id == "mixed-video" })
+
+        XCTAssertEqual(trip.photoCount, 15)
+        XCTAssertEqual(video.mediaKind, .video)
+        XCTAssertEqual(video.durationSeconds, 12.4, accuracy: 0.001)
+    }
+
     func testShuffledInputProducesStableMembershipAndOrdering() {
         let older = photos(prefix: "old", count: 18, hours: 24, coordinate: .singapore)
         let newerStart = origin.addingTimeInterval(10 * 24 * 60 * 60)
@@ -482,6 +504,65 @@ final class TripGroupingTests: XCTestCase {
             pixelWidth: 4_032,
             pixelHeight: 3_024,
             isScreenshot: isScreenshot
+        )
+    }
+}
+
+final class VideoClipHeuristicsTests: XCTestCase {
+    func testPeopleMomentGetsAReadableClipAroundTheBestFrame() throws {
+        let descriptor = try XCTUnwrap(VideoClipHeuristics.choose(
+            sourceDurationSeconds: 12,
+            frames: [
+                frame(time: 2, memory: 0.58, aesthetic: 0.56, people: 0, motion: 0.06),
+                frame(time: 7, memory: 0.91, aesthetic: 0.86, people: 3, motion: 0.14),
+                frame(time: 10, memory: 0.62, aesthetic: 0.60, people: 0, motion: 0.09),
+            ],
+            hasOriginalAudio: true
+        ))
+
+        XCTAssertEqual(descriptor.durationSeconds, 3.8, accuracy: 0.001)
+        XCTAssertEqual(descriptor.startSeconds, 5.404, accuracy: 0.001)
+        XCTAssertTrue(descriptor.hasOriginalAudio)
+    }
+
+    func testUsefulActionGetsAQuickerClipWhileViolentMotionIsPenalized() throws {
+        let descriptor = try XCTUnwrap(VideoClipHeuristics.choose(
+            sourceDurationSeconds: 9,
+            frames: [
+                frame(time: 2, memory: 0.62, aesthetic: 0.62, people: 0, motion: 0.82),
+                frame(time: 5, memory: 0.78, aesthetic: 0.75, people: 0, motion: 0.26),
+            ],
+            hasOriginalAudio: false
+        ))
+
+        XCTAssertEqual(descriptor.durationSeconds, 2.8, accuracy: 0.001)
+        XCTAssertEqual(descriptor.startSeconds, 3.824, accuracy: 0.001)
+        XCTAssertEqual(descriptor.motionScore, 0.26, accuracy: 0.001)
+    }
+
+    func testTooShortVideoDoesNotEnterTheCut() {
+        XCTAssertNil(VideoClipHeuristics.choose(
+            sourceDurationSeconds: 0.6,
+            frames: [frame(time: 0.3, memory: 0.9, aesthetic: 0.9, people: 1, motion: 0.1)],
+            hasOriginalAudio: true
+        ))
+    }
+
+    private func frame(
+        time: Double,
+        memory: Double,
+        aesthetic: Double,
+        people: Int,
+        motion: Double
+    ) -> VideoFrameEditorialScore {
+        VideoFrameEditorialScore(
+            timeSeconds: time,
+            memoryScore: memory,
+            aestheticScore: aesthetic,
+            peopleCount: people,
+            utilityProbability: 0.04,
+            documentProbability: 0.02,
+            motionFromPrevious: motion
         )
     }
 }

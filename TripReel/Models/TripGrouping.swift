@@ -5,6 +5,11 @@ struct PhotoCoordinate: Hashable, Sendable {
     let longitude: Double
 }
 
+enum LibraryMediaKind: String, Hashable, Sendable {
+    case photo
+    case video
+}
+
 struct PhotoMetadata: Identifiable, Hashable, Sendable {
     let id: String
     let creationDate: Date?
@@ -13,6 +18,32 @@ struct PhotoMetadata: Identifiable, Hashable, Sendable {
     let pixelWidth: Int
     let pixelHeight: Int
     let isScreenshot: Bool
+    let mediaKind: LibraryMediaKind
+    let durationSeconds: Double
+
+    init(
+        id: String,
+        creationDate: Date?,
+        coordinate: PhotoCoordinate?,
+        filename: String,
+        pixelWidth: Int,
+        pixelHeight: Int,
+        isScreenshot: Bool,
+        mediaKind: LibraryMediaKind = .photo,
+        durationSeconds: Double = 0
+    ) {
+        self.id = id
+        self.creationDate = creationDate
+        self.coordinate = coordinate
+        self.filename = filename
+        self.pixelWidth = max(0, pixelWidth)
+        self.pixelHeight = max(0, pixelHeight)
+        self.isScreenshot = isScreenshot && mediaKind == .photo
+        self.mediaKind = mediaKind
+        self.durationSeconds = mediaKind == .video
+            ? max(0, durationSeconds.isFinite ? durationSeconds : 0)
+            : 0
+    }
 }
 
 struct DetectedTrip: Identifiable, Hashable, Sendable {
@@ -156,7 +187,9 @@ enum TripDetector {
             filename: photo.filename,
             pixelWidth: photo.pixelWidth,
             pixelHeight: photo.pixelHeight,
-            isScreenshot: photo.isScreenshot
+            isScreenshot: photo.isScreenshot,
+            mediaKind: photo.mediaKind,
+            durationSeconds: photo.durationSeconds
         )
     }
 
@@ -202,6 +235,8 @@ enum TripDetector {
         if lhs.filename != rhs.filename { return lhs.filename < rhs.filename }
         if lhs.pixelWidth != rhs.pixelWidth { return lhs.pixelWidth < rhs.pixelWidth }
         if lhs.pixelHeight != rhs.pixelHeight { return lhs.pixelHeight < rhs.pixelHeight }
+        if lhs.mediaKind != rhs.mediaKind { return lhs.mediaKind.rawValue < rhs.mediaKind.rawValue }
+        if lhs.durationSeconds != rhs.durationSeconds { return lhs.durationSeconds < rhs.durationSeconds }
         return lhs.isScreenshot == false && rhs.isScreenshot == true
     }
 

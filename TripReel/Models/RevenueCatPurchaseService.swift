@@ -14,9 +14,9 @@ struct ExportPremiumRequirement: Equatable, Sendable {
     var reasonText: String {
         switch (exceedsPhotoLimit, exceedsDurationLimit, requiresHighDefinition) {
         case (true, true, _):
-            "This film is longer and includes more photos than a free export."
+            "This film is longer and includes more moments than a free export."
         case (true, false, _):
-            "This film includes more photos than a free export."
+            "This film includes more moments than a free export."
         case (false, true, _):
             "This film is longer than a free export."
         case (false, false, true):
@@ -75,6 +75,16 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
     }
 
     init(bundle: Bundle) {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-qaPremium") {
+            apiKey = nil
+            entitlementIdentifier = Self.defaultEntitlementIdentifier
+            super.init()
+            isPremium = true
+            return
+        }
+        #endif
+
         let configuredKey = Self.configurationValue(
             key: "REVENUECAT_PUBLIC_SDK_KEY",
             bundle: bundle

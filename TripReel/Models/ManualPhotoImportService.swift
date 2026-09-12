@@ -1,4 +1,5 @@
 import CoreTransferable
+import AVFoundation
 import Foundation
 import ImageIO
 import PhotosUI
@@ -15,8 +16,11 @@ struct ManualImportedPhoto: Identifiable, Hashable, Sendable {
     let filename: String
     let pixelWidth: Int
     let pixelHeight: Int
+    let mediaKind: LibraryMediaKind
+    let durationSeconds: Double
 
     var fileURL: URL { URL(fileURLWithPath: filePath) }
+    var isVideo: Bool { mediaKind == .video }
 }
 
 struct ManualPhotoImportResult: Hashable, Sendable {
@@ -49,14 +53,14 @@ actor ManualPhotoImportService {
 
             do {
                 guard let transferred = try await item.loadTransferable(
-                    type: PickerTransferredImage.self
+                    type: PickerTransferredMedia.self
                 ) else {
                     failureCount += 1
                     continue
                 }
 
                 do {
-                    let photo = try Self.makePhoto(
+                    let photo = try await Self.makeMedia(
                         from: transferred,
                         pickerIdentifier: item.itemIdentifier
                     )
@@ -87,8 +91,26 @@ actor ManualPhotoImportService {
         }
     }
 
+    private static func makeMedia(
+        from transferred: PickerTransferredMedia,
+        pickerIdentifier: String?
+    ) async throws -> ManualImportedPhoto {
+        switch transferred.mediaKind {
+        case .photo:
+            return try makePhoto(
+                from: transferred,
+                pickerIdentifier: pickerIdentifier
+            )
+        case .video:
+            return try await makeVideo(
+                from: transferred,
+                pickerIdentifier: pickerIdentifier
+            )
+        }
+    }
+
     private static func makePhoto(
-        from transferred: PickerTransferredImage,
+        from transferred: PickerTransferredMedia,
         pickerIdentifier: String?
     ) throws -> ManualImportedPhoto {
         guard let source = CGImageSourceCreateWithURL(
@@ -125,7 +147,49 @@ actor ManualPhotoImportService {
             coordinate: coordinate(in: rawProperties),
             filename: transferred.originalFilename,
             pixelWidth: width,
-            pixelHeight: height
+            pixelHeight: height,
+            mediaKind: .photo,
+            durationSeconds: 0
+        )
+    }
+
+    private static func makeVideo(
+        from transferred: PickerTransferredMedia,
+        pickerIdentifier: String?
+    ) async throws -> ManualImportedPhoto {
+        let asset = AVURLAsset(url: transferred.fileURL)
+        let duration = CMTimeGetSeconds(try await asset.load(.duration))
+        guard duration.isFinite, duration >= 0.8,
+              let track = try await asset.loadTracks(withMediaType: .video).first else {
+            throw ImportError.unreadableImage
+        }
+        let naturalSize = try await track.load(.naturalSize)
+        let transform = try await track.load(.preferredTransform)
+        let transformed = CGRect(origin: .zero, size: naturalSize).applying(transform)
+        let width = Int(abs(transformed.width).rounded())
+        let height = Int(abs(transformed.height).rounded())
+        guard width > 0, height > 0 else { throw ImportError.invalidDimensions }
+
+        let stableID: String
+        if let pickerIdentifier = nonempty(pickerIdentifier) {
+            stableID = "picker:\(pickerIdentifier)"
+        } else {
+            stableID = "manual:\(transferred.storageIdentifier)"
+        }
+        let resourceValues = try? transferred.fileURL.resourceValues(
+            forKeys: [.creationDateKey, .contentModificationDateKey]
+        )
+
+        return ManualImportedPhoto(
+            id: stableID,
+            filePath: transferred.fileURL.path,
+            creationDate: resourceValues?.creationDate ?? resourceValues?.contentModificationDate,
+            coordinate: nil,
+            filename: transferred.originalFilename,
+            pixelWidth: width,
+            pixelHeight: height,
+            mediaKind: .video,
+            durationSeconds: duration
         )
     }
 
@@ -279,13 +343,25 @@ actor ManualPhotoImportService {
 
 /// The value loaded by PhotosPicker. The copy must happen in this transfer
 /// representation because `received.file` is provider-owned and short-lived.
-private struct PickerTransferredImage: Transferable, Sendable {
+private struct PickerTransferredMedia: Transferable, Sendable {
     let fileURL: URL
     let originalFilename: String
     let storageIdentifier: String
+    let mediaKind: LibraryMediaKind
 
     static var transferRepresentation: some TransferRepresentation {
         FileRepresentation(importedContentType: .image) { received in
+            try copy(received, mediaKind: .photo)
+        }
+        FileRepresentation(importedContentType: .movie) { received in
+            try copy(received, mediaKind: .video)
+        }
+    }
+
+    private static func copy(
+        _ received: ReceivedTransferredFile,
+        mediaKind: LibraryMediaKind
+    ) throws -> PickerTransferredMedia {
             let fileManager = FileManager.default
             let importDirectory = try ManualPhotoImportStorage.directory()
 
@@ -307,18 +383,18 @@ private struct PickerTransferredImage: Transferable, Sendable {
             var mutableDestination = destination
             try? mutableDestination.setResourceValues(values)
 
-            return PickerTransferredImage(
+            return PickerTransferredMedia(
                 fileURL: destination,
                 originalFilename: originalFilename,
-                storageIdentifier: storageIdentifier
+                storageIdentifier: storageIdentifier,
+                mediaKind: mediaKind
             )
-        }
     }
 
     private static func safeFilename(from url: URL) -> String {
         let candidate = url.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !candidate.isEmpty, candidate != ".", candidate != ".." else {
-            return "photo.\(safeExtension(from: url))"
+            return "memory.\(safeExtension(from: url))"
         }
         return String(candidate.prefix(255))
     }

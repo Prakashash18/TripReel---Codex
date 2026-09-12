@@ -67,7 +67,7 @@ enum TripReelVideoExportError: LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .noPhotos:
-            "Keep at least one photo before exporting."
+            "Keep at least one photo or video before exporting."
         case let .photoUnavailable(label):
             "\(label) needs a little longer in Photos. Memories tried again automatically and kept every edit safe. Check your connection, then retry the download."
         case .cannotCreateWriter:
@@ -88,9 +88,14 @@ enum TripReelVideoExportError: LocalizedError, Sendable {
     }
 }
 
-/// Renders the same photo/title timeline used by the SwiftUI preview into a
-/// vertical H.264 movie. Images are decoded one at a time, so a large trip does
-/// not retain a full-resolution copy of the whole library in memory.
+private struct PreparedReelMedia: @unchecked Sendable {
+    let stillImageURL: URL?
+    let videoAsset: AVAsset?
+}
+
+/// Renders the same mixed photo, video, and title timeline used by the SwiftUI
+/// preview into a vertical H.264 movie. Full-resolution sources are prepared
+/// one at a time so a large memory does not stay resident in memory.
 final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
     private static let preparationProgressWeight = 0.28
     private static let renderingProgressWeight = 0.62
@@ -128,7 +133,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         defer { try? FileManager.default.removeItem(at: stagingDirectory) }
 
         do {
-            let preparedPhotos = try await preparePhotos(
+            let preparedMedia = try await prepareMedia(
                 request.photos,
                 outputSize: Self.outputSize(for: request.quality),
                 in: stagingDirectory,
@@ -136,22 +141,27 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             )
             try await renderSilentVideo(
                 request,
-                preparedPhotos: preparedPhotos,
+                preparedMedia: preparedMedia,
                 to: silentURL,
                 progress: progress
             )
             try Task.checkCancellation()
-            if let soundtrackURL = request.soundtrackURL {
+            let containsSourceAudio = request.photos.contains {
+                $0.isVideo && $0.hasOriginalAudio
+            }
+            if request.soundtrackURL != nil || containsSourceAudio {
                 progress(
                     TripReelVideoExportProgress(
                         fraction: 0.91,
                         phase: .addingSoundtrack
                     )
                 )
-                try await addSoundtrack(
-                    soundtrackURL,
+                try await addAudio(
+                    soundtrackURL: request.soundtrackURL,
                     toVideoAt: silentURL,
-                    outputURL: finalURL
+                    outputURL: finalURL,
+                    request: request,
+                    preparedMedia: preparedMedia
                 )
                 try? FileManager.default.removeItem(at: silentURL)
             } else {
@@ -348,7 +358,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
 
     private func renderSilentVideo(
         _ request: TripReelVideoExportRequest,
-        preparedPhotos: [String: URL],
+        preparedMedia: [String: PreparedReelMedia],
         to outputURL: URL,
         progress: @escaping @Sendable (TripReelVideoExportProgress) -> Void
     ) async throws {
@@ -419,15 +429,35 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             try Task.checkCancellation()
             let duration = item.duration(defaultPhotoDuration: request.secondsPerPhoto)
             let frameCount = max(1, Int(ceil(duration * Double(frameRate))))
-            let photoImage: CGImage?
+            var photoImage: CGImage?
+            var videoGenerator: AVAssetImageGenerator?
+            var videoPhoto: ReelPhoto?
             let itemPhotoIndex: Int
             switch item {
             case let .photo(photo):
-                photoImage = try await loadImage(
-                    for: photo,
-                    preparedPhotos: preparedPhotos,
-                    targetSize: outputSize
-                )
+                if photo.isVideo {
+                    guard let videoAsset = preparedMedia[photo.id]?.videoAsset else {
+                        throw TripReelVideoExportError.photoUnavailable(photo.label)
+                    }
+                    let generator = AVAssetImageGenerator(asset: videoAsset)
+                    generator.appliesPreferredTrackTransform = true
+                    generator.maximumSize = outputSize
+                    let tolerance = CMTime(value: 1, timescale: frameRate)
+                    generator.requestedTimeToleranceBefore = tolerance
+                    generator.requestedTimeToleranceAfter = tolerance
+                    videoGenerator = generator
+                    videoPhoto = photo
+                    photoImage = try await videoFrame(
+                        generator: generator,
+                        sourceSeconds: photo.videoStartSeconds
+                    )
+                } else {
+                    photoImage = try await loadImage(
+                        for: photo,
+                        preparedMedia: preparedMedia,
+                        targetSize: outputSize
+                    )
+                }
                 lastPhotoImage = photoImage
                 itemPhotoIndex = photoIndices[photo.id] ?? 0
             case .title:
@@ -451,6 +481,17 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 }
 
                 let phase = frameCount <= 1 ? 1 : Double(localFrame) / Double(frameCount - 1)
+                if let videoGenerator, let videoPhoto {
+                    let frameOffset = min(
+                        max(0, duration - (1 / Double(frameRate))),
+                        Double(localFrame) / Double(frameRate)
+                    )
+                    photoImage = try await videoFrame(
+                        generator: videoGenerator,
+                        sourceSeconds: videoPhoto.videoStartSeconds + frameOffset
+                    )
+                    lastPhotoImage = photoImage
+                }
                 let transitionFrames = previousItem == nil
                     ? 0
                     : min(frameCount - 1, max(2, Int((0.24 * Double(frameRate)).rounded())))
@@ -496,7 +537,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             }
 
             previousItem = item
-            previousItemImage = photoImage
+            previousItemImage = lastPhotoImage
             previousItemPhotoIndex = itemPhotoIndex
         }
 
@@ -512,14 +553,14 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         writerCompleted = true
     }
 
-    private func preparePhotos(
+    private func prepareMedia(
         _ photos: [ReelPhoto],
         outputSize: CGSize,
         in directory: URL,
         progress: @escaping @Sendable (TripReelVideoExportProgress) -> Void
-    ) async throws -> [String: URL] {
+    ) async throws -> [String: PreparedReelMedia] {
         let total = photos.count
-        var prepared: [String: URL] = [:]
+        var prepared: [String: PreparedReelMedia] = [:]
         prepared.reserveCapacity(total)
         progress(
             TripReelVideoExportProgress(
@@ -554,17 +595,31 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 )
             }
             preparationProgress(nil)
-            let requestSize = Self.photoRequestSize(for: photo, outputSize: outputSize)
-            let image = try await prepareImage(
-                for: photo,
-                targetSize: requestSize,
-                progress: preparationProgress
-            )
-            let fileURL = directory.appendingPathComponent(
-                String(format: "photo-%04d.jpg", index)
-            )
-            try Self.writePreparedImage(image, to: fileURL)
-            prepared[photo.id] = fileURL
+            if photo.isVideo {
+                let asset = try await prepareVideoAsset(
+                    for: photo,
+                    progress: preparationProgress
+                )
+                prepared[photo.id] = PreparedReelMedia(
+                    stillImageURL: nil,
+                    videoAsset: asset
+                )
+            } else {
+                let requestSize = Self.photoRequestSize(for: photo, outputSize: outputSize)
+                let image = try await prepareImage(
+                    for: photo,
+                    targetSize: requestSize,
+                    progress: preparationProgress
+                )
+                let fileURL = directory.appendingPathComponent(
+                    String(format: "photo-%04d.jpg", index)
+                )
+                try Self.writePreparedImage(image, to: fileURL)
+                prepared[photo.id] = PreparedReelMedia(
+                    stillImageURL: fileURL,
+                    videoAsset: nil
+                )
+            }
             progress(
                 TripReelVideoExportProgress(
                     fraction: (Double(index + 1) / Double(max(1, total)))
@@ -642,6 +697,72 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             } catch {
                 throw TripReelVideoExportError.photoUnavailable(photo.label)
             }
+        }
+    }
+
+    private func prepareVideoAsset(
+        for photo: ReelPhoto,
+        progress: @escaping @Sendable (Double?) -> Void
+    ) async throws -> AVAsset {
+        switch photo.source {
+        case let .imported(path):
+            let url = URL(fileURLWithPath: path)
+            guard FileManager.default.isReadableFile(atPath: url.path) else {
+                throw TripReelVideoExportError.photoUnavailable(photo.label)
+            }
+            progress(1)
+            return AVURLAsset(url: url)
+        case .bundled:
+            throw TripReelVideoExportError.photoUnavailable(photo.label)
+        case let .library(identifier):
+            return try await prepareLibraryVideoAsset(
+                identifier: identifier,
+                label: photo.label,
+                progress: progress
+            )
+        }
+    }
+
+    private func prepareLibraryVideoAsset(
+        identifier: String,
+        label: String,
+        progress: @escaping @Sendable (Double?) -> Void
+    ) async throws -> AVAsset {
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil)
+        guard let asset = result.firstObject, asset.mediaType == .video else {
+            throw TripReelVideoExportError.photoUnavailable(label)
+        }
+
+        let state = VideoAssetPreparationState(manager: imageManager)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                state.install(continuation: continuation)
+                let options = PHVideoRequestOptions()
+                options.deliveryMode = .highQualityFormat
+                options.version = .current
+                options.isNetworkAccessAllowed = true
+                options.progressHandler = { value, _, _, _ in
+                    progress(min(0.99, max(0, value)))
+                }
+                let requestID = imageManager.requestAVAsset(
+                    forVideo: asset,
+                    options: options
+                ) { videoAsset, _, info in
+                    if (info?[PHImageCancelledKey] as? Bool) == true {
+                        state.finish(.failure(CancellationError()))
+                    } else if let error = info?[PHImageErrorKey] as? Error {
+                        state.finish(.failure(error))
+                    } else if let videoAsset {
+                        progress(1)
+                        state.finish(.success(videoAsset))
+                    } else {
+                        state.finish(.failure(TripReelVideoExportError.photoUnavailable(label)))
+                    }
+                }
+                state.install(requestID: requestID)
+            }
+        } onCancel: {
+            state.cancel()
         }
     }
 
@@ -792,10 +913,10 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
 
     private func loadImage(
         for photo: ReelPhoto,
-        preparedPhotos: [String: URL],
+        preparedMedia: [String: PreparedReelMedia],
         targetSize _: CGSize
     ) async throws -> CGImage {
-        guard let url = preparedPhotos[photo.id],
+        guard let url = preparedMedia[photo.id]?.stillImageURL,
               let source = CGImageSourceCreateWithURL(
                 url as CFURL,
                 [kCGImageSourceShouldCache: false] as CFDictionary
@@ -808,6 +929,23 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             throw TripReelVideoExportError.photoUnavailable(photo.label)
         }
         return image
+    }
+
+    private func videoFrame(
+        generator: AVAssetImageGenerator,
+        sourceSeconds: Double
+    ) async throws -> CGImage {
+        let time = CMTime(
+            seconds: max(0, sourceSeconds),
+            preferredTimescale: max(600, frameRate * 10)
+        )
+        do {
+            return try await generator.image(at: time).image
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw TripReelVideoExportError.cannotCreateFrame
+        }
     }
 
     private static func outputSize(for quality: ExportQuality) -> CGSize {
@@ -834,29 +972,23 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         }.cgImage
     }
 
-    private func addSoundtrack(
-        _ soundtrackURL: URL,
+    private func addAudio(
+        soundtrackURL: URL?,
         toVideoAt videoURL: URL,
-        outputURL: URL
+        outputURL: URL,
+        request: TripReelVideoExportRequest,
+        preparedMedia: [String: PreparedReelMedia]
     ) async throws {
         let videoAsset = AVURLAsset(url: videoURL)
-        let audioAsset = AVURLAsset(url: soundtrackURL)
         let videoDuration = try await videoAsset.load(.duration)
-        let audioDuration = try await audioAsset.load(.duration)
         let videoTracks = try await videoAsset.loadTracks(withMediaType: .video)
-        let audioTracks = try await audioAsset.loadTracks(withMediaType: .audio)
-        guard let sourceVideoTrack = videoTracks.first,
-              let sourceAudioTrack = audioTracks.first,
-              audioDuration > .zero else {
+        guard let sourceVideoTrack = videoTracks.first else {
             throw TripReelVideoExportError.soundtrackFailed
         }
 
         let composition = AVMutableComposition()
         guard let videoTrack = composition.addMutableTrack(
             withMediaType: .video,
-            preferredTrackID: kCMPersistentTrackID_Invalid
-        ), let audioTrack = composition.addMutableTrack(
-            withMediaType: .audio,
             preferredTrackID: kCMPersistentTrackID_Invalid
         ) else {
             throw TripReelVideoExportError.soundtrackFailed
@@ -867,28 +999,118 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             at: .zero
         )
 
-        var cursor = CMTime.zero
-        while cursor < videoDuration {
-            try Task.checkCancellation()
-            let remaining = CMTimeSubtract(videoDuration, cursor)
-            let segmentDuration = CMTimeMinimum(audioDuration, remaining)
-            try audioTrack.insertTimeRange(
-                CMTimeRange(start: .zero, duration: segmentDuration),
-                of: sourceAudioTrack,
-                at: cursor
-            )
-            cursor = CMTimeAdd(cursor, segmentDuration)
+        var mixParameters: [AVAudioMixInputParameters] = []
+        var soundtrackParameters: AVMutableAudioMixInputParameters?
+        if let soundtrackURL {
+            let audioAsset = AVURLAsset(url: soundtrackURL)
+            let audioDuration = try await audioAsset.load(.duration)
+            let audioTracks = try await audioAsset.loadTracks(withMediaType: .audio)
+            guard let sourceAudioTrack = audioTracks.first,
+                  audioDuration > .zero,
+                  let audioTrack = composition.addMutableTrack(
+                    withMediaType: .audio,
+                    preferredTrackID: kCMPersistentTrackID_Invalid
+                  ) else {
+                throw TripReelVideoExportError.soundtrackFailed
+            }
+            var cursor = CMTime.zero
+            while cursor < videoDuration {
+                try Task.checkCancellation()
+                let remaining = CMTimeSubtract(videoDuration, cursor)
+                let segmentDuration = CMTimeMinimum(audioDuration, remaining)
+                try audioTrack.insertTimeRange(
+                    CMTimeRange(start: .zero, duration: segmentDuration),
+                    of: sourceAudioTrack,
+                    at: cursor
+                )
+                cursor = CMTimeAdd(cursor, segmentDuration)
+            }
+            let parameters = AVMutableAudioMixInputParameters(track: audioTrack)
+            parameters.setVolume(0.68, at: .zero)
+            soundtrackParameters = parameters
+            mixParameters.append(parameters)
+        }
+
+        if let sourceTrack = composition.addMutableTrack(
+            withMediaType: .audio,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) {
+            let sourceParameters = AVMutableAudioMixInputParameters(track: sourceTrack)
+            sourceParameters.setVolume(0, at: .zero)
+            var cursor = CMTime.zero
+            for item in MontageTimelineBuilder.make(
+                photos: request.photos,
+                titleCards: request.titleCards
+            ) {
+                try Task.checkCancellation()
+                let itemDurationSeconds = item.duration(
+                    defaultPhotoDuration: request.secondsPerPhoto
+                )
+                let itemDuration = CMTime(seconds: itemDurationSeconds, preferredTimescale: 600)
+                defer { cursor = CMTimeAdd(cursor, itemDuration) }
+                guard case let .photo(photo) = item,
+                      photo.isVideo,
+                      photo.hasOriginalAudio,
+                      let sourceAsset = preparedMedia[photo.id]?.videoAsset,
+                      let sourceAudio = try await sourceAsset.loadTracks(withMediaType: .audio).first
+                else { continue }
+
+                let trackRange = try await sourceAudio.load(.timeRange)
+                let requestedStart = CMTime(
+                    seconds: photo.videoStartSeconds,
+                    preferredTimescale: 600
+                )
+                let sourceStart = CMTimeMaximum(trackRange.start, requestedStart)
+                let sourceRemaining = CMTimeSubtract(CMTimeRangeGetEnd(trackRange), sourceStart)
+                let clipDuration = CMTimeMinimum(itemDuration, sourceRemaining)
+                guard clipDuration > .zero else { continue }
+                do {
+                    try sourceTrack.insertTimeRange(
+                        CMTimeRange(start: sourceStart, duration: clipDuration),
+                        of: sourceAudio,
+                        at: cursor
+                    )
+                } catch {
+                    continue
+                }
+
+                let fadeDuration = CMTimeMinimum(
+                    CMTime(seconds: 0.12, preferredTimescale: 600),
+                    CMTimeMultiplyByFloat64(clipDuration, multiplier: 0.25)
+                )
+                sourceParameters.setVolumeRamp(
+                    fromStartVolume: 0,
+                    toEndVolume: 0.92,
+                    timeRange: CMTimeRange(start: cursor, duration: fadeDuration)
+                )
+                let fadeOutStart = CMTimeSubtract(CMTimeAdd(cursor, clipDuration), fadeDuration)
+                sourceParameters.setVolumeRamp(
+                    fromStartVolume: 0.92,
+                    toEndVolume: 0,
+                    timeRange: CMTimeRange(start: fadeOutStart, duration: fadeDuration)
+                )
+                if let soundtrackParameters {
+                    soundtrackParameters.setVolume(0.24, at: cursor)
+                    soundtrackParameters.setVolume(0.68, at: CMTimeAdd(cursor, clipDuration))
+                }
+            }
+            mixParameters.append(sourceParameters)
         }
 
         guard let exportSession = AVAssetExportSession(
             asset: composition,
-            presetName: AVAssetExportPresetPassthrough
+            presetName: AVAssetExportPresetHighestQuality
         ) else {
             throw TripReelVideoExportError.soundtrackFailed
         }
         exportSession.outputURL = outputURL
         exportSession.outputFileType = .mp4
         exportSession.shouldOptimizeForNetworkUse = true
+        if !mixParameters.isEmpty {
+            let audioMix = AVMutableAudioMix()
+            audioMix.inputParameters = mixParameters
+            exportSession.audioMix = audioMix
+        }
         await withCheckedContinuation { continuation in
             exportSession.exportAsynchronously { continuation.resume() }
         }
@@ -980,7 +1202,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                     phase: easedMotionPhase(phase),
                     index: photoIndex,
                     look: request.look,
-                    intensity: request.motionIntensity
+                    intensity: photo.isVideo ? .still : request.motionIntensity
                 )
             }
             if let overlay = request.textOverlays.first(where: { $0.photoID == photo.id }) {
@@ -1519,6 +1741,62 @@ private final class VideoImageRequestState: @unchecked Sendable {
         if requestID != PHInvalidImageRequestID {
             manager.cancelImageRequest(requestID)
         }
+        continuation?.resume(throwing: CancellationError())
+    }
+}
+
+private final class VideoAssetPreparationState: @unchecked Sendable {
+    private let lock = NSLock()
+    private let manager: PHImageManager
+    private var continuation: CheckedContinuation<AVAsset, Error>?
+    private var requestID = PHInvalidImageRequestID
+    private var completed = false
+
+    init(manager: PHImageManager) {
+        self.manager = manager
+    }
+
+    func install(continuation: CheckedContinuation<AVAsset, Error>) {
+        lock.lock()
+        if completed {
+            lock.unlock()
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func install(requestID: PHImageRequestID) {
+        lock.lock()
+        if completed {
+            lock.unlock()
+            manager.cancelImageRequest(requestID)
+            return
+        }
+        self.requestID = requestID
+        lock.unlock()
+    }
+
+    func finish(_ result: Result<AVAsset, Error>) {
+        lock.lock()
+        guard !completed else { lock.unlock(); return }
+        completed = true
+        let continuation = continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
+    }
+
+    func cancel() {
+        lock.lock()
+        guard !completed else { lock.unlock(); return }
+        completed = true
+        let continuation = continuation
+        self.continuation = nil
+        let requestID = requestID
+        lock.unlock()
+        if requestID != PHInvalidImageRequestID { manager.cancelImageRequest(requestID) }
         continuation?.resume(throwing: CancellationError())
     }
 }

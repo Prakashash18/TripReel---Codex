@@ -64,6 +64,8 @@ struct TripAsset: Identifiable, Hashable, Sendable {
     let isScreenshot: Bool
     let pixelWidth: Int
     let pixelHeight: Int
+    let mediaKind: LibraryMediaKind
+    let sourceDurationSeconds: Double
 
     init(
         id: String,
@@ -72,16 +74,24 @@ struct TripAsset: Identifiable, Hashable, Sendable {
         filename: String,
         isScreenshot: Bool = false,
         pixelWidth: Int = 0,
-        pixelHeight: Int = 0
+        pixelHeight: Int = 0,
+        mediaKind: LibraryMediaKind = .photo,
+        sourceDurationSeconds: Double = 0
     ) {
         self.id = id
         self.source = source
         self.creationDate = creationDate
         self.filename = filename
-        self.isScreenshot = isScreenshot
+        self.isScreenshot = isScreenshot && mediaKind == .photo
         self.pixelWidth = max(0, pixelWidth)
         self.pixelHeight = max(0, pixelHeight)
+        self.mediaKind = mediaKind
+        self.sourceDurationSeconds = mediaKind == .video
+            ? max(0, sourceDurationSeconds.isFinite ? sourceDurationSeconds : 0)
+            : 0
     }
+
+    var isVideo: Bool { mediaKind == .video }
 }
 
 struct Trip: Identifiable, Hashable, Sendable {
@@ -94,6 +104,20 @@ struct Trip: Identifiable, Hashable, Sendable {
     let coverID: String
 
     var photoCount: Int { assets.count }
+    var videoCount: Int { assets.filter(\.isVideo).count }
+    var stillPhotoCount: Int { photoCount - videoCount }
+
+    var mediaCountText: String {
+        Self.mediaCountText(photoCount: stillPhotoCount, videoCount: videoCount)
+    }
+
+    static func mediaCountText(photoCount: Int, videoCount: Int) -> String {
+        let photos = max(0, photoCount)
+        let videos = max(0, videoCount)
+        if videos == 0 { return "\(photos) photo\(photos == 1 ? "" : "s")" }
+        if photos == 0 { return "\(videos) clip\(videos == 1 ? "" : "s")" }
+        return "\(photos) photos · \(videos) clips"
+    }
 
     var coverSource: PhotoSource {
         assets.first(where: { $0.id == coverID })?.source
@@ -168,6 +192,11 @@ struct ReelPhoto: Identifiable, Hashable, Sendable {
     let pixelWidth: Int
     let pixelHeight: Int
     let protectsPeople: Bool
+    let mediaKind: LibraryMediaKind
+    let sourceDurationSeconds: Double
+    let automaticVideoStartSeconds: Double
+    let automaticDurationSeconds: Double?
+    let hasOriginalAudio: Bool
     let automaticFrameStyle: MontageFrameStyle
     let automaticMotionStyle: MontageMotionStyle
     let automaticCropScale: Double
@@ -180,6 +209,7 @@ struct ReelPhoto: Identifiable, Hashable, Sendable {
     var cropOffsetX: Double
     var cropOffsetY: Double
     var durationSeconds: Double?
+    var videoStartSeconds: Double
 
     init(
         id: String,
@@ -195,7 +225,11 @@ struct ReelPhoto: Identifiable, Hashable, Sendable {
         cropScale: Double = 1,
         cropOffsetX: Double = 0,
         cropOffsetY: Double = 0,
-        durationSeconds: Double? = nil
+        durationSeconds: Double? = nil,
+        mediaKind: LibraryMediaKind = .photo,
+        sourceDurationSeconds: Double = 0,
+        videoStartSeconds: Double = 0,
+        hasOriginalAudio: Bool = false
     ) {
         self.id = id
         self.source = source
@@ -205,6 +239,16 @@ struct ReelPhoto: Identifiable, Hashable, Sendable {
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
         self.protectsPeople = protectsPeople
+        self.mediaKind = mediaKind
+        self.sourceDurationSeconds = mediaKind == .video
+            ? max(0, sourceDurationSeconds.isFinite ? sourceDurationSeconds : 0)
+            : 0
+        let safeStart = max(0, videoStartSeconds.isFinite ? videoStartSeconds : 0)
+        automaticVideoStartSeconds = mediaKind == .video
+            ? min(safeStart, self.sourceDurationSeconds)
+            : 0
+        self.videoStartSeconds = automaticVideoStartSeconds
+        self.hasOriginalAudio = mediaKind == .video && hasOriginalAudio
         automaticFrameStyle = frameStyle
         automaticMotionStyle = motionStyle
         automaticCropScale = min(max(cropScale, 1), 3)
@@ -216,7 +260,9 @@ struct ReelPhoto: Identifiable, Hashable, Sendable {
         self.cropScale = automaticCropScale
         self.cropOffsetX = automaticCropOffsetX
         self.cropOffsetY = automaticCropOffsetY
-        self.durationSeconds = durationSeconds.map { min(max($0, 0.6), 4) }
+        let safeDuration = durationSeconds.map { min(max($0, 0.6), 4) }
+        automaticDurationSeconds = safeDuration
+        self.durationSeconds = safeDuration
     }
 
     var aspectRatio: Double {
@@ -231,6 +277,12 @@ struct ReelPhoto: Identifiable, Hashable, Sendable {
             && cropScale == automaticCropScale
             && cropOffsetX == automaticCropOffsetX
             && cropOffsetY == automaticCropOffsetY
+    }
+
+    var isVideo: Bool { mediaKind == .video }
+
+    var videoEndSeconds: Double {
+        min(sourceDurationSeconds, videoStartSeconds + (durationSeconds ?? 0))
     }
 }
 
@@ -290,6 +342,7 @@ private struct PhotoEditOverride: Hashable, Sendable {
     var cropOffsetX: Double?
     var cropOffsetY: Double?
     var durationSeconds: Double?
+    var videoStartSeconds: Double?
 }
 
 enum MontageLook: String, CaseIterable, Identifiable, Hashable, Sendable {
@@ -311,10 +364,10 @@ enum MontageLook: String, CaseIterable, Identifiable, Hashable, Sendable {
 
     var detail: String {
         switch self {
-        case .story: "An automatic mix matched to each photo"
+        case .story: "An automatic mix matched to each moment"
         case .cinema: "Wide frames, soft mattes, and quieter cuts"
         case .journal: "Warm prints and tactile postcard moments"
-        case .clean: "Simple full-bleed photos with minimal framing"
+        case .clean: "Simple full-bleed moments with minimal framing"
         }
     }
 
@@ -1199,9 +1252,9 @@ enum TitleCardKind: String, CaseIterable, Identifiable, Hashable, Sendable {
 
     var placement: String {
         switch self {
-        case .opening: "Before the first photo"
+        case .opening: "Before the first moment"
         case .place: "At a natural chapter break"
-        case .ending: "After the last photo"
+        case .ending: "After the last moment"
         }
     }
 
@@ -1417,6 +1470,13 @@ struct TripEditSnapshot: Hashable, Sendable {
         photos.filter { !cutPhotoIDs.contains($0.id) }
     }
 
+    var keptVideoCount: Int { keptPhotos.filter(\.isVideo).count }
+    var keptStillPhotoCount: Int { keptPhotos.count - keptVideoCount }
+    var keptMediaSummary: String {
+        Trip.mediaCountText(photoCount: keptStillPhotoCount, videoCount: keptVideoCount)
+    }
+    var previewSoundtrackVolume: Float { keptVideoCount > 0 ? 0.42 : 0.82 }
+
     var montageTitleCards: [MontageTitleCard] {
         TitleCardKind.allCases.compactMap { kind in
             guard titleCards.contains(kind), let draft = titleDrafts[kind] else { return nil }
@@ -1591,6 +1651,7 @@ final class TripReelModel: ObservableObject {
     private let aiVideoGeneration: any AIVideoGenerationServing
     private let photoAnalysisThumbnails: any PhotoAnalysisThumbnailServing
     private let nativePhotoIntelligence: any NativePhotoIntelligenceServing
+    private let videoClipIntelligence: any VideoClipIntelligenceServing
     private let preferenceStore: UserDefaults
     private let manualPhotoImporter = ManualPhotoImportService()
     private var workTask: Task<Void, Never>?
@@ -1621,6 +1682,8 @@ final class TripReelModel: ObservableObject {
     private var pendingBuildTrip: Trip?
     private var activeAnalysisTrip: Trip?
     private var activePhotoInsights: [String: MontagePhotoInsight] = [:]
+    private var activeVideoClips: [String: VideoClipDescriptor] = [:]
+    private var activeVideoCloudPreviews: [String: PreparedPhotoThumbnail] = [:]
     private var cloudBlockedPhotoIDs: Set<String> = []
     private var aiCutConsentGranted = false
     private var manuallyIncludedPhotoIDs: Set<String> = []
@@ -1638,6 +1701,7 @@ final class TripReelModel: ObservableObject {
         aiVideoGeneration: (any AIVideoGenerationServing)? = nil,
         photoAnalysisThumbnails: (any PhotoAnalysisThumbnailServing)? = nil,
         nativePhotoIntelligence: (any NativePhotoIntelligenceServing)? = nil,
+        videoClipIntelligence: (any VideoClipIntelligenceServing)? = nil,
         videoExporter: (any TripReelVideoExporting)? = nil,
         preferenceStore: UserDefaults = .standard
     ) {
@@ -1648,6 +1712,7 @@ final class TripReelModel: ObservableObject {
         self.aiVideoGeneration = aiVideoGeneration ?? OpenRouterAIVideoClient()
         self.photoAnalysisThumbnails = photoAnalysisThumbnails ?? PhotoAnalysisThumbnailService()
         self.nativePhotoIntelligence = nativePhotoIntelligence ?? NativePhotoIntelligenceService()
+        self.videoClipIntelligence = videoClipIntelligence ?? VideoClipIntelligenceService()
         self.videoExporter = videoExporter ?? TripReelVideoExporter()
         self.preferenceStore = preferenceStore
         cloudAnalysisPreference = CloudAnalysisPreference(
@@ -1768,6 +1833,13 @@ final class TripReelModel: ObservableObject {
         photos.filter { !cutPhotoIDs.contains($0.id) }
     }
 
+    var keptVideoCount: Int { keptPhotos.filter(\.isVideo).count }
+    var keptStillPhotoCount: Int { keptCount - keptVideoCount }
+    var keptMediaSummary: String {
+        Trip.mediaCountText(photoCount: keptStillPhotoCount, videoCount: keptVideoCount)
+    }
+    var previewSoundtrackVolume: Float { keptVideoCount > 0 ? 0.42 : 0.82 }
+
     /// Original PhotoKit items that the user cut from this film and can choose
     /// to remove from Apple Photos. Permission-free imports stay out of cleanup
     /// because deleting TripReel's temporary copy cannot delete the original.
@@ -1778,7 +1850,9 @@ final class TripReelModel: ObservableObject {
         }
 
         let libraryCuts = photos.filter { photo in
-            guard cutPhotoIDs.contains(photo.id) else { return false }
+            // Cleanup was introduced for discarded still images. Keep videos
+            // out until the product offers an equally explicit video warning.
+            guard cutPhotoIDs.contains(photo.id), !photo.isVideo else { return false }
             if case .library = photo.source { return true }
             return false
         }
@@ -1906,7 +1980,8 @@ final class TripReelModel: ObservableObject {
                     || photo.cropScale != photo.automaticCropScale
                     || photo.cropOffsetX != photo.automaticCropOffsetX
                     || photo.cropOffsetY != photo.automaticCropOffsetY
-                    || photo.durationSeconds != nil
+                    || photo.durationSeconds != photo.automaticDurationSeconds
+                    || photo.videoStartSeconds != photo.automaticVideoStartSeconds
                 guard customized else { return nil }
                 return (
                     photo.id,
@@ -1916,7 +1991,10 @@ final class TripReelModel: ObservableObject {
                         cropScale: photo.cropScale,
                         cropOffsetX: photo.cropOffsetX,
                         cropOffsetY: photo.cropOffsetY,
-                        durationSeconds: photo.durationSeconds
+                        durationSeconds: photo.durationSeconds != photo.automaticDurationSeconds
+                            ? photo.durationSeconds
+                            : nil,
+                        videoStartSeconds: photo.isVideo ? photo.videoStartSeconds : nil
                     )
                 )
             }
@@ -1926,7 +2004,7 @@ final class TripReelModel: ObservableObject {
     var exportProgressTitle: String {
         switch exportProgressPhase {
         case .preparingPhotos:
-            "Gathering full-quality photos"
+            "Gathering full-quality moments"
         case .rendering:
             "Rendering"
         case .addingSoundtrack:
@@ -2131,7 +2209,7 @@ final class TripReelModel: ObservableObject {
         case .betterStory:
             ["How the day unfolded", "The moments behind the memory", "From arrival to goodbye"]
         case .surpriseMe:
-            ["What made this memorable", "The story between the photos", "Find the unexpected thread"]
+            ["What made this memorable", "The story between the moments", "Find the unexpected thread"]
         }
     }
 
@@ -2140,9 +2218,9 @@ final class TripReelModel: ObservableObject {
     }
 
     var overseasMemoriesEyebrow: String {
-        if isScanningLibrary { return "Scanning \(libraryPhotoCount) photos" }
+        if isScanningLibrary { return "Scanning \(libraryPhotoCount) moments" }
         if !usesDemoData {
-            return "\(trips.count) memor\(trips.count == 1 ? "y" : "ies") · \(libraryPhotoCount) photos scanned"
+            return "\(trips.count) memor\(trips.count == 1 ? "y" : "ies") · \(libraryPhotoCount) moments scanned"
         }
         return "\(trips.count) memor\(trips.count == 1 ? "y" : "ies") found"
     }
@@ -2154,7 +2232,7 @@ final class TripReelModel: ObservableObject {
 
     var tripPlace: String { selectedTrip?.place ?? "Your memory" }
     var tripShortPlace: String { selectedTrip?.shortPlace ?? "Your memory" }
-    var tripDates: String { selectedTrip?.dates ?? "Selected photos" }
+    var tripDates: String { selectedTrip?.dates ?? "Selected moments" }
 
     /// Backward-compatible opening-title access. Each title card now keeps an
     /// independent editable draft, but existing callers can still use this
@@ -2369,9 +2447,9 @@ final class TripReelModel: ObservableObject {
             && !selectedAICutPhotoIDs.isEmpty
     }
 
-    /// Photos omitted from the cut currently on screen. An AI cut can restore
+    /// Moments omitted from the cut currently on screen. An AI cut can restore
     /// a locally omitted moment without mutating the saved First Cut; filtering
-    /// here keeps More Photos truthful and makes reverting fully reversible.
+    /// here keeps More Moments truthful and makes reverting fully reversible.
     var visibleExcludedPhotos: [SmartExcludedPhoto] {
         let visiblePhotoIDs = Set(keptPhotos.map(\.id))
         return excludedPhotos.filter { !visiblePhotoIDs.contains($0.id) }
@@ -2380,7 +2458,7 @@ final class TripReelModel: ObservableObject {
     var smartSelectionSummary: String? {
         let count = visibleExcludedPhotos.count
         guard count > 0 else { return nil }
-        return "\(count) photo\(count == 1 ? "" : "s") left in More Photos"
+        return "\(count) moment\(count == 1 ? "" : "s") left in More Moments"
     }
 
     /// Entry point used by the trip list. First Cut is always created locally;
@@ -2489,13 +2567,17 @@ final class TripReelModel: ObservableObject {
             return
         }
         guard let sourceTrip = activeAnalysisTrip ?? selectedTrip else {
-            aiCutFailureMessage = "The original memory photos aren't available for another cut. Your First Cut is unchanged."
+            aiCutFailureMessage = "The original memory moments aren't available for another cut. Your First Cut is unchanged."
             return
         }
         let sourceAssets = sourceTrip.assets
         let assetsByID = Dictionary(uniqueKeysWithValues: sourceAssets.map { ($0.id, $0) })
         let allPhotos = applyingPhotoEdits(
-            to: Self.makeReelPhotos(from: sourceTrip, insights: activePhotoInsights)
+            to: Self.makeReelPhotos(
+                from: sourceTrip,
+                insights: activePhotoInsights,
+                videoClips: activeVideoClips
+            )
         )
         let allPhotosByID = Dictionary(uniqueKeysWithValues: allPhotos.map { ($0.id, $0) })
         let selectedOptions = availableAICutCandidatePhotos().filter {
@@ -2519,7 +2601,8 @@ final class TripReelModel: ObservableObject {
             for: candidates,
             sourceAssets: sourceAssets,
             tripStartDate: sourceTrip.startDate,
-            insights: activePhotoInsights
+            insights: activePhotoInsights,
+            videoClips: activeVideoClips
         )
 
         aiCutTask = Task { [weak self] in
@@ -2530,7 +2613,13 @@ final class TripReelModel: ObservableObject {
             for (index, candidate) in candidates.enumerated() {
                 guard self.aiCutGeneration == generation, !Task.isCancelled else { return }
                 do {
-                    let prepared = try await self.photoAnalysisThumbnails.prepare(asset: candidate.asset)
+                    let prepared: PreparedPhotoThumbnail
+                    if candidate.asset.isVideo,
+                       let videoPreview = self.activeVideoCloudPreviews[candidate.asset.id] {
+                        prepared = videoPreview
+                    } else {
+                        prepared = try await self.photoAnalysisThumbnails.prepare(asset: candidate.asset)
+                    }
                     let wireID = "p\(wireInputs.count)"
                     wireInputs.append(CloudPhotoAnalysisInput(
                         id: wireID,
@@ -2878,9 +2967,15 @@ final class TripReelModel: ObservableObject {
                   var photo = candidatePhotosByLocalID[localID] else {
                 throw AICutPlanValidationError.unknownPhotoID
             }
-            photo.durationSeconds = item.emphasis == .highlight
+            let plannedDuration = item.emphasis == .highlight
                 ? max(2.2, item.durationSeconds)
                 : item.durationSeconds
+            photo.durationSeconds = photo.isVideo
+                ? min(
+                    max(0.8, plannedDuration),
+                    max(0.8, photo.sourceDurationSeconds - photo.videoStartSeconds)
+                )
+                : plannedDuration
             photo.motionStyle = Self.choreographedMotionStyle(
                 for: item,
                 photo: photo,
@@ -3022,7 +3117,7 @@ final class TripReelModel: ObservableObject {
         let chapter = hasChapter ? ", adds “\(plan.story.title)” as a chapter" : ""
         let closing = plan.ending.enabled
             ? "Opens with “\(plan.hook.title)”\(chapter), and closes with “\(plan.ending.title)”."
-            : "Opens with “\(plan.hook.title)”\(chapter), and lets the final photo close the film."
+            : "Opens with “\(plan.hook.title)”\(chapter), and lets the final moment close the film."
         return [
             AICutRecommendation(
                 kind: .story,
@@ -3104,6 +3199,7 @@ final class TripReelModel: ObservableObject {
         sourceAssets: [TripAsset],
         tripStartDate: Date,
         insights: [String: MontagePhotoInsight],
+        videoClips: [String: VideoClipDescriptor] = [:],
         calendar: Calendar = .current
     ) -> [String: CloudPhotoEditorialContext] {
         let chronological = sourceAssets.sorted { left, right in
@@ -3123,6 +3219,7 @@ final class TripReelModel: ObservableObject {
             let position = positions[asset.id] ?? 0
             let previous = position > 0 ? chronological[position - 1] : nil
             let insight = insights[asset.id] ?? MontagePhotoInsight()
+            let videoClip = videoClips[asset.id]
             let assetDay = calendar.startOfDay(for: asset.creationDate ?? tripStartDate)
             let dayIndex = max(0, min(365, calendar.dateComponents([.day], from: startDay, to: assetDay).day ?? 0))
             return (asset.id, CloudPhotoEditorialContext(
@@ -3135,9 +3232,19 @@ final class TripReelModel: ObservableObject {
                 memory: cloudScoreBand(insight.memoryScore),
                 aesthetic: cloudScoreBand(insight.aestheticScore),
                 similarityGroup: similarityGroups[asset.id] ?? "",
-                sceneLabels: cloudSceneLabels(insight.classifications)
+                sceneLabels: cloudSceneLabels(insight.classifications),
+                mediaKind: asset.isVideo ? .video : .photo,
+                clipDurationSeconds: asset.isVideo ? min(4, videoClip?.durationSeconds ?? 0) : 0,
+                hasOriginalAudio: asset.isVideo && (videoClip?.hasOriginalAudio ?? false),
+                videoMotion: cloudVideoMotion(videoClip?.motionScore ?? 0)
             ))
         })
+    }
+
+    private static func cloudVideoMotion(_ value: Double) -> CloudVideoMotionBand {
+        if value >= 0.20 { return .active }
+        if value >= 0.055 { return .gentle }
+        return .still
     }
 
     private static func aiSimilarityGroups(
@@ -3303,7 +3410,11 @@ final class TripReelModel: ObservableObject {
         })
         let eligibleIDs = firstCutIDs.union(recoverableIDs).subtracting(cloudBlockedPhotoIDs)
         let allPhotos = applyingPhotoEdits(
-            to: Self.makeReelPhotos(from: sourceTrip, insights: activePhotoInsights)
+            to: Self.makeReelPhotos(
+                from: sourceTrip,
+                insights: activePhotoInsights,
+                videoClips: activeVideoClips
+            )
         )
 
         return allPhotos.compactMap { photo in
@@ -3400,6 +3511,12 @@ final class TripReelModel: ObservableObject {
         index: Int,
         previous: MontageMotionStyle?
     ) -> MontageMotionStyle {
+        // Video already contains real camera and subject motion. Never layer a
+        // still-photo Ken Burns move over the clip chosen on-device.
+        if photo.isVideo {
+            return .settle
+        }
+
         // Preserve the face-aware motion chosen on-device. A cloud suggestion
         // must never turn a safe group composition into an aggressive crop.
         if photo.protectsPeople {
@@ -3556,7 +3673,11 @@ final class TripReelModel: ObservableObject {
         selectedCutSource = .working
         self.selectedTrip = updatedTrip
         photos = applyingPhotoEdits(
-            to: Self.makeReelPhotos(from: updatedTrip, insights: activePhotoInsights)
+            to: Self.makeReelPhotos(
+                from: updatedTrip,
+                insights: activePhotoInsights,
+                videoClips: activeVideoClips
+            )
         )
         cutPhotoIDs.formIntersection(Set(photos.map(\.id)))
         currentPhotoIndex = min(currentPhotoIndex, max(0, photos.count - 1))
@@ -3597,17 +3718,27 @@ final class TripReelModel: ObservableObject {
         photoAnalysisProcessedCount = 0
         photoAnalysisTotalCount = trip.assets.count
         activePhotoInsights = [:]
+        activeVideoClips = [:]
+        activeVideoCloudPreviews = [:]
         cloudBlockedPhotoIDs = []
 
         // The analysis coordinator is installed below; keeping this launch in a
         // cancellable task prevents a second trip tap from racing the first.
         photoAnalysisTask = Task { [weak self] in
             guard let self else { return }
-            await self.analyzeAndBuild(trip: trip, generation: generation)
+            await self.analyzeAndBuild(
+                trip: trip,
+                generation: generation,
+                allowsVideoNetworkAccess: preservesExistingFollowUp
+            )
         }
     }
 
-    private func analyzeAndBuild(trip: Trip, generation: UUID) async {
+    private func analyzeAndBuild(
+        trip: Trip,
+        generation: UUID,
+        allowsVideoNetworkAccess: Bool
+    ) async {
         guard photoAnalysisGeneration == generation else { return }
         isAnalyzingPhotos = true
         var decisions: [String: SmartExcludedPhoto] = [:]
@@ -3633,15 +3764,30 @@ final class TripReelModel: ObservableObject {
             }
 
             do {
-                let thumbnail = try await photoAnalysisThumbnails.prepare(asset: asset)
-                let nativeResult = try await nativePhotoIntelligence.analyze(
-                    cgImage: thumbnail.cgImage,
-                    orientation: .up,
-                    metadata: NativePhotoIntelligenceMetadata(
-                        sourceIdentifier: asset.id,
-                        isScreenshot: asset.isScreenshot
+                let nativeResult: NativePhotoIntelligenceResult
+                if asset.isVideo {
+                    photoAnalysisStatus = allowsVideoNetworkAccess
+                        ? "Finding the best part of this video"
+                        : "Checking a video on this iPhone"
+                    let analysis = try await videoClipIntelligence.analyze(
+                        asset: asset,
+                        allowsNetworkAccess: allowsVideoNetworkAccess,
+                        nativeIntelligence: nativePhotoIntelligence
                     )
-                )
+                    nativeResult = analysis.nativeResult
+                    activeVideoClips[asset.id] = analysis.descriptor
+                    activeVideoCloudPreviews[asset.id] = analysis.cloudContactSheet
+                } else {
+                    let thumbnail = try await photoAnalysisThumbnails.prepare(asset: asset)
+                    nativeResult = try await nativePhotoIntelligence.analyze(
+                        cgImage: thumbnail.cgImage,
+                        orientation: .up,
+                        metadata: NativePhotoIntelligenceMetadata(
+                            sourceIdentifier: asset.id,
+                            isScreenshot: asset.isScreenshot
+                        )
+                    )
+                }
                 analyzedCount += 1
                 nativeResults[asset.id] = nativeResult
                 montageInsights[asset.id] = MontagePhotoInsight(result: nativeResult)
@@ -3982,7 +4128,7 @@ final class TripReelModel: ObservableObject {
         guard manualSelectionGeneration == generation, !Task.isCancelled else { return false }
         guard !metadata.isEmpty, Set(metadata.map(\.id)) == Set(identifiers) else {
             isManualSelectionInProgress = false
-            libraryErrorMessage = "Some selected photos are outside Memories' current Photo Library access. Allow Full Access or add them to Limited Access, then try again."
+            libraryErrorMessage = "Some selected moments are outside Memories' current Photo Library access. Allow Full Access or add them to Limited Access, then try again."
             return false
         }
 
@@ -4020,7 +4166,9 @@ final class TripReelModel: ObservableObject {
                 filename: $0.filename,
                 isScreenshot: $0.isScreenshot,
                 pixelWidth: $0.pixelWidth,
-                pixelHeight: $0.pixelHeight
+                pixelHeight: $0.pixelHeight,
+                mediaKind: $0.mediaKind,
+                sourceDurationSeconds: $0.durationSeconds
             )
         }
         let coordinate = sorted.compactMap(\.coordinate).first
@@ -4071,7 +4219,7 @@ final class TripReelModel: ObservableObject {
         let imported = result.photos.filter { seen.insert($0.id).inserted }
         guard !imported.isEmpty else {
             isManualSelectionInProgress = false
-            libraryErrorMessage = "Memories couldn't import the selected photos. Check your iCloud connection and try again."
+            libraryErrorMessage = "Memories couldn't import the selected moments. Check your iCloud connection and try again."
             return false
         }
 
@@ -4082,14 +4230,16 @@ final class TripReelModel: ObservableObject {
                 creationDate: photo.creationDate,
                 filename: photo.filename,
                 pixelWidth: photo.pixelWidth,
-                pixelHeight: photo.pixelHeight
+                pixelHeight: photo.pixelHeight,
+                mediaKind: photo.mediaKind,
+                sourceDurationSeconds: photo.durationSeconds
             )
         }
         let dated = imported.compactMap(\.creationDate)
         let startDate = dated.min() ?? Date()
         let endDate = dated.max() ?? startDate
         if result.failureCount > 0 {
-            libraryErrorMessage = "Imported \(imported.count) photos. \(result.failureCount) couldn't be downloaded from Photos; you can try those again when iCloud is available."
+            libraryErrorMessage = "Imported \(imported.count) moments. \(result.failureCount) couldn't be downloaded from Photos; you can try those again when iCloud is available."
         }
 
         return await installManualTrip(
@@ -4120,7 +4270,7 @@ final class TripReelModel: ObservableObject {
         }
         let trip = Trip(
             id: "manual-\(assets[0].id)",
-            place: "Selected photos",
+            place: "Selected moments",
             dates: Self.dateText(from: startDate, to: endDate),
             startDate: startDate,
             endDate: endDate,
@@ -4164,7 +4314,11 @@ final class TripReelModel: ObservableObject {
         let isNearbyTrip = nearbyEvents.contains(where: { $0.id == trip.id })
         selectedTrip = trip
         photoEditOverrides = [:]
-        photos = Self.makeReelPhotos(from: trip, insights: activePhotoInsights)
+        photos = Self.makeReelPhotos(
+            from: trip,
+            insights: activePhotoInsights,
+            videoClips: activeVideoClips
+        )
         let localTitlePlan = LocalStoryIntelligence.makeTitlePlan(
             for: trip,
             photos: photos,
@@ -4353,10 +4507,29 @@ final class TripReelModel: ObservableObject {
 
     func setPhotoDuration(_ duration: Double, forPhotoID id: String) {
         guard let index = photos.firstIndex(where: { $0.id == id }) else { return }
-        let duration = min(max(duration, 0.6), 4)
+        let minimum = photos[index].isVideo ? 0.8 : 0.6
+        let available = photos[index].isVideo
+            ? max(minimum, photos[index].sourceDurationSeconds - photos[index].videoStartSeconds)
+            : 4
+        let duration = min(max(duration, minimum), min(4, available))
         photos[index].durationSeconds = duration
         var edit = photoEditOverrides[id] ?? PhotoEditOverride()
         edit.durationSeconds = duration
+        photoEditOverrides[id] = edit
+    }
+
+    func setVideoStart(_ startSeconds: Double, forPhotoID id: String) {
+        guard let index = photos.firstIndex(where: { $0.id == id }), photos[index].isVideo else {
+            return
+        }
+        let duration = photos[index].durationSeconds ?? photos[index].automaticDurationSeconds ?? 0.8
+        let start = min(
+            max(0, startSeconds),
+            max(0, photos[index].sourceDurationSeconds - duration)
+        )
+        photos[index].videoStartSeconds = start
+        var edit = photoEditOverrides[id] ?? PhotoEditOverride()
+        edit.videoStartSeconds = start
         photoEditOverrides[id] = edit
     }
 
@@ -4369,7 +4542,8 @@ final class TripReelModel: ObservableObject {
         photos[index].cropScale = photos[index].automaticCropScale
         photos[index].cropOffsetX = photos[index].automaticCropOffsetX
         photos[index].cropOffsetY = photos[index].automaticCropOffsetY
-        photos[index].durationSeconds = nil
+        photos[index].durationSeconds = photos[index].automaticDurationSeconds
+        photos[index].videoStartSeconds = photos[index].automaticVideoStartSeconds
     }
 
     func requestExport(_ intent: ExportIntent, isPremium: Bool) {
@@ -4458,7 +4632,7 @@ final class TripReelModel: ObservableObject {
         }
 
         guard !keptPhotos.isEmpty else {
-            exportErrorMessage = "Keep at least one photo before exporting."
+            exportErrorMessage = "Keep at least one photo or video before exporting."
             go(.export)
             return
         }
@@ -4496,7 +4670,7 @@ final class TripReelModel: ObservableObject {
                 guard self.exportGeneration == generation else { return }
                 if let exportError = error as? TripReelVideoExportError,
                    case .photoUnavailable = exportError {
-                    self.exportErrorTitle = "A photo needs a little longer"
+                    self.exportErrorTitle = "A moment needs a little longer"
                     self.exportCanRetryPhotoDownload = true
                 } else {
                     self.exportErrorTitle = "Export couldn't finish"
@@ -4865,7 +5039,9 @@ final class TripReelModel: ObservableObject {
                 filename: $0.filename,
                 isScreenshot: $0.isScreenshot,
                 pixelWidth: $0.pixelWidth,
-                pixelHeight: $0.pixelHeight
+                pixelHeight: $0.pixelHeight,
+                mediaKind: $0.mediaKind,
+                sourceDurationSeconds: $0.durationSeconds
             )
         }
         let fallbackPlace = detected.centroid == nil
@@ -4896,7 +5072,9 @@ final class TripReelModel: ObservableObject {
                 filename: $0.filename,
                 isScreenshot: $0.isScreenshot,
                 pixelWidth: $0.pixelWidth,
-                pixelHeight: $0.pixelHeight
+                pixelHeight: $0.pixelHeight,
+                mediaKind: $0.mediaKind,
+                sourceDurationSeconds: $0.durationSeconds
             )
         }
         return makeReelPhotos(
@@ -4914,13 +5092,17 @@ final class TripReelModel: ObservableObject {
 
     private static func makeReelPhotos(
         from trip: Trip,
-        insights: [String: MontagePhotoInsight] = [:]
+        insights: [String: MontagePhotoInsight] = [:],
+        videoClips: [String: VideoClipDescriptor] = [:]
     ) -> [ReelPhoto] {
         MontageSequencePlanner.plan(assets: trip.assets, insights: insights)
             .enumerated().map { index, item in
             let asset = item.asset
-            let fallbackLabel = "PHOTO_\(String(format: "%04d", index + 1))"
+            let fallbackLabel = asset.isVideo
+                ? "VIDEO_\(String(format: "%04d", index + 1))"
+                : "PHOTO_\(String(format: "%04d", index + 1))"
             let label = asset.filename.isEmpty ? fallbackLabel : asset.filename
+            let clip = videoClips[asset.id]
             return ReelPhoto(
                 id: asset.id,
                 source: asset.source,
@@ -4933,11 +5115,16 @@ final class TripReelModel: ObservableObject {
                 pixelWidth: asset.pixelWidth,
                 pixelHeight: asset.pixelHeight,
                 protectsPeople: item.protectsPeople,
-                frameStyle: item.frameStyle,
-                motionStyle: item.motionStyle,
+                frameStyle: asset.isVideo ? .fullBleed : item.frameStyle,
+                motionStyle: asset.isVideo ? .settle : item.motionStyle,
                 cropScale: item.cropScale,
                 cropOffsetX: item.cropOffsetX,
-                cropOffsetY: item.cropOffsetY
+                cropOffsetY: item.cropOffsetY,
+                durationSeconds: clip?.durationSeconds,
+                mediaKind: asset.mediaKind,
+                sourceDurationSeconds: clip?.sourceDurationSeconds ?? asset.sourceDurationSeconds,
+                videoStartSeconds: clip?.startSeconds ?? 0,
+                hasOriginalAudio: clip?.hasOriginalAudio ?? false
             )
         }
     }
@@ -4952,7 +5139,11 @@ final class TripReelModel: ObservableObject {
             edited.cropScale = edit.cropScale ?? photo.automaticCropScale
             edited.cropOffsetX = edit.cropOffsetX ?? photo.automaticCropOffsetX
             edited.cropOffsetY = edit.cropOffsetY ?? photo.automaticCropOffsetY
-            edited.durationSeconds = edit.durationSeconds
+            edited.durationSeconds = edit.durationSeconds ?? photo.automaticDurationSeconds
+            edited.videoStartSeconds = min(
+                max(0, edit.videoStartSeconds ?? photo.automaticVideoStartSeconds),
+                max(0, edited.sourceDurationSeconds - (edited.durationSeconds ?? 0))
+            )
             return edited
         }
     }

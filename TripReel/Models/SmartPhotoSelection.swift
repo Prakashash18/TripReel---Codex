@@ -218,6 +218,10 @@ enum NativePhotoSimilarity {
         firstProtectsPeople: Bool = false,
         secondProtectsPeople: Bool = false
     ) -> Bool {
+        // A moving clip is editorially distinct from a still frame, even when
+        // its poster resembles a neighboring photo. Keep video candidates so
+        // motion and natural sound are not collapsed as duplicates.
+        guard !first.isVideo, !second.isVideo else { return false }
         guard let firstDate = first.creationDate,
               let secondDate = second.creationDate else { return false }
         let interval = abs(firstDate.timeIntervalSince(secondDate))
@@ -264,7 +268,7 @@ enum NativePhotoSimilarity {
 /// whole camera roll. The selector is deliberately local and reversible: it
 /// combines Vision memory/aesthetic scores with day, category, orientation,
 /// time, and feature-print diversity, then places every unselected asset in
-/// More Photos.
+/// More Moments.
 enum SmartHighlightSelector {
     static func decisions(
         for assets: [TripAsset],
@@ -341,7 +345,7 @@ enum SmartHighlightSelector {
             return SmartExcludedPhoto(
                 asset: asset,
                 reason: .notAHighlight,
-                detail: "Kept in More Photos for a shorter, more varied first cut.",
+                detail: "Kept in More Moments for a shorter, more varied first cut.",
                 confidence: 0.72,
                 origin: .onDevice
             )
@@ -383,6 +387,7 @@ enum SmartHighlightSelector {
         if result.tags.contains(.groupPhoto) { value += 0.12 }
         if result.tags.contains(.scenery) { value += 0.08 }
         if result.tags.contains(.food) { value += 0.04 }
+        if asset.isVideo { value += 0.16 }
         if !selected.contains(where: { selectedAsset in
             nativeResults[selectedAsset.id].map(contentKind(for:)) == kind
         }) {
@@ -491,6 +496,7 @@ enum SmartHighlightSelector {
         if result.tags.contains(.groupPhoto) { value += 0.14 }
         if result.tags.contains(.people) { value += 0.08 }
         if result.tags.contains(.scenery) { value += 0.05 }
+        if asset.isVideo { value += 0.14 }
         return value
     }
 

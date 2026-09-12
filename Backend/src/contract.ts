@@ -75,6 +75,12 @@ export type PhotoScoreBand = (typeof PHOTO_SCORE_BANDS)[number];
 export const PHOTO_CONTENT_KINDS = ["scenery", "people", "food", "moment"] as const;
 export type PhotoContentKind = (typeof PHOTO_CONTENT_KINDS)[number];
 
+export const MEDIA_KINDS = ["photo", "video"] as const;
+export type MediaKind = (typeof MEDIA_KINDS)[number];
+
+export const VIDEO_MOTION_BANDS = ["still", "gentle", "active"] as const;
+export type VideoMotionBand = (typeof VIDEO_MOTION_BANDS)[number];
+
 export const FIRST_CUT_FRAME_STYLES = ["full_bleed", "portrait_matte", "cinematic", "postcard"] as const;
 export type FirstCutFrameStyle = (typeof FIRST_CUT_FRAME_STYLES)[number];
 
@@ -116,6 +122,10 @@ export interface PhotoEditorialContext {
   aesthetic: PhotoScoreBand;
   similarityGroup: string;
   sceneLabels: string[];
+  mediaKind: MediaKind;
+  clipDurationSeconds: number;
+  hasOriginalAudio: boolean;
+  videoMotion: VideoMotionBand;
 }
 
 export interface FirstCutSequenceItem {

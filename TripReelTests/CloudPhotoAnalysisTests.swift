@@ -359,7 +359,11 @@ final class CloudPhotoAnalysisTests: XCTestCase {
             memory: .high,
             aesthetic: .medium,
             similarityGroup: "",
-            sceneLabels: ["People", "Event"]
+            sceneLabels: ["People", "Event"],
+            mediaKind: .photo,
+            clipDurationSeconds: 0,
+            hasOriginalAudio: false,
+            videoMotion: .still
         )
         let client = CloudPhotoAnalysisClient(
             endpoint: URL(string: "https://analysis.example.test/v1/analyze"),

@@ -300,7 +300,7 @@ struct PhotoAccessScreen: View {
             }
             Button("Not now", role: .cancel) {}
         } message: {
-            Text("Allow Memories to read your photos in Settings, or choose photos manually instead.")
+            Text("Allow Memories to read your photos and videos in Settings, or choose moments manually instead.")
         }
         .accessibilityIdentifier("photo-access-screen")
     }
@@ -316,7 +316,7 @@ struct PhotoAccessScreen: View {
                         .tracking(1.2)
                         .foregroundStyle(TR.keep.opacity(0.88))
 
-                    Text("Choose the photos that matter")
+                    Text("Choose the moments that matter")
                         .font(TR.display(compact ? 32 : 38))
                         .tracking(-0.38)
                         .multilineTextAlignment(.center)
@@ -328,7 +328,7 @@ struct PhotoAccessScreen: View {
                     .clipShape(RoundedRectangle(cornerRadius: compact ? 18 : 22, style: .continuous))
                     .shadow(color: .black.opacity(0.5), radius: 26, y: 18)
 
-                Text("Set this up once. Memories uses dates and locations on this iPhone to group your photos into stories. You stay in control.")
+                Text("Set this up once. Memories groups related photos and videos into stories using dates and locations on this iPhone. You stay in control.")
                     .font(TR.ui(compact ? 13 : 15))
                     .foregroundStyle(.white.opacity(0.72))
                     .multilineTextAlignment(.center)
@@ -354,7 +354,7 @@ struct PhotoAccessScreen: View {
                 .buttonStyle(CreamButtonStyle())
                 .disabled(requestingAccess)
 
-                Button("Select photos instead") {
+                Button("Select moments instead") {
                     showPicker = true
                 }
                 .font(TR.ui(14, weight: .medium))
@@ -364,7 +364,7 @@ struct PhotoAccessScreen: View {
                     isPresented: $showPicker,
                     selection: $pickerItems,
                     maxSelectionCount: 0,
-                    matching: .images,
+                    matching: .any(of: [.images, .videos]),
                     preferredItemEncoding: .current,
                     photoLibrary: .shared()
                 )
@@ -414,7 +414,7 @@ struct LimitedAccessScreen: View {
                         .font(TR.ui(13, weight: .medium))
                         .foregroundStyle(.white.opacity(0.63))
 
-                    Text("You'll only see the photos you picked")
+                    Text("You'll only see the moments you picked")
                         .font(TR.display(36))
                         .tracking(-0.4)
                         .multilineTextAlignment(.center)
@@ -435,7 +435,7 @@ struct LimitedAccessScreen: View {
                         }
                     }
 
-                    Text("Memories can only build stories from the photos you selected. You can expand access at any time.")
+                    Text("Memories can only build stories from the photos and videos you selected. You can expand access at any time.")
                         .font(TR.ui(15))
                         .foregroundStyle(.white.opacity(0.72))
                         .multilineTextAlignment(.center)
@@ -453,7 +453,7 @@ struct LimitedAccessScreen: View {
                     }
                     .buttonStyle(CreamButtonStyle())
 
-                    Button("Continue with \(model.selectedPhotoCount) photos") {
+                    Button("Continue with \(model.selectedPhotoCount) moments") {
                         model.showTripResults()
                     }
                     .font(TR.ui(14, weight: .medium))

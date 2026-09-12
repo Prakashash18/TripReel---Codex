@@ -9,6 +9,7 @@ import {
 } from "../src/contract.ts";
 import { compareAICut } from "../src/comparison.ts";
 import { handleRequest } from "../src/handler.ts";
+import { buildOpenAIRequest } from "../src/openai.ts";
 import { RequestProblem, validatePayload } from "../src/validation.ts";
 
 const AUTH_TOKEN = "tripreel-test-token-that-is-at-least-32-bytes";
@@ -135,6 +136,10 @@ function photoContext(index) {
     aesthetic: "high",
     similarityGroup: "",
     sceneLabels: index % 3 === 0 ? ["People", "Event"] : ["Landscape"],
+    mediaKind: "photo",
+    clipDurationSeconds: 0,
+    hasOriginalAudio: false,
+    videoMotion: "still",
   };
 }
 
@@ -255,6 +260,57 @@ test("validates only the versioned editorial request contract", () => {
     () => validatePayload({ ...payload(), version: 3 }),
     (error) => error instanceof RequestProblem && error.code === "invalid_request",
   );
+});
+
+test("validates video contact sheets and tells the AI Director to use clips as moments", () => {
+  const mixed = comparativePayload(["p0", "p1"]);
+  mixed.photos[1].context = {
+    ...photoContext(1),
+    mediaKind: "video",
+    clipDurationSeconds: 3.4,
+    hasOriginalAudio: true,
+    videoMotion: "active",
+  };
+
+  const validated = validatePayload(mixed);
+  assert.equal(validated.photos[1].context.mediaKind, "video");
+  assert.equal(validated.photos[1].context.clipDurationSeconds, 3.4);
+  const request = buildOpenAIRequest(validated, DEFAULT_MODEL);
+  assert.match(request.instructions, /video preview is a left-to-right three-frame contact sheet/u);
+  assert.match(request.instructions, /alternate stills and clips/u);
+  const videoDescription = request.input[0].content.find(
+    (item) => item.type === "input_text" && /"mediaKind":"video"/u.test(item.text),
+  );
+  assert.ok(videoDescription);
+
+  const invalid = structuredClone(mixed);
+  invalid.photos[1].context.clipDurationSeconds = 9;
+  assert.throws(
+    () => validatePayload(invalid),
+    (error) => error instanceof RequestProblem && error.code === "invalid_photo_context",
+  );
+
+  invalid.photos[1].context.clipDurationSeconds = 0;
+  assert.throws(
+    () => validatePayload(invalid),
+    (error) => error instanceof RequestProblem && error.code === "invalid_photo_context",
+  );
+});
+
+test("keeps the previous photo-only context valid during mixed-media rollout", () => {
+  const legacy = comparativePayload(["p0", "p1"]);
+  for (const photo of legacy.photos) {
+    delete photo.context.mediaKind;
+    delete photo.context.clipDurationSeconds;
+    delete photo.context.hasOriginalAudio;
+    delete photo.context.videoMotion;
+  }
+
+  const validated = validatePayload(legacy);
+  assert.equal(validated.photos[0].context.mediaKind, "photo");
+  assert.equal(validated.photos[0].context.clipDurationSeconds, 0);
+  assert.equal(validated.photos[0].context.hasOriginalAudio, false);
+  assert.equal(validated.photos[0].context.videoMotion, "still");
 });
 
 test("rejects duplicate IDs, oversized dimensions, and excessive counts", () => {

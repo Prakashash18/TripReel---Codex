@@ -8,9 +8,12 @@ final class TripReelFlowUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    private func launchApp(at screen: String = "trips") {
+    private func launchApp(at screen: String = "trips", premium: Bool = false) {
         app = XCUIApplication()
         app.launchArguments = ["-qaScreen", screen, "-qaNoHint"]
+        if premium {
+            app.launchArguments.append("-qaPremium")
+        }
         app.launchEnvironment["TRIPREEL_DEVELOPMENT_AUTH_TOKEN"] = String(repeating: "u", count: 32)
         app.launch()
     }
@@ -36,14 +39,24 @@ final class TripReelFlowUITests: XCTestCase {
         launchApp(at: "welcome")
 
         XCTAssertTrue(screen("welcome-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Memories"].exists)
+        XCTAssertTrue(
+            app.staticTexts
+                .matching(NSPredicate(format: "label ==[c] %@", "Memories"))
+                .firstMatch
+                .exists
+        )
         XCTAssertTrue(app.staticTexts["Turn the photos that matter into a story."].exists)
-        XCTAssertTrue(screen("memories-entrance-artwork").exists)
-        XCTAssertTrue(screen("welcome-continue-button").exists)
+        XCTAssertTrue(
+            app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label CONTAINS[c] %@", "become one animated story"))
+                .firstMatch
+                .exists
+        )
+        XCTAssertTrue(app.buttons["Get started"].exists)
     }
 
     func testCoreFilmCreationFlow() {
-        launchApp()
+        launchApp(premium: true)
         XCTAssertTrue(screen("trips-screen").waitForExistence(timeout: 3))
 
         app.buttons["trip-row-demo-da-nang"].tap()
@@ -177,7 +190,7 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Keep the whole story"].exists)
         XCTAssertTrue(
             app.staticTexts
-                .matching(NSPredicate(format: "label CONTAINS[c] %@", "up to 24 photos and 0:30"))
+                .matching(NSPredicate(format: "label CONTAINS[c] %@", "up to 24 moments and 0:30"))
                 .firstMatch
                 .exists
         )
@@ -209,10 +222,10 @@ final class TripReelFlowUITests: XCTestCase {
         button(startingWith: "Improve with AI").tap()
         XCTAssertTrue(screen("cloud-analysis-consent").waitForExistence(timeout: 3))
 
-        button(startingWith: "Allow & choose photos").tap()
+        button(startingWith: "Allow & choose moments").tap()
 
         XCTAssertTrue(screen("ai-direction-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Edit photos & direction"].exists)
+        XCTAssertTrue(app.staticTexts["Edit moments & direction"].exists)
         XCTAssertTrue(screen("ai-direction-expand").exists)
         XCTAssertFalse(screen("ai-direction-dynamic").exists)
         XCTAssertTrue(
@@ -226,12 +239,12 @@ final class TripReelFlowUITests: XCTestCase {
         screen("ai-direction-expand").tap()
         XCTAssertTrue(screen("ai-direction-dynamic").waitForExistence(timeout: 2))
 
-        let photoPicker = button(startingWith: "Photos for AI")
+        let photoPicker = button(startingWith: "Moments for AI")
         XCTAssertTrue(photoPicker.waitForExistence(timeout: 2))
         photoPicker.tap()
 
         XCTAssertTrue(screen("ai-photo-selection-sheet").waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Deselect one photo to choose another"].exists)
+        XCTAssertTrue(app.staticTexts["Deselect one moment to choose another"].exists)
         XCTAssertTrue(app.buttons["Suggested"].exists)
         XCTAssertTrue(app.buttons["Clear"].exists)
         attachScreenshot(named: "AI exact photo selection")
@@ -266,7 +279,7 @@ final class TripReelFlowUITests: XCTestCase {
         launchApp(at: "aiProcessing")
         XCTAssertTrue(screen("ai-processing-screen").waitForExistence(timeout: 3))
         let transfer = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS[c] %@", "reduced preview copies"))
+            .matching(NSPredicate(format: "label CONTAINS[c] %@", "Original media"))
             .firstMatch
         XCTAssertTrue(transfer.waitForExistence(timeout: 2))
 
@@ -304,7 +317,7 @@ final class TripReelFlowUITests: XCTestCase {
     }
 
     func testCapCutPathRendersACompatibleMovie() {
-        launchApp(at: "export")
+        launchApp(at: "export", premium: true)
         XCTAssertTrue(screen("export-screen").waitForExistence(timeout: 3))
 
         screen("export-project").tap()
