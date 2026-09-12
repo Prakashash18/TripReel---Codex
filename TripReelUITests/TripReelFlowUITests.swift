@@ -170,6 +170,21 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
     }
 
+    func testPaywallExplainsTheFreeLimitAndKeepsEditingAvailable() {
+        launchApp(at: "paywall")
+
+        XCTAssertTrue(screen("paywall-screen").waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Keep the whole story"].exists)
+        XCTAssertTrue(
+            app.staticTexts
+                .matching(NSPredicate(format: "label CONTAINS[c] %@", "up to 24 photos and 0:30"))
+                .firstMatch
+                .exists
+        )
+        XCTAssertTrue(app.buttons["Not now"].exists)
+        XCTAssertTrue(app.buttons["Restore purchases"].exists)
+    }
+
     func testAIConsentComesBeforeDirectionAndDeclineReturnsSafely() {
         launchApp(at: "firstCutOptions")
         XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
@@ -239,22 +254,12 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
     }
 
-    func testAICutComparisonOffersSeparateGenerativeVideoChoice() {
+    func testAICutComparisonKeepsRetiredGenerativeVideoOutOfTheFlow() {
         launchApp(at: "aiComparison")
         XCTAssertTrue(screen("ai-comparison-screen").waitForExistence(timeout: 3))
-
-        let videoChoice = screen("open-ai-video-button")
-        XCTAssertTrue(videoChoice.waitForExistence(timeout: 2))
-        if !videoChoice.isHittable { app.swipeUp() }
-        XCTAssertTrue(videoChoice.isHittable)
-        videoChoice.tap()
-
-        XCTAssertTrue(screen("ai-video-intro-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(screen("ai-video-beginning-card").exists)
-        XCTAssertTrue(screen("ai-video-ending-card").exists)
-        XCTAssertTrue(screen("ai-video-photo-picker").exists)
-        XCTAssertTrue(screen("create-ai-video-button").exists)
-        XCTAssertFalse(screen("ai-video-generating-screen").exists)
+        XCTAssertFalse(screen("open-ai-video-button").exists)
+        XCTAssertTrue(screen("use-ai-cut-button").exists)
+        XCTAssertTrue(screen("edit-compared-cut-button").exists)
     }
 
     func testAIProcessingShowsSecureTransferAndCanCancel() {

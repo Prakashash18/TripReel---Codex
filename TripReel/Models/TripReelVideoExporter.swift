@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 struct TripReelVideoExportRequest: Sendable {
     let photos: [ReelPhoto]
     let titleCards: [MontageTitleCard]
+    let textOverlays: [MontageTextOverlay]
     let secondsPerPhoto: Double
     let look: MontageLook
     let motionIntensity: MontageMotionIntensity
@@ -982,6 +983,9 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                     intensity: request.motionIntensity
                 )
             }
+            if let overlay = request.textOverlays.first(where: { $0.photoID == photo.id }) {
+                drawTextOverlay(overlay, bounds: bounds, phase: phase)
+            }
         case let .title(card):
             drawTitle(
                 card,
@@ -1218,6 +1222,89 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 0.58 * staggeredReveal(phase, start: 0.18, duration: 0.34)
             ),
             tracking: 0
+        )
+    }
+
+    private static func drawTextOverlay(
+        _ overlay: MontageTextOverlay,
+        bounds: CGRect,
+        phase: Double
+    ) {
+        let reveal = staggeredReveal(phase, start: 0.06, duration: 0.28)
+        guard reveal > 0 else { return }
+        let baseSize: CGFloat = bounds.width * 0.060
+        let font: UIFont
+        let text: String
+        switch overlay.style {
+        case .editorial:
+            font = UIFont(name: "InstrumentSerif-Regular", size: baseSize * 1.22)
+                ?? UIFont.systemFont(ofSize: baseSize * 1.22, weight: .regular)
+            text = overlay.text
+        case .clean:
+            font = UIFont.systemFont(ofSize: baseSize, weight: .semibold)
+            text = overlay.text
+        case .bold:
+            font = UIFont.systemFont(ofSize: baseSize, weight: .black)
+            text = overlay.text.uppercased()
+        }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byWordWrapping
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: UIColor(red: 0.992, green: 0.980, blue: 0.956, alpha: reveal),
+            .paragraphStyle: paragraph,
+            .kern: overlay.style == .editorial ? -0.4 : 0
+        ]
+        let horizontalMargin = bounds.width * 0.085
+        let textWidth = bounds.width - (horizontalMargin * 2) - 40
+        let measured = NSString(string: text).boundingRect(
+            with: CGSize(width: textWidth, height: bounds.height * 0.30),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attributes,
+            context: nil
+        )
+        let textHeight = min(bounds.height * 0.24, ceil(measured.height))
+        let baseY: CGFloat
+        switch overlay.placement {
+        case .top: baseY = bounds.height * 0.105
+        case .center: baseY = bounds.midY - (textHeight / 2)
+        case .bottom: baseY = bounds.height * 0.73 - textHeight
+        }
+        let rise = overlay.animation == .rise ? (1 - reveal) * 34 : 0
+        let textRect = CGRect(
+            x: horizontalMargin + 20,
+            y: baseY + rise,
+            width: textWidth,
+            height: textHeight + 4
+        )
+        let backgroundRect = textRect.insetBy(dx: -20, dy: -14)
+        let context = UIGraphicsGetCurrentContext()
+        context?.saveGState()
+        defer { context?.restoreGState() }
+        if overlay.animation == .pop {
+            let scale = 0.88 + (0.12 * reveal)
+            context?.translateBy(x: backgroundRect.midX, y: backgroundRect.midY)
+            context?.scaleBy(x: scale, y: scale)
+            context?.translateBy(x: -backgroundRect.midX, y: -backgroundRect.midY)
+        }
+        UIColor.black.withAlphaComponent(0.58 * reveal).setFill()
+        UIBezierPath(
+            roundedRect: backgroundRect,
+            cornerRadius: max(14, backgroundRect.height * 0.16)
+        ).fill()
+        UIColor.white.withAlphaComponent(0.16 * reveal).setStroke()
+        let border = UIBezierPath(
+            roundedRect: backgroundRect.insetBy(dx: 1, dy: 1),
+            cornerRadius: max(13, backgroundRect.height * 0.16)
+        )
+        border.lineWidth = 1.5
+        border.stroke()
+        NSString(string: text).draw(
+            with: textRect,
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attributes,
+            context: nil
         )
     }
 

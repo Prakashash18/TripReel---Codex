@@ -1,4 +1,5 @@
 import CoreTransferable
+import RevenueCat
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -14,7 +15,16 @@ struct TripReelMovieFile: Transferable, Sendable {
 
 struct ExportScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @EnvironmentObject private var purchases: RevenueCatPurchaseService
     @State private var showProjectSheet = false
+
+    private var standardNeedsPro: Bool {
+        ExportAccessPolicy.premiumRequirement(
+            photoCount: model.keptCount,
+            durationSeconds: model.filmDurationSeconds,
+            quality: .standard
+        ) != nil
+    }
 
     var body: some View {
         ZStack {
@@ -39,12 +49,12 @@ struct ExportScreen: View {
                         source: model.previewSource(at: 0),
                         title: "Standard",
                         subtitle: "720p · watermarked",
-                        badge: "FREE",
-                        badgeColor: TR.keep,
+                        badge: standardNeedsPro ? "PRO · FULL LENGTH" : "FREE",
+                        badgeColor: standardNeedsPro ? TR.accent : TR.keep,
                         watermark: true,
                         accessibilityID: "export-standard"
                     ) {
-                        model.startRender()
+                        model.requestExport(.standard, isPremium: purchases.isPremium)
                     }
 
                     ExportOptionCard(
@@ -57,7 +67,7 @@ struct ExportScreen: View {
                         showsChevron: true,
                         accessibilityID: "export-hd"
                     ) {
-                        model.go(.paywall)
+                        model.requestExport(.highDefinition, isPremium: purchases.isPremium)
                     }
 
                     Button {
@@ -79,7 +89,7 @@ struct ExportScreen: View {
                                     .font(TR.ui(13))
                                     .foregroundStyle(.white.opacity(0.62))
                                     .lineSpacing(2)
-                                MetadataText(text: "Free", color: TR.keep)
+                                MetadataText(text: "Timeline files free", color: TR.keep)
                             }
 
                             Spacer(minLength: 4)
@@ -192,6 +202,7 @@ private struct ExportOptionCard: View {
 
 private struct ProjectFormatSheet: View {
     @EnvironmentObject private var model: TripReelModel
+    @EnvironmentObject private var purchases: RevenueCatPurchaseService
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var projectURL: URL?
@@ -230,7 +241,7 @@ private struct ProjectFormatSheet: View {
 
                     Button {
                         dismiss()
-                        model.startCapCutRender()
+                        model.requestExport(.capCut, isPremium: purchases.isPremium)
                     } label: {
                         Label("Render MP4 for CapCut", systemImage: "play.rectangle.fill")
                             .frame(maxWidth: .infinity)
@@ -416,12 +427,26 @@ private struct ProjectFormatSheet: View {
 
 struct PaywallScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @EnvironmentObject private var purchases: RevenueCatPurchaseService
+    @State private var selectedPackageID: String?
+    @State private var showsPrivacyPolicy = false
+    @State private var didResumeExport = false
+
+    private var requirement: ExportPremiumRequirement {
+        model.pendingExportPremiumRequirement
+    }
+
+    private var selectedPackage: Package? {
+        purchases.packages.first { $0.identifier == selectedPackageID }
+            ?? purchases.packages.first
+    }
 
     var body: some View {
         ZStack {
             MontageView(
                 photos: model.keptPhotos,
                 titleCards: model.montageTitleCards,
+                textOverlays: model.textOverlays,
                 dim: true,
                 watermark: true,
                 look: model.montageLook,
@@ -433,67 +458,265 @@ struct PaywallScreen: View {
             LinearGradient(colors: [.clear, .black.opacity(0.94)], startPoint: .center, endPoint: .bottom)
                 .ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 22) {
-                Spacer()
+            LinearGradient(colors: [.black.opacity(0.18), .black.opacity(0.97)], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
 
-                VStack(alignment: .leading, spacing: 12) {
-                    MetadataText(text: "Memories Pro", color: .white.opacity(0.64))
-                    Text("Lose the watermark on this film")
-                        .font(TR.display(36))
-                        .tracking(-0.4)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("Free is 1 film a month, watermarked, 720p. Pro is unlimited films, 1080p, no watermark, and the full music library.")
-                        .font(TR.ui(14))
-                        .foregroundStyle(.white.opacity(0.69))
-                        .lineSpacing(5)
-                }
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    Spacer(minLength: 190)
 
-                VStack(spacing: 10) {
-                    purchaseRow(title: "Yearly", subtitle: "$24.99/yr · 2 months free", badge: "BEST VALUE", highlighted: true)
-                    purchaseRow(title: "Monthly", subtitle: "$2.99/mo", badge: nil, highlighted: false)
+                    VStack(alignment: .leading, spacing: 10) {
+                        MetadataText(text: "Memories Pro", color: TR.accent)
+                        Text("Keep the whole story")
+                            .font(TR.display(38))
+                            .tracking(-0.5)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                    Button("Keep the watermark, export free") {
-                        model.startRender()
+                        HStack(spacing: 8) {
+                            metricPill(symbol: "photo.on.rectangle.angled", text: "\(requirement.photoCount) photos")
+                            metricPill(symbol: "clock", text: model.filmDurationText)
+                        }
+
+                        Text(requirement.reasonText)
+                            .font(TR.ui(14, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.76))
+                            .lineSpacing(4)
+
+                        Text("Free exports include up to \(requirement.freePhotoLimit) photos and \(durationText(requirement.freeDurationLimit)). Previewing and editing stay free.")
+                            .font(TR.ui(12))
+                            .foregroundStyle(.white.opacity(0.54))
+                            .lineSpacing(3)
                     }
-                    .font(TR.ui(14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.54))
+
+                    HStack(spacing: 12) {
+                        benefit(symbol: "film.stack", title: "Longer films")
+                        benefit(symbol: "sparkles.rectangle.stack", title: "1080p")
+                        benefit(symbol: "drop.triangle", title: "No watermark")
+                    }
+
+                    if purchases.isConfigured {
+                        if purchases.isLoading && purchases.packages.isEmpty {
+                            HStack(spacing: 10) {
+                                ProgressView().tint(TR.accent)
+                                Text("Loading subscription options…")
+                                    .font(TR.ui(13))
+                                    .foregroundStyle(.white.opacity(0.62))
+                            }
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, 20)
+                        } else {
+                            VStack(spacing: 9) {
+                                ForEach(purchases.packages, id: \.identifier) { package in
+                                    packageRow(package)
+                                }
+                            }
+                        }
+                    } else {
+                        configurationNotice
+                    }
+
+                    if let message = purchases.message {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(message)
+                                .font(TR.ui(12, weight: .medium))
+                                .foregroundStyle(TR.cut.opacity(0.9))
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Spacer(minLength: 0)
+
+                            if purchases.isConfigured && !purchases.isLoading {
+                                Button("Try again") {
+                                    Task { await purchases.refresh() }
+                                }
+                                .font(TR.ui(12, weight: .semibold))
+                                .foregroundStyle(TR.accent)
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    Button {
+                        buySelectedPackage()
+                    } label: {
+                        HStack(spacing: 9) {
+                            if purchases.isPurchasing {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .tint(TR.ink)
+                            }
+                            Text(purchases.isPurchasing ? "Connecting to App Store…" : "Unlock & export")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(CreamButtonStyle())
+                    .disabled(selectedPackage == nil || purchases.isPurchasing)
+                    .accessibilityIdentifier("purchase-memories-pro")
+
+                    HStack {
+                        Button("Restore purchases") {
+                            restorePurchases()
+                        }
+                        .disabled(!purchases.isConfigured || purchases.isPurchasing)
+                        Spacer()
+                        Button("Not now") {
+                            model.keepEditingInsteadOfUpgrading()
+                        }
+                    }
+                    .font(TR.ui(13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.62))
                     .buttonStyle(.plain)
-                    .padding(.vertical, 8)
+
+                    VStack(spacing: 7) {
+                        Text("Subscriptions renew automatically unless cancelled at least 24 hours before the current period ends. Manage or cancel in your Apple ID settings.")
+                            .font(TR.ui(10))
+                            .foregroundStyle(.white.opacity(0.38))
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(2)
+
+                        HStack(spacing: 18) {
+                            Button("Privacy") { showsPrivacyPolicy = true }
+                            Link(
+                                "Terms",
+                                destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
+                            )
+                        }
+                        .font(TR.ui(11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.54))
+                    }
+                    .frame(maxWidth: .infinity)
                 }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 28)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 18)
-            .safeAreaPadding(.bottom)
-            .trEntrance(0, distance: 14)
+        }
+        .task {
+            await purchases.refresh()
+            selectDefaultPackageIfNeeded()
+            resumeIfPremium()
+        }
+        .onChange(of: purchases.packages.map(\.identifier)) { _, _ in
+            selectDefaultPackageIfNeeded()
+        }
+        .onChange(of: purchases.isPremium) { _, isPremium in
+            if isPremium { resumeIfPremium() }
+        }
+        .sheet(isPresented: $showsPrivacyPolicy) {
+            TripReelPrivacyPolicyView()
         }
         .accessibilityIdentifier("paywall-screen")
     }
 
-    private func purchaseRow(title: String, subtitle: String, badge: String?, highlighted: Bool) -> some View {
-        Button {
-            model.startRender(hd: true)
+    private func metricPill(symbol: String, text: String) -> some View {
+        Label(text, systemImage: symbol)
+            .font(TR.ui(12, weight: .semibold))
+            .foregroundStyle(TR.cream)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 8)
+            .background(.white.opacity(0.09))
+            .clipShape(Capsule())
+    }
+
+    private func benefit(symbol: String, title: String) -> some View {
+        VStack(spacing: 7) {
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(TR.accent)
+            Text(title)
+                .font(TR.ui(11, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.07))
+        .overlay(RoundedRectangle(cornerRadius: 15).stroke(.white.opacity(0.12), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+    }
+
+    private func packageRow(_ package: Package) -> some View {
+        let isSelected = selectedPackage?.identifier == package.identifier
+        let isAnnual = package.packageType == .annual
+        return Button {
+            withAnimation(TRMotion.selection) {
+                selectedPackageID = package.identifier
+            }
         } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(title)
+                    Text(package.memoriesDisplayName)
                         .font(TR.ui(16, weight: .semibold))
-                    Text(subtitle)
+                    Text(package.memoriesPriceDetail)
                         .font(TR.ui(12))
                         .foregroundStyle(.white.opacity(0.62))
                 }
                 Spacer()
-                if let badge {
-                    MetadataText(text: badge, color: TR.accent)
+                if isAnnual {
+                    MetadataText(text: "BEST VALUE", color: TR.accent)
                 }
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(isSelected ? TR.accent : .white.opacity(0.28))
             }
             .foregroundStyle(TR.cream)
             .padding(.horizontal, 18)
             .padding(.vertical, 16)
-            .background(highlighted ? TR.accent.opacity(0.14) : .white.opacity(0.07))
-            .overlay(RoundedRectangle(cornerRadius: 18).stroke(highlighted ? TR.accent.opacity(0.56) : .white.opacity(0.16), lineWidth: 1))
+            .background(isSelected ? TR.accent.opacity(0.14) : .white.opacity(0.07))
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(isSelected ? TR.accent.opacity(0.62) : .white.opacity(0.14), lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(TactileButtonStyle())
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+    }
+
+    private var configurationNotice: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Purchases aren't available yet", systemImage: "cart.badge.questionmark")
+                .font(TR.ui(14, weight: .semibold))
+            Text("You can keep editing, or shorten this reel to the free export limit and try again.")
+                .font(TR.ui(12))
+                .foregroundStyle(.white.opacity(0.58))
+                .lineSpacing(3)
+        }
+        .padding(15)
+        .background(.white.opacity(0.07))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.13), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func selectDefaultPackageIfNeeded() {
+        guard selectedPackageID == nil || !purchases.packages.contains(where: { $0.identifier == selectedPackageID }) else {
+            return
+        }
+        selectedPackageID = purchases.packages.first(where: { $0.packageType == .annual })?.identifier
+            ?? purchases.packages.first?.identifier
+    }
+
+    private func buySelectedPackage() {
+        guard let package = selectedPackage else { return }
+        Task {
+            if await purchases.purchase(package) {
+                resumeIfPremium()
+            }
+        }
+    }
+
+    private func restorePurchases() {
+        Task {
+            if await purchases.restorePurchases() {
+                resumeIfPremium()
+            }
+        }
+    }
+
+    private func resumeIfPremium() {
+        guard purchases.isPremium, !didResumeExport else { return }
+        didResumeExport = true
+        model.resumePendingExportAfterPurchase()
+    }
+
+    private func durationText(_ seconds: Double) -> String {
+        let rounded = max(0, Int(seconds.rounded()))
+        return String(format: "%d:%02d", rounded / 60, rounded % 60)
     }
 }
 
@@ -510,6 +733,7 @@ struct RenderingScreen: View {
                 MontageView(
                     photos: model.keptPhotos,
                     titleCards: model.montageTitleCards,
+                    textOverlays: model.textOverlays,
                     showLabels: false,
                     look: model.montageLook,
                     motionIntensity: model.montageMotionIntensity,
@@ -641,6 +865,7 @@ struct FilmReadyScreen: View {
             MontageView(
                 photos: model.keptPhotos,
                 titleCards: model.montageTitleCards,
+                textOverlays: model.textOverlays,
                 watermark: model.exportQuality.includesWatermark,
                 showLabels: false,
                 look: model.montageLook,

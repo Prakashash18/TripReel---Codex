@@ -973,14 +973,7 @@ export async function handleRequest(request: Request, env: Env, fetcher: Fetcher
       return await handleRegistration(request, env, requireAppAttestConfiguration(env), responseOrigin);
     }
     if (VIDEO_PATHS.has(url.pathname as AppAttestProtectedPath)) {
-      return await handleVideo(
-        request,
-        env,
-        configuration,
-        url.pathname as AppAttestProtectedPath,
-        responseOrigin,
-        fetcher,
-      );
+      return errorResponse(410, "feature_retired", "AI video generation is no longer available.", responseOrigin);
     }
     return await handleAnalyze(request, env, configuration, responseOrigin, fetcher);
   } catch (error) {

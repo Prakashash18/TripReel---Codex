@@ -355,6 +355,7 @@ struct BuildingScreen: View {
                     MontageView(
                         photos: model.photos,
                         titleCards: model.montageTitleCards,
+                        textOverlays: model.textOverlays,
                         showLabels: false,
                         look: model.montageLook,
                         motionIntensity: model.montageMotionIntensity,

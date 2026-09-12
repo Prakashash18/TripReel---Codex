@@ -147,6 +147,7 @@ struct MontageView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var photos: [ReelPhoto] = []
     var titleCards: [MontageTitleCard] = []
+    var textOverlays: [MontageTextOverlay] = []
     var usesBundledFallback = false
     var dim = false
     var watermark = false
@@ -209,6 +210,11 @@ struct MontageView: View {
             cropOffsetX: photo.cropOffsetX,
             cropOffsetY: photo.cropOffsetY
         )
+    }
+
+    private var currentTextOverlay: MontageTextOverlay? {
+        guard case let .photo(photo) = currentItem else { return nil }
+        return textOverlays.first { $0.photoID == photo.id && !$0.text.isEmpty }
     }
 
     private var contentKey: MontageContentKey {
@@ -295,6 +301,7 @@ struct MontageView: View {
                 }
             }
 
+
             if dim {
                 LinearGradient(
                     colors: [.black.opacity(0.70), .black.opacity(0.34), .black.opacity(0.82)],
@@ -309,6 +316,16 @@ struct MontageView: View {
                 startRadius: 90,
                 endRadius: 430
             )
+
+            if let overlay = currentTextOverlay, currentPhotoLoadState.isReady {
+                MontageTextOverlayArtwork(
+                    overlay: overlay,
+                    motionPhase: motionPhase,
+                    reduceMotion: motionReduced
+                )
+                .id(overlay.id)
+                .transition(.opacity)
+            }
 
             if watermark {
                 HStack(spacing: 5) {
@@ -440,6 +457,68 @@ struct MontageView: View {
         return false
     }
 
+}
+
+private struct MontageTextOverlayArtwork: View {
+    let overlay: MontageTextOverlay
+    let motionPhase: Bool
+    let reduceMotion: Bool
+
+    var body: some View {
+        VStack {
+            if overlay.placement != .top { Spacer(minLength: 0) }
+            Text(overlay.style == .bold ? overlay.text.uppercased() : overlay.text)
+                .font(font)
+                .foregroundStyle(TR.cream)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .minimumScaleFactor(0.66)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .background(.black.opacity(0.58))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .stroke(.white.opacity(0.16), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                .shadow(color: .black.opacity(0.55), radius: 12, y: 5)
+                .opacity(reduceMotion ? 1 : (motionPhase ? 1 : 0))
+                .offset(y: reduceMotion ? 0 : offset)
+                .scaleEffect(reduceMotion ? 1 : scale)
+                .animation(reduceMotion ? nil : animation, value: motionPhase)
+            if overlay.placement != .bottom { Spacer(minLength: 0) }
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 52)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var font: Font {
+        switch overlay.style {
+        case .editorial: TR.display(35)
+        case .clean: TR.ui(24, weight: .semibold)
+        case .bold: TR.ui(25, weight: .black)
+        }
+    }
+
+    private var offset: CGFloat {
+        guard !motionPhase else { return 0 }
+        return overlay.animation == .rise ? 18 : 0
+    }
+
+    private var scale: CGFloat {
+        guard !motionPhase else { return 1 }
+        return overlay.animation == .pop ? 0.86 : 1
+    }
+
+    private var animation: Animation {
+        switch overlay.animation {
+        case .fade: .easeOut(duration: 0.55)
+        case .rise: .spring(response: 0.66, dampingFraction: 0.84)
+        case .pop: .spring(response: 0.52, dampingFraction: 0.70)
+        }
+    }
 }
 
 private struct MontagePhotoWaitingBadge: View {

@@ -1,6 +1,6 @@
 # Memories Privacy Policy
 
-Effective September 11, 2026
+Effective September 12, 2026
 
 Memories turns the photos that matter into a story. This policy explains what the app processes and what happens when you optionally enable cloud photo intelligence.
 
@@ -18,21 +18,21 @@ Apple Vision analyzes reduced images on the iPhone for screenshots, document-lik
 
 Memories creates a complete First Cut on-device without cloud AI. Only after the user chooses Improve with AI, selects a creative direction, and explicitly continues may selected reduced-resolution JPEG previews pass through Memories' secure backend to a configurable OpenAI image-capable model. If the user writes or chooses an optional story hint, that short text is sent with the selected previews so titles and story structure can reflect the intended occasion. To compare its proposal with the existing film, Memories also sends a privacy-safe description of the First Cut and coarse on-device editorial cues: temporary sequence IDs, relative order and duration, frame and motion choices, title text, bundled soundtrack and style choices, relative day/time-gap bands, orientation, broad Vision scene categories, people counts, score bands, and temporary similarity groups. Memories does not send exact timestamps, GPS, filenames, recognized OCR text, faces, or stable Apple Photos identifiers. The thumbnail copies are re-encoded without EXIF or other embedded metadata. Known screenshots and sensitive or document-like images are blocked. OpenAI returns only a structured editorial plan and diagnosis, which Memories validates and applies locally without modifying original photos. Memories' backend independently calculates the change counts shown in the comparison screen.
 
-## Optional AI video generation
-
-AI video is a separate choice after the user reviews a cut. Nothing is sent when this option is merely opened. Apple Vision privately recommends a beginning and ending on the iPhone, and the user can replace either moment. After the user explicitly agrees, Memories re-encodes up to two reduced JPEGs without EXIF, GPS, filenames, exact capture dates, recognized text, or stable Apple Photos identifiers. Those copies pass through Memories' secure backend to OpenRouter, which routes them to ByteDance's Seedance 2.0 to create a six-second vertical story from the first frame to the last (or a four-second animation when only one usable moment is available). Seedance may invent motion or small visual details, so the app asks the user to review the result. Memories adds the selected visible title locally after downloading the video. The source photos and both existing cuts remain unchanged.
-
 ## Storage and deletion
 
-Memories' backend does not intentionally persist cloud previews, edit plans, or generated videos and discards in-memory request copies after use. OpenAI is called with `store: false`. OpenRouter video generation is asynchronous and is not eligible for Zero Data Retention: OpenRouter and the selected provider must temporarily retain the video input and output while the job is processed and retrieved. See [OpenRouter's video generation data notice](https://openrouter.ai/docs/guides/overview/multimodal/video-generation#zero-data-retention).
+Memories' backend does not intentionally persist cloud previews or edit plans and discards in-memory request copies after use. OpenAI is called with `store: false`.
 
 Leaving a photo out of a film never deletes the original. Cleanup can request deletion only for cut Apple Photos assets the user individually selects. The request is batched atomically, requires a clear in-app warning and Apple's system confirmation, and is not made if any selected photo is unavailable. Imported picker copies and bundled demo images cannot be deleted from Apple Photos by Memories.
 
 Under OpenAI's default API controls, OpenAI may retain API content for abuse monitoring for up to 30 days, or longer when legally or safety-required. Zero Data Retention removes default storage for eligible accounts, but images flagged by OpenAI's child-safety classifier may still be retained for manual review. OpenAI states that API data is not used to train its models by default unless the API organization opts in. See [OpenAI's API data controls](https://developers.openai.com/api/docs/guides/your-data).
 
+## Purchases
+
+Apple processes in-app payments. RevenueCat receives an anonymous app user identifier and purchase or subscription status so Memories can unlock longer reels and HD export and restore eligible purchases. RevenueCat does not receive photos, reduced previews, finished films, titles, or location data from Memories.
+
 ## Identity, advertising, and tracking
 
-Memories sends per-request placeholder IDs and opaque job tokens instead of Apple Photos identifiers. Cloud images are not used by Memories for advertising or cross-app tracking. Cloud requests are not linked to a Memories user profile.
+Memories sends per-request placeholder IDs instead of Apple Photos identifiers. Cloud images are not used by Memories for advertising or cross-app tracking. Cloud AI requests are not linked to a Memories user profile.
 
 ## Your choices
 

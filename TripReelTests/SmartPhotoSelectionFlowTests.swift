@@ -111,6 +111,10 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         XCTAssertEqual(model.aiCutSnapshot?.motionIntensity, .expressive)
         XCTAssertEqual(model.aiCutSnapshot?.titleDrafts[.opening]?.title, "A different angle")
         XCTAssertTrue(model.aiCutSnapshot?.titleCards.contains(.ending) == true)
+        XCTAssertEqual(
+            model.aiCutSnapshot?.textOverlays.map(\.text),
+            ["A different angle", "Worth another look"]
+        )
         XCTAssertEqual(model.aiCutRecommendations.count, 4)
         XCTAssertEqual(baselines.count, 1)
         XCTAssertEqual(baselines[0]?.photoCount, 2)
@@ -123,7 +127,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         model.useAICut()
         XCTAssertEqual(model.selectedCutSource, .aiCut)
         XCTAssertEqual(model.photos.map(\.id), Array(firstIDs.reversed()))
-        XCTAssertEqual(model.screen, .secondWatch)
+        XCTAssertEqual(model.screen, .export)
 
         model.editCut(.aiCut)
         XCTAssertEqual(model.selectedCutSource, .working)

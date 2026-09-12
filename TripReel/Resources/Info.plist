@@ -30,6 +30,8 @@
 	<string>Memories uses accessible photos, dates, and locations on your device to find meaningful moments and build stories. Originals are deleted only when you explicitly confirm Cleanup.</string>
 	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
 	<true/>
+	<key>REVENUECAT_PUBLIC_SDK_KEY</key>
+	<string>$(REVENUECAT_PUBLIC_SDK_KEY)</string>
 	<key>TRIPREEL_PHOTO_ANALYSIS_ENDPOINT</key>
 	<string>$(TRIPREEL_PHOTO_ANALYSIS_ENDPOINT)</string>
 	<key>UIAppFonts</key>

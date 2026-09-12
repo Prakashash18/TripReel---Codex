@@ -18,6 +18,7 @@ struct FirstWatchScreen: View {
             MontageView(
                 photos: firstCut?.keptPhotos ?? model.keptPhotos,
                 titleCards: firstCut?.montageTitleCards ?? model.montageTitleCards,
+                textOverlays: firstCut?.textOverlays ?? model.textOverlays,
                 look: firstCut?.montageLook ?? model.montageLook,
                 motionIntensity: firstCut?.motionIntensity ?? model.montageMotionIntensity,
                 secondsPerSlide: firstCut.map { 1.85 - ($0.pace * 1.25) } ?? model.secondsPerPhoto
@@ -1066,6 +1067,7 @@ struct AICutComparisonScreen: View {
                         MontageView(
                             photos: snapshot.keptPhotos,
                             titleCards: snapshot.montageTitleCards,
+                            textOverlays: snapshot.textOverlays,
                             dim: false,
                             watermark: false,
                             showLabels: false,
@@ -1181,36 +1183,6 @@ struct AICutComparisonScreen: View {
                             .buttonStyle(GlassButtonStyle())
                             .accessibilityIdentifier("edit-compared-cut-button")
 
-                        Button {
-                            model.openAIVideoIntro(from: previewSource)
-                        } label: {
-                            HStack(spacing: 13) {
-                                Image(systemName: "photo.stack")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(TR.accent)
-                                    .frame(width: 42, height: 42)
-                                    .background(TR.accent.opacity(0.10))
-                                    .clipShape(Circle())
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Choose two moments")
-                                        .font(TR.ui(13, weight: .semibold))
-                                    Text("Start with two on-device recommendations")
-                                        .font(TR.ui(10))
-                                        .foregroundStyle(.white.opacity(0.50))
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundStyle(.white.opacity(0.42))
-                            }
-                            .foregroundStyle(TR.cream)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                            .glassCard(cornerRadius: 18)
-                        }
-                        .buttonStyle(TactileButtonStyle())
-                        .accessibilityHint("Opens a separate generative video option. Nothing is sent yet")
-                        .accessibilityIdentifier("open-ai-video-button")
                     }
                 }
                 .padding(.horizontal, 24)
@@ -2324,6 +2296,7 @@ struct SecondWatchScreen: View {
                 MontageView(
                     photos: previewPhotos,
                     titleCards: selectedPhotoID == nil ? model.montageTitleCards : [],
+                    textOverlays: selectedPhotoID == nil ? model.textOverlays : model.textOverlays.filter { $0.photoID == selectedPhotoID },
                     showLabels: false,
                     look: model.montageLook,
                     motionIntensity: model.montageMotionIntensity,
@@ -2660,6 +2633,7 @@ private struct FullFilmPreview: View {
             MontageView(
                 photos: model.keptPhotos,
                 titleCards: model.montageTitleCards,
+                textOverlays: model.textOverlays,
                 showLabels: false,
                 look: model.montageLook,
                 motionIntensity: model.montageMotionIntensity,
@@ -2836,6 +2810,7 @@ private struct PhotoEditorSheet: View {
         GeometryReader { proxy in
             MontageView(
                 photos: [photo],
+                textOverlays: model.textOverlays.filter { $0.photoID == photo.id },
                 showLabels: false,
                 look: .story,
                 motionIntensity: model.montageMotionIntensity,
@@ -3115,6 +3090,7 @@ private struct FilmStyleSheet: View {
         HStack(spacing: 17) {
             MontageView(
                 photos: previewPhotos,
+                textOverlays: model.textOverlays.filter { overlay in previewPhotos.contains(where: { $0.id == overlay.photoID }) },
                 showLabels: false,
                 look: model.montageLook,
                 motionIntensity: model.montageMotionIntensity,
@@ -3260,6 +3236,10 @@ private struct TitlesSheet: View {
                     }
 
                     titleControls
+
+                    if !model.textOverlays.isEmpty {
+                        onPhotoTextControls
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
@@ -3387,6 +3367,64 @@ private struct TitlesSheet: View {
                 Slider(value: durationBinding, in: 1...4, step: 0.1)
                     .tint(TR.accent)
                     .accessibilityIdentifier("title-duration-slider")
+            }
+        }
+        .padding(15)
+        .glassCard(cornerRadius: 20)
+    }
+
+    private var onPhotoTextControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            MetadataText(text: "ON-PHOTO STORY BEATS", color: TR.accent)
+            Text("AI placed these short lines inside the reel. Rewrite them, move them, change how they enter, or remove them.")
+                .font(TR.ui(12))
+                .foregroundStyle(.white.opacity(0.52))
+                .lineSpacing(3)
+
+            ForEach(model.textOverlays) { overlay in
+                VStack(alignment: .leading, spacing: 10) {
+                    TextField(
+                        "Text on photo",
+                        text: Binding(
+                            get: { model.textOverlays.first(where: { $0.id == overlay.id })?.text ?? "" },
+                            set: { model.setTextOverlayText($0, id: overlay.id) }
+                        ),
+                        axis: .vertical
+                    )
+                    .font(overlay.style == .editorial ? TR.display(22) : TR.ui(15, weight: .semibold))
+                    .lineLimit(1...3)
+                    .accessibilityIdentifier("photo-text-\(overlay.id)")
+
+                    HStack(spacing: 8) {
+                        Menu(overlay.style.name) {
+                            ForEach(MontageTitleStyle.allCases) { style in
+                                Button(style.name) { model.setTextOverlayStyle(style, id: overlay.id) }
+                            }
+                        }
+                        Menu(overlay.placement.name) {
+                            ForEach(MontageTextPlacement.allCases) { placement in
+                                Button(placement.name) { model.setTextOverlayPlacement(placement, id: overlay.id) }
+                            }
+                        }
+                        Menu(overlay.animation.name) {
+                            ForEach(MontageTextAnimation.allCases) { animation in
+                                Button(animation.name) { model.setTextOverlayAnimation(animation, id: overlay.id) }
+                            }
+                        }
+                        Button(role: .destructive) {
+                            model.removeTextOverlay(id: overlay.id)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .accessibilityLabel("Remove text")
+                    }
+                    .font(TR.ui(11, weight: .semibold))
+                    .foregroundStyle(TR.cream)
+                }
+                .padding(14)
+                .background(.white.opacity(0.055))
+                .overlay(RoundedRectangle(cornerRadius: 15).stroke(.white.opacity(0.13), lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
             }
         }
         .padding(15)

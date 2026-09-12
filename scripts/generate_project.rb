@@ -14,10 +14,36 @@ project.root_object.attributes['LastUpgradeCheck'] = '2660'
 target = project.new_target(:application, 'TripReel', :ios, '17.0')
 target.product_reference.name = 'TripReel.app'
 
+revenuecat_package = project.new(Xcodeproj::Project::Object::XCRemoteSwiftPackageReference)
+revenuecat_package.repositoryURL = 'https://github.com/RevenueCat/purchases-ios-spm.git'
+revenuecat_package.requirement = {
+  'kind' => 'upToNextMajorVersion',
+  'minimumVersion' => '5.43.0'
+}
+project.root_object.package_references << revenuecat_package
+
+revenuecat_product = project.new(Xcodeproj::Project::Object::XCSwiftPackageProductDependency)
+revenuecat_product.package = revenuecat_package
+revenuecat_product.product_name = 'RevenueCat'
+target.package_product_dependencies << revenuecat_product
+
+revenuecat_build_file = project.new(Xcodeproj::Project::Object::PBXBuildFile)
+revenuecat_build_file.product_ref = revenuecat_product
+target.frameworks_build_phase.files << revenuecat_build_file
+
 unit_test_target = project.new_target(:unit_test_bundle, 'TripReelTests', :ios, '17.0')
 ui_test_target = project.new_target(:ui_test_bundle, 'TripReelUITests', :ios, '17.0')
 unit_test_target.add_dependency(target)
 ui_test_target.add_dependency(target)
+
+project.root_object.attributes['TargetAttributes'] ||= {}
+project.root_object.attributes['TargetAttributes'][target.uuid] = {
+  'CreatedOnToolsVersion' => '26.0',
+  'ProvisioningStyle' => 'Automatic',
+  'SystemCapabilities' => {
+    'com.apple.InAppPurchase' => { 'enabled' => 1 }
+  }
+}
 
 app_group = project.main_group.new_group('TripReel', 'TripReel')
 
@@ -93,6 +119,7 @@ target.build_configurations.each do |configuration|
   settings['SWIFT_EMIT_LOC_STRINGS'] = 'YES'
   settings['SWIFT_VERSION'] = '5.0'
   settings['TARGETED_DEVICE_FAMILY'] = '1'
+  settings['REVENUECAT_PUBLIC_SDK_KEY'] = ''
   settings['TRIPREEL_PHOTO_ANALYSIS_ENDPOINT'] = 'https://tripreel-visual-analysis.tripreel-prakashash18.workers.dev/v1/analyze'
   settings['TRIPREEL_APP_ATTEST_ENVIRONMENT'] = 'production'
 end

@@ -1373,6 +1373,20 @@ enum ExportHandoff: Equatable, Sendable {
     case capCut
 }
 
+enum ExportIntent: Equatable, Sendable {
+    case standard
+    case highDefinition
+    case capCut
+
+    var quality: ExportQuality {
+        self == .highDefinition ? .hd : .standard
+    }
+
+    var handoff: ExportHandoff {
+        self == .capCut ? .capCut : .normal
+    }
+}
+
 enum TripCutSource: String, Equatable, Sendable {
     case firstCut
     case aiCut
@@ -1395,6 +1409,7 @@ struct TripEditSnapshot: Hashable, Sendable {
     let motionIntensity: MontageMotionIntensity
     let titleCards: Set<TitleCardKind>
     let titleDrafts: [TitleCardKind: TitleCardDraft]
+    let textOverlays: [MontageTextOverlay]
     let selectedTrackID: String?
     let cutToBeat: Bool
 
@@ -1423,6 +1438,33 @@ struct TripEditSnapshot: Hashable, Sendable {
         }
         return photoDuration + montageTitleCards.reduce(0) { $0 + $1.duration }
     }
+}
+
+enum MontageTextPlacement: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case top
+    case center
+    case bottom
+
+    var id: String { rawValue }
+    var name: String { rawValue.capitalized }
+}
+
+enum MontageTextAnimation: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case fade
+    case rise
+    case pop
+
+    var id: String { rawValue }
+    var name: String { rawValue.capitalized }
+}
+
+struct MontageTextOverlay: Identifiable, Hashable, Sendable {
+    let id: String
+    let photoID: String
+    var text: String
+    var style: MontageTitleStyle
+    var placement: MontageTextPlacement
+    var animation: MontageTextAnimation
 }
 
 struct AICutRecommendation: Identifiable, Hashable, Sendable {
@@ -1471,6 +1513,7 @@ final class TripReelModel: ObservableObject {
     @Published var renderProgress = 0.0
     @Published var titleCards: Set<TitleCardKind> = [.opening]
     @Published private(set) var titleDrafts: [TitleCardKind: TitleCardDraft] = [:]
+    @Published private(set) var textOverlays: [MontageTextOverlay] = []
     @Published var selectedTrackID: String? = "wanderlust"
     @Published var cutToBeat = true
     @Published var selectedFormatID = "sequence"
@@ -1481,6 +1524,7 @@ final class TripReelModel: ObservableObject {
     @Published var selectedPhotoCount = 0
     @Published var exportQuality: ExportQuality = .standard
     @Published private(set) var exportHandoff: ExportHandoff = .normal
+    @Published private(set) var pendingExportIntent: ExportIntent?
     @Published var montageLook: MontageLook = .story
     @Published var montageMotionIntensity: MontageMotionIntensity = .gentle
     @Published private(set) var trips: [Trip] = []
@@ -1787,9 +1831,13 @@ final class TripReelModel: ObservableObject {
     }
 
     var filmDurationText: String {
+        Self.durationText(seconds: filmDurationSeconds)
+    }
+
+    var filmDurationSeconds: Double {
         let titleDuration = montageTitleCards.reduce(0) { $0 + $1.duration }
         let photoDuration = keptPhotos.reduce(0) { $0 + duration(for: $1) }
-        return Self.durationText(seconds: photoDuration + titleDuration)
+        return photoDuration + titleDuration
     }
 
     var firstCutDurationText: String {
@@ -1826,6 +1874,7 @@ final class TripReelModel: ObservableObject {
             titleDrafts: Dictionary(
                 uniqueKeysWithValues: TitleCardKind.allCases.map { ($0, titleDraft(for: $0)) }
             ),
+            textOverlays: textOverlays,
             selectedTrackID: selectedTrackID,
             cutToBeat: cutToBeat
         )
@@ -1839,6 +1888,7 @@ final class TripReelModel: ObservableObject {
         montageMotionIntensity = snapshot.motionIntensity
         titleCards = snapshot.titleCards
         titleDrafts = snapshot.titleDrafts
+        textOverlays = snapshot.textOverlays
         selectedTrackID = snapshot.selectedTrackID
         cutToBeat = snapshot.cutToBeat
         selectedCutSource = source
@@ -1985,6 +2035,30 @@ final class TripReelModel: ObservableObject {
         } else {
             titleCards.remove(kind)
         }
+    }
+
+    func setTextOverlayText(_ text: String, id: String) {
+        guard let index = textOverlays.firstIndex(where: { $0.id == id }) else { return }
+        textOverlays[index].text = String(text.prefix(80))
+    }
+
+    func setTextOverlayStyle(_ style: MontageTitleStyle, id: String) {
+        guard let index = textOverlays.firstIndex(where: { $0.id == id }) else { return }
+        textOverlays[index].style = style
+    }
+
+    func setTextOverlayPlacement(_ placement: MontageTextPlacement, id: String) {
+        guard let index = textOverlays.firstIndex(where: { $0.id == id }) else { return }
+        textOverlays[index].placement = placement
+    }
+
+    func setTextOverlayAnimation(_ animation: MontageTextAnimation, id: String) {
+        guard let index = textOverlays.firstIndex(where: { $0.id == id }) else { return }
+        textOverlays[index].animation = animation
+    }
+
+    func removeTextOverlay(id: String) {
+        textOverlays.removeAll { $0.id == id }
     }
 
     private func resetTitleDrafts() {
@@ -2190,6 +2264,7 @@ final class TripReelModel: ObservableObject {
         case .export:
             go(exportReturnScreen, direction: .backward)
         case .paywall:
+            pendingExportIntent = nil
             go(.export, direction: .backward)
         case .done:
             go(.export, direction: .backward)
@@ -2869,9 +2944,66 @@ final class TripReelModel: ObservableObject {
             ) ?? settings.motion,
             titleCards: titleCards,
             titleDrafts: titleDrafts,
+            textOverlays: Self.aiTextOverlays(
+                for: validated,
+                plannedPhotos: plannedPhotos
+            ),
             selectedTrackID: validated.soundtrack.trackID.rawValue,
             cutToBeat: true
         )
+    }
+
+    private static func aiTextOverlays(
+        for plan: AICutEditPlan,
+        plannedPhotos: [ReelPhoto]
+    ) -> [MontageTextOverlay] {
+        guard !plannedPhotos.isEmpty else { return [] }
+        var result: [MontageTextOverlay] = []
+        var usedPhotoIDs: Set<String> = []
+        var usedText: Set<String> = []
+
+        func append(_ rawText: String, photo: ReelPhoto, placement: MontageTextPlacement, animation: MontageTextAnimation, style: MontageTitleStyle) {
+            let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalized = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            guard !text.isEmpty, !usedPhotoIDs.contains(photo.id), !usedText.contains(normalized) else { return }
+            usedPhotoIDs.insert(photo.id)
+            usedText.insert(normalized)
+            result.append(MontageTextOverlay(
+                id: "ai-text-\(photo.id)",
+                photoID: photo.id,
+                text: String(text.prefix(80)),
+                style: style,
+                placement: placement,
+                animation: animation
+            ))
+        }
+
+        append(
+            plan.hook.title,
+            photo: plannedPhotos[0],
+            placement: plannedPhotos[0].protectsPeople ? .top : .bottom,
+            animation: .rise,
+            style: titleStyle(for: plan.hook.style)
+        )
+        if plannedPhotos.count >= 5 {
+            append(
+                plan.story.title,
+                photo: plannedPhotos[plannedPhotos.count / 2],
+                placement: .bottom,
+                animation: .fade,
+                style: .clean
+            )
+        }
+        if plan.ending.enabled, let finalPhoto = plannedPhotos.last {
+            append(
+                plan.ending.title,
+                photo: finalPhoto,
+                placement: finalPhoto.protectsPeople ? .top : .bottom,
+                animation: .pop,
+                style: titleStyle(for: plan.ending.style)
+            )
+        }
+        return result
     }
 
     private static func titleStyle(for style: AICutTitleStyle) -> MontageTitleStyle {
@@ -3353,6 +3485,16 @@ final class TripReelModel: ObservableObject {
                     duration: 2.0
                 )
             ]) { _, aiDraft in aiDraft },
+            textOverlays: included.isEmpty ? [] : [
+                MontageTextOverlay(
+                    id: "demo-ai-text",
+                    photoID: included[0].id,
+                    text: "The moments between the moments",
+                    style: .editorial,
+                    placement: .bottom,
+                    animation: .rise
+                )
+            ],
             selectedTrackID: "simplicity",
             cutToBeat: true
         )
@@ -4031,7 +4173,9 @@ final class TripReelModel: ObservableObject {
         )
         titleDrafts = localTitlePlan.drafts
         titleCards = localTitlePlan.enabledCards
+        textOverlays = []
         exportHandoff = .normal
+        pendingExportIntent = nil
         exportedVideoURL = nil
         exportErrorMessage = nil
         exportSaveMessage = nil
@@ -4228,6 +4372,48 @@ final class TripReelModel: ObservableObject {
         photos[index].durationSeconds = nil
     }
 
+    func requestExport(_ intent: ExportIntent, isPremium: Bool) {
+        let requirement = ExportAccessPolicy.premiumRequirement(
+            photoCount: keptCount,
+            durationSeconds: filmDurationSeconds,
+            quality: intent.quality
+        )
+
+        guard isPremium || requirement == nil else {
+            pendingExportIntent = intent
+            go(.paywall, direction: .forward)
+            return
+        }
+
+        pendingExportIntent = nil
+        startRender(hd: intent.quality == .hd, handoff: intent.handoff)
+    }
+
+    var pendingExportPremiumRequirement: ExportPremiumRequirement {
+        ExportAccessPolicy.premiumRequirement(
+            photoCount: keptCount,
+            durationSeconds: filmDurationSeconds,
+            quality: (pendingExportIntent ?? .highDefinition).quality
+        ) ?? ExportPremiumRequirement(
+            photoCount: keptCount,
+            durationSeconds: filmDurationSeconds,
+            freePhotoLimit: ExportAccessPolicy.freePhotoLimit,
+            freeDurationLimit: ExportAccessPolicy.freeDurationLimit,
+            requiresHighDefinition: true
+        )
+    }
+
+    func resumePendingExportAfterPurchase() {
+        let intent = pendingExportIntent ?? .highDefinition
+        pendingExportIntent = nil
+        startRender(hd: intent.quality == .hd, handoff: intent.handoff)
+    }
+
+    func keepEditingInsteadOfUpgrading() {
+        pendingExportIntent = nil
+        go(.export, direction: .backward)
+    }
+
     func startRender(hd: Bool = false) {
         startRender(hd: hd, handoff: .normal)
     }
@@ -4280,6 +4466,7 @@ final class TripReelModel: ObservableObject {
         let request = TripReelVideoExportRequest(
             photos: keptPhotos,
             titleCards: montageTitleCards,
+            textOverlays: textOverlays,
             secondsPerPhoto: secondsPerPhoto,
             look: montageLook,
             motionIntensity: montageMotionIntensity,

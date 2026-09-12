@@ -7,8 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		AA88E57B589C4DE4A6A97102 /* TripReelVideoExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA88E57B589C4DE4A6A97103 /* TripReelVideoExporter.swift */; };
-		AA77E57B589C4DE4A6A97102 /* AppAttestCloudPhotoAnalysisAuthorizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA77E57B589C4DE4A6A97103 /* AppAttestCloudPhotoAnalysisAuthorizer.swift */; };
 		050E6A1D8D90DF1515ABDC18 /* InstrumentSerif-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 518C1F47CD476565000F8137 /* InstrumentSerif-Italic.ttf */; };
 		06F40B34C571F4B6469E2FA5 /* SmartPhotoSelectionFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5D6F0320E51D07035AA4F6F /* SmartPhotoSelectionFlowTests.swift */; };
 		09B1F1C72A1A53AB9455EAD4 /* SmartPhotoSelectionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4F8BD3DADE8F267D386287 /* SmartPhotoSelectionViews.swift */; };
@@ -29,10 +27,19 @@
 		87E1A116F52854E2874D925E /* SmartPhotoSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40C85D6FCCEAAF47992BC710 /* SmartPhotoSelection.swift */; };
 		89A96196B16384BAC32665A0 /* OnboardingScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56BDE4FB9B5D77BC3D117A7B /* OnboardingScreens.swift */; };
 		9E9C852C42DD0DBD4A75EF20 /* TripScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5353217E4A466EC5AB24FEDF /* TripScreens.swift */; };
+		A1B2C3D4E5F60718293A4B01 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60718293A4B05 /* RevenueCat */; };
+		A1B2C3D4E5F60718293A4B02 /* RevenueCatPurchaseService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B03 /* RevenueCatPurchaseService.swift */; };
+		AA77E57B589C4DE4A6A97102 /* AppAttestCloudPhotoAnalysisAuthorizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA77E57B589C4DE4A6A97103 /* AppAttestCloudPhotoAnalysisAuthorizer.swift */; };
+		AA88E57B589C4DE4A6A97102 /* TripReelVideoExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA88E57B589C4DE4A6A97103 /* TripReelVideoExporter.swift */; };
 		AB4C1E160DF073DE8FE6B121 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A05DBA13DDE89A223BF74084 /* Foundation.framework */; };
 		B776F50C273D716AF454A0DA /* CloudPhotoAnalysisClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE26B8F4A694B6E15BB21FC1 /* CloudPhotoAnalysisClient.swift */; };
 		BDE6D49BCE0AE8419B8876B2 /* TripReelFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3E8414F01F601C1F1299A6C /* TripReelFlowUITests.swift */; };
 		C02880A95450631B821F1822 /* PhotoLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E28ABF9F3C865F02010FAF8 /* PhotoLibraryService.swift */; };
+		C0A000000000000000000001 /* wanderlust.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D0A000000000000000000001 /* wanderlust.m4a */; };
+		C0A000000000000000000002 /* simplicity.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D0A000000000000000000002 /* simplicity.m4a */; };
+		C0A000000000000000000003 /* castles-in-the-sky.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D0A000000000000000000003 /* castles-in-the-sky.m4a */; };
+		C0A000000000000000000004 /* the-long-way-home.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D0A000000000000000000004 /* the-long-way-home.m4a */; };
+		C0A000000000000000000005 /* MUSIC-CREDITS.txt in Resources */ = {isa = PBXBuildFile; fileRef = D0A000000000000000000005 /* MUSIC-CREDITS.txt */; };
 		CCFE1ACB52D5AA9DA1460531 /* TripReelApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD5F979D31E77ACB87012D87 /* TripReelApp.swift */; };
 		CFB5CA6AC5D1181FA11EFCAD /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66AE5D366E7AF01DF0DE7BBB /* RootView.swift */; };
 		D2444DED08CF777D03A20693 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A05DBA13DDE89A223BF74084 /* Foundation.framework */; };
@@ -41,11 +48,6 @@
 		F6C953390844CEDFC6C1BEC2 /* PhotoAnalysisThumbnailService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1F8E2A45D62E233FE456939 /* PhotoAnalysisThumbnailService.swift */; };
 		F897002B0F9BB807FCB1F01A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 65CF059667A4BDD5C2D4495A /* Assets.xcassets */; };
 		FB4940A8E3141CBF51989301 /* NativePhotoIntelligenceScoringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1661F4C3BF5766186551D2A7 /* NativePhotoIntelligenceScoringTests.swift */; };
-		C0A000000000000000000001 /* wanderlust.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D0A000000000000000000001 /* wanderlust.m4a */; };
-		C0A000000000000000000002 /* simplicity.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D0A000000000000000000002 /* simplicity.m4a */; };
-		C0A000000000000000000003 /* castles-in-the-sky.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D0A000000000000000000003 /* castles-in-the-sky.m4a */; };
-		C0A000000000000000000004 /* the-long-way-home.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D0A000000000000000000004 /* the-long-way-home.m4a */; };
-		C0A000000000000000000005 /* MUSIC-CREDITS.txt in Resources */ = {isa = PBXBuildFile; fileRef = D0A000000000000000000005 /* MUSIC-CREDITS.txt */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -66,10 +68,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		AA88E57B589C4DE4A6A97103 /* TripReelVideoExporter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelVideoExporter.swift; path = Models/TripReelVideoExporter.swift; sourceTree = "<group>"; };
-		AA77E57B589C4DE4A6A97103 /* AppAttestCloudPhotoAnalysisAuthorizer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppAttestCloudPhotoAnalysisAuthorizer.swift; path = Models/AppAttestCloudPhotoAnalysisAuthorizer.swift; sourceTree = "<group>"; };
 		06EE510F98A67B1A8E8D95C9 /* NativePhotoIntelligenceService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = NativePhotoIntelligenceService.swift; path = Models/NativePhotoIntelligenceService.swift; sourceTree = "<group>"; };
-		0A4DD0217C602F175EF78D21 /* InstrumentSerif-Regular.ttf */ = {isa = PBXFileReference; includeInIndex = 1; name = "InstrumentSerif-Regular.ttf"; path = "Resources/Fonts/InstrumentSerif-Regular.ttf"; sourceTree = "<group>"; };
+		0A4DD0217C602F175EF78D21 /* InstrumentSerif-Regular.ttf */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; name = "InstrumentSerif-Regular.ttf"; path = "Resources/Fonts/InstrumentSerif-Regular.ttf"; sourceTree = "<group>"; };
 		1661F4C3BF5766186551D2A7 /* NativePhotoIntelligenceScoringTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativePhotoIntelligenceScoringTests.swift; sourceTree = "<group>"; };
 		2257B61BB25B85B34BF9CB46 /* ManualPhotoImportService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ManualPhotoImportService.swift; path = Models/ManualPhotoImportService.swift; sourceTree = "<group>"; };
 		27E1E22E0738530EFCE94C6C /* CloudAnalysisConsentView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CloudAnalysisConsentView.swift; path = Screens/CloudAnalysisConsentView.swift; sourceTree = "<group>"; };
@@ -79,7 +79,7 @@
 		43F94729E331BA0045BE79EB /* TripReelPrivacyPolicyView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelPrivacyPolicyView.swift; path = Screens/TripReelPrivacyPolicyView.swift; sourceTree = "<group>"; };
 		46EF74D71B427C50665FC2FA /* EditingScreens.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EditingScreens.swift; path = Screens/EditingScreens.swift; sourceTree = "<group>"; };
 		4E0CF58F9757D40B4B8B93E4 /* SharedViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SharedViews.swift; path = Components/SharedViews.swift; sourceTree = "<group>"; };
-		518C1F47CD476565000F8137 /* InstrumentSerif-Italic.ttf */ = {isa = PBXFileReference; includeInIndex = 1; name = "InstrumentSerif-Italic.ttf"; path = "Resources/Fonts/InstrumentSerif-Italic.ttf"; sourceTree = "<group>"; };
+		518C1F47CD476565000F8137 /* InstrumentSerif-Italic.ttf */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; name = "InstrumentSerif-Italic.ttf"; path = "Resources/Fonts/InstrumentSerif-Italic.ttf"; sourceTree = "<group>"; };
 		5353217E4A466EC5AB24FEDF /* TripScreens.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripScreens.swift; path = Screens/TripScreens.swift; sourceTree = "<group>"; };
 		56BDE4FB9B5D77BC3D117A7B /* OnboardingScreens.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = OnboardingScreens.swift; path = Screens/OnboardingScreens.swift; sourceTree = "<group>"; };
 		6165CA0D4738C8E8C6A326CA /* ExportScreens.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExportScreens.swift; path = Screens/ExportScreens.swift; sourceTree = "<group>"; };
@@ -89,26 +89,29 @@
 		7CD7D09C961CEBCBCF6B1700 /* TripGroupingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TripGroupingTests.swift; sourceTree = "<group>"; };
 		9953289207A8CC41C9A61899 /* TripReelModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelModel.swift; path = Models/TripReelModel.swift; sourceTree = "<group>"; };
 		A05DBA13DDE89A223BF74084 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS14.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
-		A073A98B449C0C783CAAFC66 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = Resources/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A073A98B449C0C783CAAFC66 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = Resources/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B03 /* RevenueCatPurchaseService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RevenueCatPurchaseService.swift; path = Models/RevenueCatPurchaseService.swift; sourceTree = "<group>"; };
 		A35C1A3C46684F9B1761B266 /* CloudPhotoAnalysisTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CloudPhotoAnalysisTests.swift; sourceTree = "<group>"; };
 		A5D6F0320E51D07035AA4F6F /* SmartPhotoSelectionFlowTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SmartPhotoSelectionFlowTests.swift; sourceTree = "<group>"; };
 		A689E9B6C2743B25AD899649 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = Resources/Info.plist; sourceTree = "<group>"; };
 		AA77E57B589C4DE4A6A97101 /* TripReel.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; name = TripReel.entitlements; path = Resources/TripReel.entitlements; sourceTree = "<group>"; };
+		AA77E57B589C4DE4A6A97103 /* AppAttestCloudPhotoAnalysisAuthorizer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppAttestCloudPhotoAnalysisAuthorizer.swift; path = Models/AppAttestCloudPhotoAnalysisAuthorizer.swift; sourceTree = "<group>"; };
+		AA88E57B589C4DE4A6A97103 /* TripReelVideoExporter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelVideoExporter.swift; path = Models/TripReelVideoExporter.swift; sourceTree = "<group>"; };
 		B1F8E2A45D62E233FE456939 /* PhotoAnalysisThumbnailService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PhotoAnalysisThumbnailService.swift; path = Models/PhotoAnalysisThumbnailService.swift; sourceTree = "<group>"; };
 		BD5F979D31E77ACB87012D87 /* TripReelApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelApp.swift; path = App/TripReelApp.swift; sourceTree = "<group>"; };
 		BE26B8F4A694B6E15BB21FC1 /* CloudPhotoAnalysisClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CloudPhotoAnalysisClient.swift; path = Models/CloudPhotoAnalysisClient.swift; sourceTree = "<group>"; };
 		BF7B611247DFFA6E3FD10EB3 /* TripReelUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripReelUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C1FF368A943FC1D2B6DAEB76 /* TripReelModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TripReelModelTests.swift; sourceTree = "<group>"; };
-		C6503A4F6A976D37B5E9DC45 /* TripReel.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = TripReel.app; path = TripReel.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		CC3B475300161E9F2A7EB701 /* OFL-InstrumentSerif.txt */ = {isa = PBXFileReference; includeInIndex = 1; name = "OFL-InstrumentSerif.txt"; path = "Resources/Fonts/OFL-InstrumentSerif.txt"; sourceTree = "<group>"; };
+		C6503A4F6A976D37B5E9DC45 /* TripReel.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TripReel.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CC3B475300161E9F2A7EB701 /* OFL-InstrumentSerif.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = "OFL-InstrumentSerif.txt"; path = "Resources/Fonts/OFL-InstrumentSerif.txt"; sourceTree = "<group>"; };
+		D0A000000000000000000001 /* wanderlust.m4a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = audio.m4a; name = wanderlust.m4a; path = Resources/Music/wanderlust.m4a; sourceTree = "<group>"; };
+		D0A000000000000000000002 /* simplicity.m4a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = audio.m4a; name = simplicity.m4a; path = Resources/Music/simplicity.m4a; sourceTree = "<group>"; };
+		D0A000000000000000000003 /* castles-in-the-sky.m4a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = audio.m4a; name = "castles-in-the-sky.m4a"; path = "Resources/Music/castles-in-the-sky.m4a"; sourceTree = "<group>"; };
+		D0A000000000000000000004 /* the-long-way-home.m4a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = audio.m4a; name = "the-long-way-home.m4a"; path = "Resources/Music/the-long-way-home.m4a"; sourceTree = "<group>"; };
+		D0A000000000000000000005 /* MUSIC-CREDITS.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = "MUSIC-CREDITS.txt"; path = "Resources/Music/MUSIC-CREDITS.txt"; sourceTree = "<group>"; };
 		D3E8414F01F601C1F1299A6C /* TripReelFlowUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TripReelFlowUITests.swift; sourceTree = "<group>"; };
 		DD4F8BD3DADE8F267D386287 /* SmartPhotoSelectionViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SmartPhotoSelectionViews.swift; path = Screens/SmartPhotoSelectionViews.swift; sourceTree = "<group>"; };
 		E05554B9C707378C118B13B3 /* TripReelTheme.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelTheme.swift; path = DesignSystem/TripReelTheme.swift; sourceTree = "<group>"; };
-		D0A000000000000000000001 /* wanderlust.m4a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = audio.m4a; name = wanderlust.m4a; path = Resources/Music/wanderlust.m4a; sourceTree = "<group>"; };
-		D0A000000000000000000002 /* simplicity.m4a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = audio.m4a; name = simplicity.m4a; path = Resources/Music/simplicity.m4a; sourceTree = "<group>"; };
-		D0A000000000000000000003 /* castles-in-the-sky.m4a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = audio.m4a; name = castles-in-the-sky.m4a; path = Resources/Music/castles-in-the-sky.m4a; sourceTree = "<group>"; };
-		D0A000000000000000000004 /* the-long-way-home.m4a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = audio.m4a; name = the-long-way-home.m4a; path = Resources/Music/the-long-way-home.m4a; sourceTree = "<group>"; };
-		D0A000000000000000000005 /* MUSIC-CREDITS.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = MUSIC-CREDITS.txt; path = Resources/Music/MUSIC-CREDITS.txt; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -117,6 +120,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D2444DED08CF777D03A20693 /* Foundation.framework in Frameworks */,
+				A1B2C3D4E5F60718293A4B01 /* RevenueCat in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -147,6 +151,7 @@
 				4E0CF58F9757D40B4B8B93E4 /* SharedViews.swift */,
 				E05554B9C707378C118B13B3 /* TripReelTheme.swift */,
 				BE26B8F4A694B6E15BB21FC1 /* CloudPhotoAnalysisClient.swift */,
+				A1B2C3D4E5F60718293A4B03 /* RevenueCatPurchaseService.swift */,
 				AA77E57B589C4DE4A6A97103 /* AppAttestCloudPhotoAnalysisAuthorizer.swift */,
 				2257B61BB25B85B34BF9CB46 /* ManualPhotoImportService.swift */,
 				06EE510F98A67B1A8E8D95C9 /* NativePhotoIntelligenceService.swift */,
@@ -176,7 +181,6 @@
 				D0A000000000000000000004 /* the-long-way-home.m4a */,
 				D0A000000000000000000005 /* MUSIC-CREDITS.txt */,
 			);
-			name = TripReel;
 			path = TripReel;
 			sourceTree = "<group>";
 		};
@@ -226,7 +230,6 @@
 				7CD7D09C961CEBCBCF6B1700 /* TripGroupingTests.swift */,
 				C1FF368A943FC1D2B6DAEB76 /* TripReelModelTests.swift */,
 			);
-			name = TripReelTests;
 			path = TripReelTests;
 			sourceTree = "<group>";
 		};
@@ -235,7 +238,6 @@
 			children = (
 				D3E8414F01F601C1F1299A6C /* TripReelFlowUITests.swift */,
 			);
-			name = TripReelUITests;
 			path = TripReelUITests;
 			sourceTree = "<group>";
 		};
@@ -255,6 +257,9 @@
 			dependencies = (
 			);
 			name = TripReel;
+			packageProductDependencies = (
+				A1B2C3D4E5F60718293A4B05 /* RevenueCat */,
+			);
 			productName = TripReel;
 			productReference = C6503A4F6A976D37B5E9DC45 /* TripReel.app */;
 			productType = "com.apple.product-type.application";
@@ -304,6 +309,17 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastSwiftUpdateCheck = 2660;
 				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					1035759A12886F0EB2002E11 = {
+						CreatedOnToolsVersion = 26.0;
+						ProvisioningStyle = Automatic;
+						SystemCapabilities = {
+							com.apple.InAppPurchase = {
+								enabled = 1;
+							};
+						};
+					};
+				};
 			};
 			buildConfigurationList = C6B523492E9D3B154E4E3304 /* Build configuration list for PBXProject "TripReel" */;
 			compatibilityVersion = "Xcode 15.0";
@@ -314,6 +330,9 @@
 				Base,
 			);
 			mainGroup = 44BE93A3A5071C31B2B1DD5D;
+			packageReferences = (
+				A1B2C3D4E5F60718293A4B04 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
+			);
 			productRefGroup = 840459F7C0070CE6DAFA13F6 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -368,6 +387,7 @@
 				82E6B110F8E44D0475A1B1E7 /* SharedViews.swift in Sources */,
 				51915F88844C5B47A6714A9C /* TripReelTheme.swift in Sources */,
 				B776F50C273D716AF454A0DA /* CloudPhotoAnalysisClient.swift in Sources */,
+				A1B2C3D4E5F60718293A4B02 /* RevenueCatPurchaseService.swift in Sources */,
 				AA77E57B589C4DE4A6A97102 /* AppAttestCloudPhotoAnalysisAuthorizer.swift in Sources */,
 				4031D0983D8C7D2B129FB59C /* ManualPhotoImportService.swift in Sources */,
 				637614BC5AAACF420A388D9A /* NativePhotoIntelligenceService.swift in Sources */,
@@ -479,14 +499,15 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.prakashash18.tripreel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				REVENUECAT_PUBLIC_SDK_KEY = "";
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
-				TRIPREEL_PHOTO_ANALYSIS_ENDPOINT = "https://tripreel-visual-analysis.tripreel-prakashash18.workers.dev/v1/analyze";
 				TRIPREEL_APP_ATTEST_ENVIRONMENT = production;
+				TRIPREEL_PHOTO_ANALYSIS_ENDPOINT = "https://tripreel-visual-analysis.tripreel-prakashash18.workers.dev/v1/analyze";
 			};
 			name = Debug;
 		};
@@ -525,9 +546,9 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -547,6 +568,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				REVENUECAT_PUBLIC_SDK_KEY = "";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
@@ -561,8 +583,8 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_OBJC_WEAK = NO;
-				CODE_SIGN_STYLE = Automatic;
 				CODE_SIGN_ENTITLEMENTS = TripReel/Resources/TripReel.entitlements;
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = GT9EAB8826;
 				ENABLE_PREVIEWS = YES;
@@ -582,8 +604,8 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
-				TRIPREEL_PHOTO_ANALYSIS_ENDPOINT = "https://tripreel-visual-analysis.tripreel-prakashash18.workers.dev/v1/analyze";
 				TRIPREEL_APP_ATTEST_ENVIRONMENT = production;
+				TRIPREEL_PHOTO_ANALYSIS_ENDPOINT = "https://tripreel-visual-analysis.tripreel-prakashash18.workers.dev/v1/analyze";
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
@@ -717,6 +739,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A1B2C3D4E5F60718293A4B04 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.43.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A1B2C3D4E5F60718293A4B05 /* RevenueCat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D4E5F60718293A4B04 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCat;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 480CA8818CC194FF590467B2 /* Project object */;
 }

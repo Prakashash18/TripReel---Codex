@@ -602,6 +602,37 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertFalse(model.exportQuality.includesWatermark)
     }
 
+    func testFreeExportIncludesTwentyFourPhotosAndThirtySeconds() {
+        XCTAssertNil(ExportAccessPolicy.premiumRequirement(
+            photoCount: 24,
+            durationSeconds: 30,
+            quality: .standard
+        ))
+    }
+
+    func testLongerOrLargerStandardExportRequiresPremium() {
+        XCTAssertTrue(ExportAccessPolicy.premiumRequirement(
+            photoCount: 25,
+            durationSeconds: 30,
+            quality: .standard
+        )?.exceedsPhotoLimit == true)
+        XCTAssertTrue(ExportAccessPolicy.premiumRequirement(
+            photoCount: 24,
+            durationSeconds: 30.01,
+            quality: .standard
+        )?.exceedsDurationLimit == true)
+    }
+
+    func testHDAlwaysRequiresPremium() {
+        let requirement = ExportAccessPolicy.premiumRequirement(
+            photoCount: 1,
+            durationSeconds: 2,
+            quality: .hd
+        )
+        XCTAssertNotNil(requirement)
+        XCTAssertTrue(requirement?.requiresHighDefinition == true)
+    }
+
     func testTitleCardsBecomeRealTimelineItems() {
         let model = makeModel()
         model.titleCards = [.opening, .place, .ending]

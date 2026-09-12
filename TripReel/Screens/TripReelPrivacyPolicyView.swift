@@ -24,16 +24,16 @@ struct TripReelPrivacyPolicyView: View {
                             "Your complete First Cut is created on-device without cloud AI. Only after you choose Improve with AI, select a creative direction, and explicitly continue may selected reduced-resolution JPEG previews pass through Memories' secure backend to OpenAI's GPT-5.6 Luna. To let AI compare rather than start blindly, Memories also sends the First Cut's title text, photo order, pacing, motion, soundtrack, and visual treatment, plus broad on-device cues such as relative day, orientation, scene category, people count, similarity group, and score bands. Memories re-encodes previews without EXIF, GPS, filenames, exact capture dates, recognized text, or stable Apple Photos identifiers. Known screenshots and sensitive or document-like images are blocked. OpenAI returns a structured editing plan; Memories validates and applies it locally without changing your originals."
                         )
                         section(
-                            "AI video generation",
-                            "AI video is a separate, optional feature. Apple Vision privately recommends a beginning and ending on your iPhone, and you can replace either. After you explicitly agree, Memories re-encodes up to two reduced JPEGs without EXIF, GPS, filenames, exact capture dates, or stable Apple Photos identifiers. Those copies pass through Memories' secure backend to OpenRouter, which routes them to ByteDance's Seedance 2.0 to create a six-second vertical story from the first frame to the last, or a four-second animation when only one usable moment is available. Seedance may invent motion or small visual details, so you should review the result. Memories adds the visible title locally after download. Your source photos and existing First Cut are never changed."
-                        )
-                        section(
                             "Storage and deletion",
-                            "Memories' backend does not intentionally persist cloud previews, edit plans, or generated videos and discards in-memory request copies after use. OpenAI is called with store set to false. Under default API controls, OpenAI may retain API content for abuse monitoring for up to 30 days, or longer when legally or safety-required. Zero Data Retention removes default storage for eligible OpenAI requests, but images flagged by OpenAI's child-safety classifier may still be retained for manual review. OpenRouter video generation is not eligible for Zero Data Retention because its asynchronous provider must temporarily retain the input and generated output while the job is processed and retrieved."
+                            "Memories' backend does not intentionally persist cloud previews or edit plans and discards in-memory request copies after use. OpenAI is called with store set to false. Under default API controls, OpenAI may retain API content for abuse monitoring for up to 30 days, or longer when legally or safety-required. Zero Data Retention removes default storage for eligible OpenAI requests, but images flagged by OpenAI's child-safety classifier may still be retained for manual review."
                         )
                         section(
                             "Training, identity, and tracking",
-                            "OpenAI states that API data is not used to train its models by default unless the API organization opts in. OpenRouter and the selected video provider have their own data terms. Memories sends temporary request or job identifiers instead of your Photos identifiers and does not use these images for advertising or cross-app tracking."
+                            "OpenAI states that API data is not used to train its models by default unless the API organization opts in. Memories sends temporary request identifiers instead of your Photos identifiers and does not use these images for advertising or cross-app tracking."
+                        )
+                        section(
+                            "Purchases",
+                            "Apple processes payments. RevenueCat receives an anonymous app user identifier and purchase or subscription status so Memories can unlock longer reels and HD export across your devices. RevenueCat never receives your photos, previews, films, titles, or location data. You can restore eligible purchases from the upgrade screen."
                         )
                         section(
                             "Your choices",
@@ -45,10 +45,7 @@ struct TripReelPrivacyPolicyView: View {
                                 "OpenAI API data controls",
                                 destination: URL(string: "https://developers.openai.com/api/docs/guides/your-data")!
                             )
-                            Link(
-                                "OpenRouter video data notice",
-                                destination: URL(string: "https://openrouter.ai/docs/guides/overview/multimodal/video-generation#zero-data-retention")!
-                            )
+                            Link("RevenueCat privacy policy", destination: URL(string: "https://www.revenuecat.com/privacy")!)
                             Link(
                                 "Memories support",
                                 destination: URL(string: "https://github.com/Prakashash18/TripReel---Codex/issues")!
@@ -57,7 +54,7 @@ struct TripReelPrivacyPolicyView: View {
                         .font(TR.ui(13, weight: .semibold))
                         .foregroundStyle(TR.accent)
 
-                        Text("Effective September 11, 2026")
+                        Text("Effective September 12, 2026")
                             .font(TR.mono(10))
                             .tracking(0.8)
                             .foregroundStyle(.white.opacity(0.38))
