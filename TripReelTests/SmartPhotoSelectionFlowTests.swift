@@ -373,6 +373,12 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
 
         model.openAICutDirections()
         model.useCloudEnhancement()
+        XCTAssertEqual(model.aiCutPhotoOptions.count, 2)
+        XCTAssertEqual(model.aiCutSelectedPhotoCount, 1)
+        XCTAssertEqual(model.aiCutPrivacyReviewPhotoCount, 1)
+        XCTAssertTrue(
+            model.aiCutPhotoOptions.first(where: { $0.id == "asset-0" })?.requiresPrivacyReview == true
+        )
         model.selectAICutDirection(.betterStory)
         model.continueWithAICutDirection()
         try await waitUntil { model.screen == .aiComparison }
@@ -382,6 +388,46 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         XCTAssertEqual(wireIDs, ["p0"])
         XCTAssertEqual(requestedIDs, ["asset-0", "asset-1", "asset-1"])
         XCTAssertEqual(model.firstCutSnapshot?.keptPhotos.count, 2)
+    }
+
+    func testUserCanApproveEveryTextHeavyFirstCutMomentForAIDirector() async throws {
+        let preferences = makePreferences()
+        defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
+        let cloud = CloudAnalysisSpy()
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            photoLibrary: StubPhotoLibraryForSelection(),
+            cloudPhotoAnalysis: cloud,
+            photoAnalysisThumbnails: ThumbnailStub(),
+            nativePhotoIntelligence: NativeIntelligenceStub(protectedDocumentID: "asset-0"),
+            preferenceStore: preferences
+        )
+
+        model.requestBuild(trip: makeTrip(count: 26))
+        try await waitUntil { model.screen == .building }
+        model.openAICutDirections()
+        model.useCloudEnhancement()
+
+        XCTAssertEqual(model.firstCutSnapshot?.keptPhotos.count, 26)
+        XCTAssertEqual(model.aiCutPhotoOptions.count, 26)
+        XCTAssertEqual(model.aiCutSelectedPhotoCount, 25)
+        XCTAssertEqual(model.aiCutPrivacyReviewPhotoCount, 1)
+
+        // The ordinary toggle cannot bypass the extra privacy acknowledgement.
+        model.toggleAICutPhotoSelection("asset-0")
+        XCTAssertFalse(model.selectedAICutPhotoIDs.contains("asset-0"))
+
+        model.selectAllAICutPhotos(approvingPrivacyReview: true)
+        XCTAssertEqual(model.aiCutSelectedPhotoCount, 26)
+        XCTAssertEqual(model.aiCutPrivacyReviewPhotoCount, 0)
+
+        model.selectAICutDirection(.people)
+        model.continueWithAICutDirection()
+        try await waitUntil { model.screen == .aiComparison }
+
+        let wireIDs = await cloud.observedWireIDs()
+        XCTAssertEqual(wireIDs.count, 26)
     }
 
     func testLargeOnDeviceTripBecomesAConciseRecoverableFirstCut() async throws {

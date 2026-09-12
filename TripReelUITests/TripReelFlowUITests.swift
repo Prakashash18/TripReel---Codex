@@ -249,6 +249,7 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("ai-photo-selection-sheet").waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Deselect one moment to choose another"].exists)
         XCTAssertTrue(app.buttons["Suggested"].exists)
+        XCTAssertTrue(app.buttons["Select all"].exists)
         XCTAssertTrue(app.buttons["Clear"].exists)
         attachScreenshot(named: "AI exact photo selection")
     }

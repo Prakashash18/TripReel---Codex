@@ -432,7 +432,7 @@ private struct AICutPhotoSelectionCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Moments for AI")
                         .font(TR.ui(15, weight: .semibold))
-                    Text("\(model.aiCutSelectedPhotoCount) selected · max \(model.aiCutPhotoSelectionLimit)")
+                    Text(selectionSummary)
                         .font(TR.ui(11))
                         .foregroundStyle(.white.opacity(0.56))
                     Text("Photos or sampled video frames only")
@@ -459,12 +459,46 @@ private struct AICutPhotoSelectionCard: View {
         .accessibilityHint("Edit which reduced photo previews or sampled video frames may be sent")
         .accessibilityIdentifier("ai-photo-selection-card")
     }
+
+    private var selectionSummary: String {
+        if model.aiCutAvailablePhotoCount > model.aiCutPhotoSelectionLimit {
+            return "\(model.aiCutSelectedPhotoCount) selected · max \(model.aiCutPhotoSelectionLimit)"
+        }
+        return "\(model.aiCutSelectedPhotoCount) selected · \(model.aiCutAvailablePhotoCount) available"
+    }
 }
 
 private struct AICutPhotoSelectionSheet: View {
+    private enum PrivacyReviewPrompt: Identifiable {
+        case moment(String)
+        case all(Int)
+
+        var id: String {
+            switch self {
+            case let .moment(photoID): "moment-\(photoID)"
+            case .all: "all"
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .moment: "Share this moment?"
+            case let .all(count): "Include \(count) text-heavy moment\(count == 1 ? "" : "s")?"
+            }
+        }
+
+        var actionTitle: String {
+            switch self {
+            case .moment: "Share preview"
+            case .all: "Include & select all"
+            }
+        }
+    }
+
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var privacyReviewPrompt: PrivacyReviewPrompt?
 
     private let columns = Array(
         repeating: GridItem(.flexible(), spacing: 8),
@@ -484,29 +518,29 @@ private struct AICutPhotoSelectionSheet: View {
                     .padding(.horizontal, 22)
                     .padding(.top, 20)
 
-                HStack {
-                    Text("\(model.aiCutSelectedPhotoCount) of \(model.aiCutPhotoSelectionLimit) selected")
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(selectionSummary)
                         .font(TR.ui(12, weight: .semibold))
                         .foregroundStyle(selectionIsFull ? TR.accent : .white.opacity(0.64))
 
-                    Spacer()
-
-                    Button("Suggested") {
-                        withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                    HStack(spacing: 8) {
+                        selectionAction("Suggested", identifier: "ai-photos-suggested") {
                             model.selectSuggestedAICutPhotos()
                         }
-                    }
-                    .accessibilityIdentifier("ai-photos-suggested")
 
-                    Button("Clear") {
-                        withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                        selectionAction("Select all", identifier: "ai-photos-select-all") {
+                            if model.aiCutPrivacyReviewPhotoCount > 0 {
+                                privacyReviewPrompt = .all(model.aiCutPrivacyReviewPhotoCount)
+                            } else {
+                                model.selectAllAICutPhotos(approvingPrivacyReview: false)
+                            }
+                        }
+
+                        selectionAction("Clear", identifier: "ai-photos-clear") {
                             model.clearAICutPhotoSelection()
                         }
                     }
-                    .accessibilityIdentifier("ai-photos-clear")
                 }
-                .font(TR.ui(12, weight: .semibold))
-                .foregroundStyle(TR.accent)
                 .padding(.horizontal, 22)
                 .padding(.top, 13)
                 .padding(.bottom, 12)
@@ -529,6 +563,10 @@ private struct AICutPhotoSelectionSheet: View {
                     Text("Deselect one moment to choose another")
                         .font(TR.ui(11))
                         .foregroundStyle(.white.opacity(0.52))
+                } else if model.aiCutPrivacyReviewPhotoCount > 0 {
+                    Text("REVIEW moments need your approval before sharing")
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.52))
                 } else {
                     Text("Only selected previews go to OpenAI")
                         .font(TR.ui(11))
@@ -548,6 +586,23 @@ private struct AICutPhotoSelectionSheet: View {
             .background(TR.sheet.opacity(0.94))
         }
         .accessibilityIdentifier("ai-photo-selection-sheet")
+        .alert(item: $privacyReviewPrompt) { prompt in
+            Alert(
+                title: Text(prompt.title),
+                message: Text("On-device checks found substantial text, which could include personal information. If you continue, only reduced previews are sent to OpenAI for this cut."),
+                primaryButton: .default(Text(prompt.actionTitle)) {
+                    withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                        switch prompt {
+                        case let .moment(photoID):
+                            model.approveAndSelectAICutPhoto(photoID)
+                        case .all:
+                            model.selectAllAICutPhotos(approvingPrivacyReview: true)
+                        }
+                    }
+                },
+                secondaryButton: .cancel()
+            )
+        }
     }
 
     private func photoCell(_ option: AICutPhotoOption) -> some View {
@@ -556,7 +611,15 @@ private struct AICutPhotoSelectionSheet: View {
 
         return Button {
             withAnimation(reduceMotion ? nil : TRMotion.selection) {
-                model.toggleAICutPhotoSelection(option.id)
+                if selected {
+                    model.toggleAICutPhotoSelection(option.id)
+                } else if !canSelect {
+                    return
+                } else if !option.requiresPrivacyReview {
+                    model.toggleAICutPhotoSelection(option.id)
+                } else {
+                    privacyReviewPrompt = .moment(option.id)
+                }
             }
         } label: {
             ZStack(alignment: .topTrailing) {
@@ -597,6 +660,19 @@ private struct AICutPhotoSelectionSheet: View {
                         .padding(7)
                 }
 
+                if option.requiresPrivacyReview {
+                    Text("REVIEW")
+                        .font(TR.mono(8, weight: .semibold))
+                        .tracking(0.8)
+                        .foregroundStyle(TR.ink)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 5)
+                        .background(TR.accent)
+                        .clipShape(Capsule())
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        .padding(7)
+                }
+
                 if option.photo.isVideo {
                     Label("CLIP", systemImage: "play.fill")
                         .font(TR.mono(8, weight: .semibold))
@@ -620,8 +696,41 @@ private struct AICutPhotoSelectionSheet: View {
                 : "More Moments \(option.photo.isVideo ? "video clip" : "photo")"
         )
         .accessibilityValue(selected ? "Selected" : "Not selected")
-        .accessibilityHint(canSelect ? "Double tap to toggle" : "Deselect another photo first")
+        .accessibilityHint(
+            option.requiresPrivacyReview
+                ? "Double tap to review before sharing this text-heavy moment"
+                : (canSelect ? "Double tap to toggle" : "Deselect another photo first")
+        )
         .accessibilityIdentifier("ai-photo-\(option.id)")
+    }
+
+    private func selectionAction(
+        _ title: String,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                action()
+            }
+        } label: {
+            Text(title)
+                .font(TR.ui(11, weight: .semibold))
+                .foregroundStyle(title == "Clear" ? .white.opacity(0.58) : TR.accent)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(.white.opacity(0.055))
+                .clipShape(Capsule())
+        }
+        .buttonStyle(TactileButtonStyle(pressedScale: 0.96))
+        .accessibilityIdentifier(identifier)
+    }
+
+    private var selectionSummary: String {
+        if model.aiCutAvailablePhotoCount > model.aiCutPhotoSelectionLimit {
+            return "\(model.aiCutSelectedPhotoCount) selected · max \(model.aiCutPhotoSelectionLimit)"
+        }
+        return "\(model.aiCutSelectedPhotoCount) selected · \(model.aiCutAvailablePhotoCount) available"
     }
 }
 

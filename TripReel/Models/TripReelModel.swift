@@ -1888,11 +1888,13 @@ struct AICutFailure: Hashable, Sendable {
 private struct AICutCandidatePhoto: Sendable {
     let photo: ReelPhoto
     let localSelection: CloudPhotoLocalSelection
+    let requiresPrivacyReview: Bool
 }
 
 struct AICutPhotoOption: Identifiable, Hashable, Sendable {
     let photo: ReelPhoto
     let localSelection: CloudPhotoLocalSelection
+    let requiresPrivacyReview: Bool
 
     var id: String { photo.id }
 }
@@ -2032,6 +2034,7 @@ final class TripReelModel: ObservableObject {
     private var activeVideoClips: [String: VideoClipDescriptor] = [:]
     private var activeVideoCloudPreviews: [String: PreparedPhotoThumbnail] = [:]
     private var cloudBlockedPhotoIDs: Set<String> = []
+    private var explicitlyApprovedAICutPhotoIDs: Set<String> = []
     private var aiCutConsentGranted = false
     private var manuallyIncludedPhotoIDs: Set<String> = []
     private var photoEditOverrides: [String: PhotoEditOverride] = [:]
@@ -2754,7 +2757,12 @@ final class TripReelModel: ObservableObject {
 
     var aiCutPhotoOptions: [AICutPhotoOption] {
         availableAICutCandidatePhotos().map {
-            AICutPhotoOption(photo: $0.photo, localSelection: $0.localSelection)
+            AICutPhotoOption(
+                photo: $0.photo,
+                localSelection: $0.localSelection,
+                requiresPrivacyReview: $0.requiresPrivacyReview
+                    && !explicitlyApprovedAICutPhotoIDs.contains($0.photo.id)
+            )
         }
     }
 
@@ -2764,6 +2772,14 @@ final class TripReelModel: ObservableObject {
 
     var aiCutSelectedPhotoCount: Int {
         selectedAICutPhotoIDs.count
+    }
+
+    var aiCutAvailablePhotoCount: Int {
+        aiCutPhotoOptions.count
+    }
+
+    var aiCutPrivacyReviewPhotoCount: Int {
+        aiCutPhotoOptions.filter(\.requiresPrivacyReview).count
     }
 
     var aiVideoPhotoOptions: [ReelPhoto] {
@@ -2879,13 +2895,39 @@ final class TripReelModel: ObservableObject {
     }
 
     func toggleAICutPhotoSelection(_ photoID: String) {
-        let validIDs = Set(aiCutPhotoOptions.map(\.id))
-        guard validIDs.contains(photoID) else { return }
+        guard let option = aiCutPhotoOptions.first(where: { $0.id == photoID }) else { return }
         if selectedAICutPhotoIDs.contains(photoID) {
             selectedAICutPhotoIDs.remove(photoID)
-        } else if selectedAICutPhotoIDs.count < aiCutPhotoSelectionLimit {
+        } else if !option.requiresPrivacyReview,
+                  selectedAICutPhotoIDs.count < aiCutPhotoSelectionLimit {
             selectedAICutPhotoIDs.insert(photoID)
         }
+    }
+
+    func approveAndSelectAICutPhoto(_ photoID: String) {
+        guard selectedAICutPhotoIDs.count < aiCutPhotoSelectionLimit,
+              availableAICutCandidatePhotos().contains(where: {
+                  $0.photo.id == photoID && $0.requiresPrivacyReview
+              }) else { return }
+        explicitlyApprovedAICutPhotoIDs.insert(photoID)
+        selectedAICutPhotoIDs.insert(photoID)
+    }
+
+    func selectAllAICutPhotos(approvingPrivacyReview: Bool) {
+        let options = availableAICutCandidatePhotos()
+        if approvingPrivacyReview {
+            explicitlyApprovedAICutPhotoIDs.formUnion(
+                options.filter(\.requiresPrivacyReview).map { $0.photo.id }
+            )
+        }
+        let selectable = options.filter {
+            !$0.requiresPrivacyReview
+                || explicitlyApprovedAICutPhotoIDs.contains($0.photo.id)
+        }
+        selectedAICutPhotoIDs = Set(
+            Self.evenlySampled(selectable, limit: aiCutPhotoSelectionLimit)
+                .map { $0.photo.id }
+        )
     }
 
     func selectSuggestedAICutPhotos() {
@@ -2942,6 +2984,8 @@ final class TripReelModel: ObservableObject {
         let allPhotosByID = Dictionary(uniqueKeysWithValues: allPhotos.map { ($0.id, $0) })
         let selectedOptions = availableAICutCandidatePhotos().filter {
             selectedAICutPhotoIDs.contains($0.photo.id)
+                && (!$0.requiresPrivacyReview
+                    || explicitlyApprovedAICutPhotoIDs.contains($0.photo.id))
         }
         let candidates = selectedOptions.compactMap { candidate -> AICutCandidate? in
             guard let asset = assetsByID[candidate.photo.id], !asset.isScreenshot else { return nil }
@@ -3781,10 +3825,11 @@ final class TripReelModel: ObservableObject {
               let sourceTrip = activeAnalysisTrip ?? selectedTrip else { return [] }
 
         let firstCutIDs = Set(firstCutSnapshot.keptPhotos.map(\.id))
+        let assetsByID = Dictionary(uniqueKeysWithValues: sourceTrip.assets.map { ($0.id, $0) })
         let recoverableIDs = Set(excludedPhotos.compactMap { excluded in
             excluded.reason.isEligibleForCloudReconsideration ? excluded.id : nil
         })
-        let eligibleIDs = firstCutIDs.union(recoverableIDs).subtracting(cloudBlockedPhotoIDs)
+        let eligibleIDs = firstCutIDs.union(recoverableIDs)
         let allPhotos = applyingPhotoEdits(
             to: Self.makeReelPhotos(
                 from: sourceTrip,
@@ -3794,15 +3839,24 @@ final class TripReelModel: ObservableObject {
         )
 
         return allPhotos.compactMap { photo in
-            guard eligibleIDs.contains(photo.id) else { return nil }
+            guard eligibleIDs.contains(photo.id),
+                  let asset = assetsByID[photo.id],
+                  !asset.isScreenshot else { return nil }
+            let requiresPrivacyReview = cloudBlockedPhotoIDs.contains(photo.id)
+            // A protected omission remains private. A protected moment already
+            // present in First Cut is shown so the user can explicitly approve
+            // its reduced preview instead of wondering where it went.
+            guard firstCutIDs.contains(photo.id) || !requiresPrivacyReview else { return nil }
             return AICutCandidatePhoto(
                 photo: photo,
-                localSelection: firstCutIDs.contains(photo.id) ? .firstCut : .morePhotos
+                localSelection: firstCutIDs.contains(photo.id) ? .firstCut : .morePhotos,
+                requiresPrivacyReview: requiresPrivacyReview
             )
         }
     }
 
     private func resetAICutPhotoSelection() {
+        explicitlyApprovedAICutPhotoIDs = []
         guard let firstCutSnapshot else {
             selectedAICutPhotoIDs = []
             return
@@ -3856,10 +3910,18 @@ final class TripReelModel: ObservableObject {
         }
 
         let selectedFirstCut = evenlySampled(eligibleFirstCut, limit: firstCount).map {
-            AICutCandidatePhoto(photo: $0, localSelection: .firstCut)
+            AICutCandidatePhoto(
+                photo: $0,
+                localSelection: .firstCut,
+                requiresPrivacyReview: false
+            )
         }
         let selectedMorePhotos = evenlySampled(eligibleMorePhotos, limit: moreCount).map {
-            AICutCandidatePhoto(photo: $0, localSelection: .morePhotos)
+            AICutCandidatePhoto(
+                photo: $0,
+                localSelection: .morePhotos,
+                requiresPrivacyReview: false
+            )
         }
 
         var interleaved: [AICutCandidatePhoto] = []
@@ -4721,6 +4783,7 @@ final class TripReelModel: ObservableObject {
         cleanupSelection = []
         selectedCutSource = .firstCut
         selectedAICutPhotoIDs = []
+        explicitlyApprovedAICutPhotoIDs = []
         aiCutStoryContext = ""
         aiCutConsentGranted = false
         aiCutSnapshot = nil
@@ -5340,6 +5403,7 @@ final class TripReelModel: ObservableObject {
         aiCutFailure = nil
         aiCutProgress = 0
         selectedAICutPhotoIDs = []
+        explicitlyApprovedAICutPhotoIDs = []
         aiCutStoryContext = ""
         aiCutConsentGranted = false
         aiVideoGenerationID = UUID()
