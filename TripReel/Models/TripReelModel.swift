@@ -50,6 +50,14 @@ enum AppScreen: String {
     }
 }
 
+enum AICutSetupStep: Int, CaseIterable, Hashable, Sendable {
+    case moments
+    case story
+    case direction
+
+    var position: Int { rawValue + 1 }
+}
+
 enum PhotoSource: Hashable, Sendable {
     case bundled(String)
     case library(String)
@@ -2262,6 +2270,7 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var cloudAnalysisPreference: CloudAnalysisPreference
     @Published var isCloudAnalysisConsentPresented = false
     @Published private(set) var cloudConsentIsSettings = false
+    @Published private(set) var aiCutSetupStep: AICutSetupStep = .moments
     @Published private(set) var selectedAICutDirection: AICutDirection?
     @Published private(set) var selectedAICutPhotoIDs: Set<String> = []
     @Published var aiCutStoryContext = ""
@@ -3094,7 +3103,11 @@ final class TripReelModel: ObservableObject {
             go(.trips, direction: .backward)
         case .firstCutOptions:
             go(.firstWatch, direction: .backward)
-        case .aiDirection, .aiComparison:
+        case .aiDirection:
+            if !retreatAICutSetup() {
+                go(.firstCutOptions, direction: .backward)
+            }
+        case .aiComparison:
             go(.firstCutOptions, direction: .backward)
         case .aiVideoIntro, .aiVideoReady:
             go(.aiComparison, direction: .backward)
@@ -3289,11 +3302,42 @@ final class TripReelModel: ObservableObject {
 
     func openAICutDirections() {
         aiCutFailure = nil
+        aiCutSetupStep = .moments
         selectedAICutDirection = recommendedAICutDirection
         resetAICutPhotoSelection()
         aiCutConsentGranted = false
         cloudConsentIsSettings = false
         isCloudAnalysisConsentPresented = true
+    }
+
+    func advanceAICutSetup() {
+        switch aiCutSetupStep {
+        case .moments:
+            guard !selectedAICutPhotoIDs.isEmpty else { return }
+            navigationDirection = .forward
+            aiCutSetupStep = .story
+        case .story:
+            navigationDirection = .forward
+            aiCutSetupStep = .direction
+        case .direction:
+            break
+        }
+    }
+
+    @discardableResult
+    func retreatAICutSetup() -> Bool {
+        switch aiCutSetupStep {
+        case .moments:
+            return false
+        case .story:
+            navigationDirection = .backward
+            aiCutSetupStep = .moments
+            return true
+        case .direction:
+            navigationDirection = .backward
+            aiCutSetupStep = .story
+            return true
+        }
     }
 
     func selectAICutDirection(_ direction: AICutDirection) {
@@ -3528,6 +3572,7 @@ final class TripReelModel: ObservableObject {
             retryAICut()
         case .reviewMoments:
             self.aiCutFailure = nil
+            aiCutSetupStep = .moments
             go(.aiDirection, direction: .backward)
         case .startAgain:
             self.aiCutFailure = nil
@@ -3770,6 +3815,7 @@ final class TripReelModel: ObservableObject {
     func tryAnotherAICut() {
         aiCutFailure = nil
         selectedAICutDirection = recommendedAICutDirection
+        aiCutSetupStep = .direction
         go(.aiDirection, direction: .backward)
     }
 
@@ -5159,6 +5205,7 @@ final class TripReelModel: ObservableObject {
         freePreviewReason = nil
         selectedAICutPhotoIDs = []
         aiCutStoryContext = ""
+        aiCutSetupStep = .moments
         aiCutConsentGranted = false
         aiCutSnapshot = nil
         aiCutSummary = nil
@@ -5769,6 +5816,7 @@ final class TripReelModel: ObservableObject {
         aiCutProgress = 0
         selectedAICutPhotoIDs = []
         aiCutStoryContext = ""
+        aiCutSetupStep = .moments
         aiCutConsentGranted = false
         aiVideoGenerationID = UUID()
         aiVideoTask?.cancel()

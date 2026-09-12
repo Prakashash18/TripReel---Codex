@@ -231,7 +231,7 @@ struct AICutDirectionScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsPhotoSelection = false
-    @State private var recipesExpanded = false
+    @FocusState private var storyFieldFocused: Bool
 
     var body: some View {
         ZStack {
@@ -239,42 +239,36 @@ struct AICutDirectionScreen: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
-                    ScreenHeading(
-                        eyebrow: "AI Director · permission granted",
-                        title: "Edit moments & direction"
-                    )
-                    .padding(.leading, 48)
-                    .trEntrance(0, distance: 8)
+                    stepHeader
 
-                    AICutPhotoSelectionCard {
-                        showsPhotoSelection = true
+                    switch model.aiCutSetupStep {
+                    case .moments:
+                        momentsStep
+                    case .story:
+                        storyStep
+                    case .direction:
+                        directionStep
                     }
-                        .trEntrance(1, distance: 8)
-
-                    storyContextEditor
-                        .trEntrance(2, distance: 8)
-
-                    recipePicker
-
-                    Button("Create AI cut") {
-                        model.continueWithAICutDirection()
-                    }
-                    .buttonStyle(CreamButtonStyle())
-                    .disabled(!model.aiCutCanCreate)
-                    .opacity(model.aiCutCanCreate ? 1 : 0.48)
-                    .accessibilityHint("Sends the selected reduced previews and current edit recipe to OpenAI, then creates a comparison cut")
-                    .accessibilityIdentifier("ai-direction-continue")
-
-                    Text(sharingSummary)
-                        .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.42))
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 6)
-                .padding(.bottom, 34)
+                .padding(.bottom, 22)
             }
+            .scrollDismissesKeyboard(.interactively)
+            .id(model.aiCutSetupStep)
+            .transition(
+                TRMotion.screenTransition(
+                    direction: model.navigationDirection,
+                    prefersCrossFade: reduceMotion
+                )
+            )
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                stepFooter
+            }
+        }
+        .animation(reduceMotion ? .easeInOut(duration: 0.16) : TRMotion.navigation, value: model.aiCutSetupStep)
+        .onChange(of: model.aiCutSetupStep) { _, _ in
+            storyFieldFocused = false
         }
         .sheet(isPresented: $showsPhotoSelection) {
             AICutPhotoSelectionSheet()
@@ -287,73 +281,84 @@ struct AICutDirectionScreen: View {
         .accessibilityIdentifier("ai-direction-screen")
     }
 
-    private var activeDirection: AICutDirection {
-        model.selectedAICutDirection ?? model.recommendedAICutDirection
+    private var stepHeader: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            ScreenHeading(
+                eyebrow: "AI Director · step \(model.aiCutSetupStep.position) of 3",
+                title: stepTitle,
+                size: 42
+            )
+            .padding(.leading, 48)
+
+            Text(stepDetail)
+                .font(TR.ui(14))
+                .foregroundStyle(.white.opacity(0.62))
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 6) {
+                ForEach(AICutSetupStep.allCases, id: \.self) { step in
+                    Capsule()
+                        .fill(step.rawValue <= model.aiCutSetupStep.rawValue ? TR.accent : .white.opacity(0.16))
+                        .frame(
+                            width: step == model.aiCutSetupStep ? 30 : 10,
+                            height: 5
+                        )
+                }
+                Spacer()
+                Text("\(model.aiCutSetupStep.position) / 3")
+                    .font(TR.mono(10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.42))
+            }
+            .animation(reduceMotion ? nil : TRMotion.selection, value: model.aiCutSetupStep)
+        }
+        .trEntrance(0, distance: 8)
     }
 
-    @ViewBuilder
-    private var recipePicker: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack {
-                MetadataText(text: "Reel recipe", color: .white.opacity(0.52))
-                Spacer()
-                if recipesExpanded {
-                    Button("Collapse") {
-                        withAnimation(reduceMotion ? nil : TRMotion.selection) {
-                            recipesExpanded = false
-                        }
-                    }
-                    .font(TR.ui(11, weight: .semibold))
-                    .foregroundStyle(TR.accent)
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("ai-direction-collapse")
-                }
+    private var momentsStep: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            AICutPhotoSelectionCard {
+                showsPhotoSelection = true
             }
 
-            if recipesExpanded {
-                LazyVStack(spacing: 11) {
-                    ForEach(AICutDirection.allCases) { direction in
-                        AICutDirectionCard(
-                            direction: direction,
-                            selected: model.selectedAICutDirection == direction,
-                            recommended: model.recommendedAICutDirection == direction
-                        ) {
-                            model.selectAICutDirection(direction)
-                            withAnimation(reduceMotion ? nil : TRMotion.selection) {
-                                recipesExpanded = false
-                            }
-                        }
+            Label("Nothing is sent until you create the cut", systemImage: "lock.fill")
+                .font(TR.ui(11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.46))
+        }
+        .trEntrance(1, distance: 8)
+        .accessibilityIdentifier("ai-setup-step-moments")
+    }
+
+    private var storyStep: some View {
+        storyContextEditor
+            .trEntrance(1, distance: 8)
+            .accessibilityIdentifier("ai-setup-step-story")
+    }
+
+    private var directionStep: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            MetadataText(text: "Reel direction", color: .white.opacity(0.52))
+
+            LazyVStack(spacing: 11) {
+                ForEach(orderedDirections) { direction in
+                    AICutDirectionCard(
+                        direction: direction,
+                        selected: model.selectedAICutDirection == direction,
+                        recommended: model.recommendedAICutDirection == direction
+                    ) {
+                        model.selectAICutDirection(direction)
                     }
                 }
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            } else {
-                AICutDirectionCard(
-                    direction: activeDirection,
-                    selected: true,
-                    recommended: model.recommendedAICutDirection == activeDirection,
-                    actionLabel: "Change"
-                ) {
-                    withAnimation(reduceMotion ? nil : TRMotion.selection) {
-                        recipesExpanded = true
-                    }
-                }
-                .accessibilityIdentifier("ai-direction-expand")
-                .transition(.opacity)
             }
         }
-        .padding(.top, 2)
+        .trEntrance(1, distance: 8)
+        .accessibilityIdentifier("ai-setup-step-direction")
     }
 
     private var storyContextEditor: some View {
         VStack(alignment: .leading, spacing: 11) {
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("What is this reel about?")
-                        .font(TR.ui(15, weight: .semibold))
-                    Text("Optional · one clue helps AI find the meaning")
-                        .font(TR.ui(10))
-                        .foregroundStyle(.white.opacity(0.48))
-                }
+                Text("Your clue · optional")
+                    .font(TR.ui(13, weight: .semibold))
                 Spacer()
                 Text("\(model.aiCutStoryContext.count)/\(CloudPhotoAnalysisClient.maximumStoryContextCharacters)")
                     .font(TR.mono(9))
@@ -368,6 +373,7 @@ struct AICutDirectionScreen: View {
             .font(TR.ui(13))
             .lineLimit(2...3)
             .textInputAutocapitalization(.sentences)
+            .focused($storyFieldFocused)
             .padding(.horizontal, 13)
             .padding(.vertical, 12)
             .background(.black.opacity(0.20))
@@ -389,7 +395,7 @@ struct AICutDirectionScreen: View {
                 HStack(spacing: 7) {
                     ForEach(model.aiCutStoryContextSuggestions, id: \.self) { suggestion in
                         Button(suggestion) {
-                            withAnimation(TRMotion.selection) {
+                            withAnimation(reduceMotion ? nil : TRMotion.selection) {
                                 model.aiCutStoryContext = suggestion
                             }
                         }
@@ -413,11 +419,101 @@ struct AICutDirectionScreen: View {
         .glassCard(cornerRadius: 18)
     }
 
-    private var sharingSummary: String {
-        let context = model.aiCutStoryContext.trimmingCharacters(in: .whitespacesAndNewlines)
-        return context.isEmpty
-            ? "OpenAI’s GPT-5.6 Luna receives \(model.aiCutSelectedPhotoCount) small previews and your current edit recipe."
-            : "OpenAI’s GPT-5.6 Luna receives \(model.aiCutSelectedPhotoCount) small previews, your edit recipe and story hint."
+    private var stepFooter: some View {
+        VStack(spacing: 9) {
+            Button(footerButtonTitle) {
+                storyFieldFocused = false
+                if model.aiCutSetupStep == .direction {
+                    model.continueWithAICutDirection()
+                } else {
+                    model.advanceAICutSetup()
+                }
+            }
+            .buttonStyle(CreamButtonStyle())
+            .disabled(!footerIsEnabled)
+            .opacity(footerIsEnabled ? 1 : 0.48)
+            .accessibilityHint(footerAccessibilityHint)
+            .accessibilityIdentifier(
+                model.aiCutSetupStep == .direction
+                    ? "ai-direction-continue"
+                    : "ai-setup-continue"
+            )
+
+            Text(footerNote)
+                .font(TR.ui(10))
+                .foregroundStyle(.white.opacity(0.42))
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+        .background(
+            LinearGradient(
+                colors: [TR.sheet.opacity(0.15), TR.sheet.opacity(0.96)],
+                startPoint: .top,
+                endPoint: .center
+            )
+            .ignoresSafeArea()
+        )
+    }
+
+    private var orderedDirections: [AICutDirection] {
+        let recommended = model.recommendedAICutDirection
+        return [recommended] + AICutDirection.allCases.filter { $0 != recommended }
+    }
+
+    private var stepTitle: String {
+        switch model.aiCutSetupStep {
+        case .moments: "Choose the moments"
+        case .story: "Add the meaning"
+        case .direction: "Choose a direction"
+        }
+    }
+
+    private var stepDetail: String {
+        switch model.aiCutSetupStep {
+        case .moments:
+            "Start with the moments ranked on your iPhone for quality, relevance and variety."
+        case .story:
+            "A short clue helps AI write a better hook and more meaningful titles. You can leave it blank."
+        case .direction:
+            model.recommendedAICutReason
+        }
+    }
+
+    private var footerButtonTitle: String {
+        model.aiCutSetupStep == .direction ? "Create AI cut" : "Continue"
+    }
+
+    private var footerIsEnabled: Bool {
+        switch model.aiCutSetupStep {
+        case .moments:
+            model.aiCutSelectedPhotoCount > 0
+        case .story:
+            true
+        case .direction:
+            model.aiCutCanCreate
+        }
+    }
+
+    private var footerNote: String {
+        switch model.aiCutSetupStep {
+        case .moments, .story:
+            "Nothing is sent yet"
+        case .direction:
+            "Only \(model.aiCutSelectedPhotoCount) reduced previews and your choices are sent"
+        }
+    }
+
+    private var footerAccessibilityHint: String {
+        switch model.aiCutSetupStep {
+        case .moments:
+            "Continues to an optional story clue"
+        case .story:
+            "Continues to reel direction choices"
+        case .direction:
+            "Sends the selected reduced previews and choices to OpenAI, then creates a comparison cut"
+        }
     }
 }
 

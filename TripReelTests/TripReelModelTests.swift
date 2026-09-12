@@ -11,17 +11,58 @@ final class TripReelModelTests: XCTestCase {
         TripReelModel(arguments: [], useDemoData: true)
     }
 
-    func testShareProviderAdvertisesAnExplicitMP4Movie() {
+    func testShareItemSourceHandsOffAFileURLAsAnExplicitMP4Movie() {
         let videoURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("share-provider-test.mp4")
-        let provider = MP4ShareProviderFactory.makeProvider(
-            for: videoURL,
-            suggestedName: "Memories-Reel"
+        let source = MP4ShareItemSource(
+            videoURL: videoURL,
+            title: "A memory"
+        )
+        let controller = UIActivityViewController(
+            activityItems: [videoURL],
+            applicationActivities: nil
         )
 
-        XCTAssertEqual(provider.suggestedName, "Memories-Reel.mp4")
-        XCTAssertEqual(provider.registeredTypeIdentifiers, [UTType.mpeg4Movie.identifier])
-        XCTAssertTrue(provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier))
+        XCTAssertEqual(
+            source.activityViewControllerPlaceholderItem(controller) as? URL,
+            videoURL
+        )
+        XCTAssertEqual(
+            source.activityViewController(controller, itemForActivityType: nil) as? URL,
+            videoURL
+        )
+        XCTAssertEqual(
+            source.activityViewController(controller, dataTypeIdentifierForActivityType: nil),
+            UTType.mpeg4Movie.identifier
+        )
+    }
+
+    func testAIDirectorSetupAdvancesAndBacktracksOneDecisionAtATime() {
+        let model = makeModel()
+        model.go(.firstCutOptions)
+        model.openAICutDirections()
+        model.go(.aiDirection)
+
+        XCTAssertEqual(model.aiCutSetupStep, .moments)
+        XCTAssertGreaterThan(model.aiCutSelectedPhotoCount, 0)
+
+        model.advanceAICutSetup()
+        XCTAssertEqual(model.aiCutSetupStep, .story)
+        XCTAssertEqual(model.screen, .aiDirection)
+
+        model.advanceAICutSetup()
+        XCTAssertEqual(model.aiCutSetupStep, .direction)
+
+        model.navigateBack()
+        XCTAssertEqual(model.aiCutSetupStep, .story)
+        XCTAssertEqual(model.screen, .aiDirection)
+
+        model.navigateBack()
+        XCTAssertEqual(model.aiCutSetupStep, .moments)
+        XCTAssertEqual(model.screen, .aiDirection)
+
+        model.navigateBack()
+        XCTAssertEqual(model.screen, .firstCutOptions)
     }
 
     func testVideoFrameCopyDoesNotTurnUIKitArtworkUpsideDown() throws {
@@ -1115,7 +1156,7 @@ final class TripReelModelTests: XCTestCase {
         model.startRender(hd: true)
 
         for _ in 0..<100 where model.exportErrorMessage == nil {
-            await Task.yield()
+            try await Task.sleep(nanoseconds: 10_000_000)
         }
 
         XCTAssertEqual(model.screen, .export)
@@ -1125,7 +1166,7 @@ final class TripReelModelTests: XCTestCase {
 
         model.retryExportPhotoDownload()
         for _ in 0..<100 where model.screen != .done {
-            await Task.yield()
+            try await Task.sleep(nanoseconds: 10_000_000)
         }
 
         XCTAssertEqual(model.screen, .done)

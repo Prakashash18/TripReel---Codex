@@ -10,21 +10,43 @@ struct MP4SharePayload: Identifiable {
     let title: String
 }
 
-enum MP4ShareProviderFactory {
-    static func makeProvider(for videoURL: URL, suggestedName: String) -> NSItemProvider {
-        let provider = NSItemProvider()
-        provider.suggestedName = suggestedName.hasSuffix(".mp4")
-            ? suggestedName
-            : "\(suggestedName).mp4"
-        provider.registerFileRepresentation(
-            for: .mpeg4Movie,
-            visibility: .all,
-            openInPlace: false
-        ) { completion in
-            completion(videoURL, false, nil)
-            return nil
-        }
-        return provider
+final class MP4ShareItemSource: NSObject, UIActivityItemSource {
+    let videoURL: URL
+    let title: String
+
+    init(videoURL: URL, title: String) {
+        self.videoURL = videoURL
+        self.title = title
+    }
+
+    func activityViewControllerPlaceholderItem(
+        _ activityViewController: UIActivityViewController
+    ) -> Any {
+        videoURL
+    }
+
+    func activityViewController(
+        _ activityViewController: UIActivityViewController,
+        itemForActivityType activityType: UIActivity.ActivityType?
+    ) -> Any? {
+        // Return the finished file URL itself. UIKit brokers access to the
+        // extension; Instagram and TikTok can then import the movie as a
+        // normal file instead of interpreting a custom provider callback.
+        videoURL
+    }
+
+    func activityViewController(
+        _ activityViewController: UIActivityViewController,
+        subjectForActivityType activityType: UIActivity.ActivityType?
+    ) -> String {
+        title
+    }
+
+    func activityViewController(
+        _ activityViewController: UIActivityViewController,
+        dataTypeIdentifierForActivityType activityType: UIActivity.ActivityType?
+    ) -> String {
+        UTType.mpeg4Movie.identifier
     }
 }
 
@@ -33,16 +55,14 @@ private struct MP4ShareController: UIViewControllerRepresentable {
     let onComplete: () -> Void
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        let provider = MP4ShareProviderFactory.makeProvider(
-            for: payload.url,
-            suggestedName: "Memories-Reel.mp4"
+        let source = MP4ShareItemSource(
+            videoURL: payload.url,
+            title: payload.title
         )
-        let configuration = UIActivityItemsConfiguration(itemProviders: [provider])
-        configuration.perItemMetadataProvider = { _, key in
-            key == .title ? payload.title : nil
-        }
-
-        let controller = UIActivityViewController(activityItemsConfiguration: configuration)
+        let controller = UIActivityViewController(
+            activityItems: [source],
+            applicationActivities: nil
+        )
         controller.completionWithItemsHandler = { _, _, _, _ in
             DispatchQueue.main.async {
                 onComplete()

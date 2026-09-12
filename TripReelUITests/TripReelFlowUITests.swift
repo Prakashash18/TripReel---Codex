@@ -224,19 +224,11 @@ final class TripReelFlowUITests: XCTestCase {
         button(startingWith: "Allow & choose moments").tap()
 
         XCTAssertTrue(screen("ai-direction-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Edit moments & direction"].exists)
-        XCTAssertTrue(screen("ai-direction-expand").exists)
-        XCTAssertFalse(screen("ai-direction-dynamic").exists)
-        XCTAssertTrue(
-            app.staticTexts
-                .matching(NSPredicate(format: "label CONTAINS[c] %@", "small previews"))
-                .firstMatch
-                .exists
-        )
-        attachScreenshot(named: "AI photo and direction choices")
-
-        screen("ai-direction-expand").tap()
-        XCTAssertTrue(screen("ai-direction-dynamic").waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Choose the moments"].exists)
+        XCTAssertTrue(screen("ai-setup-step-moments").exists)
+        XCTAssertFalse(screen("ai-setup-step-story").exists)
+        XCTAssertFalse(screen("ai-setup-step-direction").exists)
+        attachScreenshot(named: "AI moments step")
 
         let photoPicker = button(startingWith: "Moments for AI")
         XCTAssertTrue(photoPicker.waitForExistence(timeout: 2))
@@ -251,6 +243,27 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(bulkSelection.exists)
         XCTAssertTrue(app.buttons["Clear"].exists)
         attachScreenshot(named: "AI exact photo selection")
+
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertFalse(screen("ai-photo-selection-sheet").waitForExistence(timeout: 2))
+        XCTAssertTrue(screen("ai-setup-step-moments").waitForExistence(timeout: 2))
+        XCTAssertTrue(button(startingWith: "Continue").waitForExistence(timeout: 2))
+        button(startingWith: "Continue").tap()
+        XCTAssertTrue(screen("ai-setup-step-story").waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Add the meaning"].exists)
+        XCTAssertFalse(screen("ai-setup-step-direction").exists)
+
+        XCTAssertTrue(button(startingWith: "Continue").waitForExistence(timeout: 2))
+        button(startingWith: "Continue").tap()
+        XCTAssertTrue(screen("ai-setup-step-direction").waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Choose a direction"].exists)
+        XCTAssertTrue(screen("ai-direction-dynamic").exists)
+        attachScreenshot(named: "AI direction step")
+
+        screen("app-back-button").tap()
+        XCTAssertTrue(screen("ai-setup-step-story").waitForExistence(timeout: 2))
+        screen("app-back-button").tap()
+        XCTAssertTrue(screen("ai-setup-step-moments").waitForExistence(timeout: 2))
     }
 
     func testAICutComparisonKeepsExportAndEditAsDistinctRoutes() {
