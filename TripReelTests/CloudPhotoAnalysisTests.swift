@@ -331,7 +331,7 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         {
           "model":"gpt-5.6-luna",
           "plan":{
-            "version":3,"direction":"people","summary":"Build around distinct people and give the strongest reaction room to land.",
+            "version":4,"direction":"people","summary":"Build around distinct people and give the strongest reaction room to land.",
             "story":{"title":"The people made it","arc":"Open on connection, vary the group moments with details, and finish on a shared payoff."},
             "hook":{"title":"This was the moment","subtitle":"","style":"bold","durationSeconds":2.2},
             "ending":{"enabled":true,"title":"One for the memory","subtitle":"","style":"clean","durationSeconds":2.0},
@@ -344,20 +344,21 @@ final class CloudPhotoAnalysisTests: XCTestCase {
             "diagnosis":{"verdict":"The First Cut needs a more human opening and a clearer finish.","issues":[{
               "kind":"weak_hook","title":"Lead with connection","detail":"The strongest visible people moment should establish the film.","evidencePhotoIds":["p0"]
             }]},
+            "preview":{"endPhotoId":"p0","reason":"This shared moment gives the short reel a complete ending."},
             "comparison":{"firstCutPhotoCount":1,"aiCutPhotoCount":1,"restoredCount":0,"removedCount":0,"reorderedCount":0,"retimedCount":1,"motionChangedCount":1,"titleChangedCount":2,"soundtrackChanged":true,"treatmentChanged":true,"score":44,"materiallyDifferent":true}
           },
           "retention":{"proxyStored":false,"openAIStore":false,"abuseMonitoring":"up_to_30_days_unless_zdr"}
         }
         """
         URLProtocolStub.handler = { request in
-            XCTAssertEqual(request.value(forHTTPHeaderField: "X-TripReel-Client"), "TripReel-iOS/3")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-TripReel-Client"), "TripReel-iOS/4")
             let body = try XCTUnwrap(request.httpBody)
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             let baseline = try XCTUnwrap(json["baseline"] as? [String: Any])
             let photos = try XCTUnwrap(json["photos"] as? [[String: Any]])
             let context = try XCTUnwrap(photos[0]["context"] as? [String: Any])
 
-            XCTAssertEqual(json["version"] as? Int, 3)
+            XCTAssertEqual(json["version"] as? Int, 4)
             XCTAssertEqual(Set(json.keys), ["version", "direction", "baseline", "photos"])
             XCTAssertEqual(baseline["photoCount"] as? Int, 1)
             XCTAssertEqual(baseline["soundtrackId"] as? String, "wanderlust")
@@ -433,10 +434,107 @@ final class CloudPhotoAnalysisTests: XCTestCase {
             )]
         )
 
-        XCTAssertEqual(result.version, 3)
+        XCTAssertEqual(result.version, 4)
         XCTAssertEqual(result.diagnosis?.issues.first?.kind, .weakHook)
         XCTAssertEqual(result.comparison?.score, 44)
         XCTAssertEqual(result.comparison?.materiallyDifferent, true)
+        XCTAssertEqual(result.preview?.endPhotoID, "p0")
+        XCTAssertEqual(result.preview?.reason, "This shared moment gives the short reel a complete ending.")
+    }
+
+    func testComparativeDirectorFallsBackToVersionThreeDuringWorkerRollout() async throws {
+        let legacyResponse = """
+        {
+          "model":"gpt-5.6-luna",
+          "plan":{
+            "version":3,"direction":"people","summary":"Keep the people-led sequence clear and warm.",
+            "story":{"title":"Together in the moment","arc":"Open on connection and finish on the shared reaction."},
+            "hook":{"title":"This was the moment","subtitle":"","style":"bold","durationSeconds":2.2},
+            "ending":{"enabled":false,"title":"","subtitle":"","style":"clean","durationSeconds":2.0},
+            "soundtrack":{"trackId":"simplicity","reason":"A warm acoustic pulse supports the sequence."},
+            "treatment":{"look":"journal","motionIntensity":"gentle","reason":"Restrained motion keeps the focus on people."},
+            "sequence":[{"photoId":"p0","order":0,"durationSeconds":2.6,"role":"people","emphasis":"highlight","motion":"settle"}],
+            "diagnosis":{"verdict":"The opening needs a clearer human focus.","issues":[{"kind":"weak_hook","title":"Lead with connection","detail":"The visible people moment should establish the edit.","evidencePhotoIds":["p0"]}]},
+            "comparison":{"firstCutPhotoCount":1,"aiCutPhotoCount":1,"restoredCount":0,"removedCount":0,"reorderedCount":0,"retimedCount":1,"motionChangedCount":1,"titleChangedCount":2,"soundtrackChanged":true,"treatmentChanged":true,"score":44,"materiallyDifferent":true}
+          },
+          "retention":{"proxyStored":false,"openAIStore":false,"abuseMonitoring":"up_to_30_days_unless_zdr"}
+        }
+        """
+        let requests = LockedRequestList()
+        URLProtocolStub.handler = { request in
+            requests.append(request)
+            let version = try XCTUnwrap(
+                (JSONSerialization.jsonObject(with: try XCTUnwrap(request.httpBody)) as? [String: Any])?["version"] as? Int
+            )
+            let statusCode = version == 4 ? 400 : 200
+            let data = version == 4
+                ? Data(#"{"error":{"code":"invalid_request","message":"Unsupported version"}}"#.utf8)
+                : Data(legacyResponse.utf8)
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: request.url!,
+                statusCode: statusCode,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            ))
+            return (response, data)
+        }
+        let baseline = CloudFirstCutInput(
+            photoCount: 1,
+            durationSeconds: 3.7,
+            omittedPhotoCount: 0,
+            sequence: [.init(
+                photoID: "p0",
+                order: 0,
+                durationSeconds: 1.5,
+                motion: .zoomIn,
+                frameStyle: .portraitMatte
+            )],
+            titles: [],
+            soundtrackID: "wanderlust",
+            look: .clean,
+            motionIntensity: .gentle
+        )
+        let context = CloudPhotoEditorialContext(
+            captureIndex: 0,
+            dayIndex: 0,
+            timeGap: .start,
+            orientation: .portrait,
+            contentKind: .people,
+            peopleCount: 3,
+            memory: .high,
+            aesthetic: .medium,
+            similarityGroup: "",
+            sceneLabels: ["People"],
+            mediaKind: .photo,
+            clipDurationSeconds: 0,
+            hasOriginalAudio: false,
+            videoMotion: .still
+        )
+        let client = CloudPhotoAnalysisClient(
+            endpoint: URL(string: "https://analysis.example.test/v1/analyze"),
+            session: makeSession(),
+            authorizer: TestCloudAuthorizer()
+        )
+
+        let result = try await client.createEditPlan(
+            direction: .people,
+            baseline: baseline,
+            photos: [.init(
+                id: "p0",
+                jpegData: Data([0xFF, 0xD8, 0xFF]),
+                localSelection: .firstCut,
+                context: context
+            )]
+        )
+
+        XCTAssertEqual(result.version, 3)
+        XCTAssertNil(result.preview)
+        XCTAssertEqual(
+            requests.values().compactMap {
+                $0.value(forHTTPHeaderField: "X-TripReel-Client")
+            },
+            ["TripReel-iOS/4", "TripReel-iOS/3"]
+        )
     }
 
     func testClientRetriesOnceWithTheSameBodyAfterRecoverableAuthenticationFailure() async throws {

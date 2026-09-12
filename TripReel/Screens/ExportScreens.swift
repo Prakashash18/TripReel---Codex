@@ -1,14 +1,116 @@
-import CoreTransferable
 import RevenueCat
+import AVKit
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
-struct TripReelMovieFile: Transferable, Sendable {
+struct MP4SharePayload: Identifiable {
+    let id = UUID()
+    let url: URL
+    let title: String
+}
+
+enum MP4ShareProviderFactory {
+    static func makeProvider(for videoURL: URL, suggestedName: String) -> NSItemProvider {
+        let provider = NSItemProvider()
+        provider.suggestedName = suggestedName.hasSuffix(".mp4")
+            ? suggestedName
+            : "\(suggestedName).mp4"
+        provider.registerFileRepresentation(
+            for: .mpeg4Movie,
+            visibility: .all,
+            openInPlace: false
+        ) { completion in
+            completion(videoURL, false, nil)
+            return nil
+        }
+        return provider
+    }
+}
+
+private struct MP4ShareController: UIViewControllerRepresentable {
+    let payload: MP4SharePayload
+    let onComplete: () -> Void
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let provider = MP4ShareProviderFactory.makeProvider(
+            for: payload.url,
+            suggestedName: "Memories-Reel.mp4"
+        )
+        let configuration = UIActivityItemsConfiguration(itemProviders: [provider])
+        configuration.perItemMetadataProvider = { _, key in
+            key == .title ? payload.title : nil
+        }
+
+        let controller = UIActivityViewController(activityItemsConfiguration: configuration)
+        controller.completionWithItemsHandler = { _, _, _, _ in
+            DispatchQueue.main.async {
+                onComplete()
+            }
+        }
+        return controller
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+private struct RenderedFilmPreview: View {
     let url: URL
 
-    static var transferRepresentation: some TransferRepresentation {
-        FileRepresentation(exportedContentType: .mpeg4Movie) { movie in
-            SentTransferredFile(movie.url)
+    @State private var player = AVPlayer()
+    @State private var didFinish = false
+
+    var body: some View {
+        VideoPlayer(player: player)
+            .background(Color.black)
+            .overlay {
+                if didFinish {
+                    Button {
+                        replay()
+                    } label: {
+                        Label("Replay", systemImage: "arrow.counterclockwise")
+                            .font(TR.ui(13, weight: .semibold))
+                            .foregroundStyle(TR.cream)
+                            .padding(.horizontal, 17)
+                            .frame(height: 44)
+                            .background(.black.opacity(0.74))
+                            .overlay(Capsule().stroke(.white.opacity(0.24), lineWidth: 1))
+                            .clipShape(Capsule())
+                            .shadow(color: .black.opacity(0.48), radius: 12, y: 6)
+                    }
+                    .buttonStyle(TactileButtonStyle(pressedScale: 0.94))
+                    .accessibilityHint("Plays the exported video again from the beginning")
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
+            }
+            .task(id: url) {
+                let item = AVPlayerItem(url: url)
+                player.replaceCurrentItem(with: item)
+                player.actionAtItemEnd = .pause
+                didFinish = false
+                player.play()
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(
+                    for: AVPlayerItem.didPlayToEndTimeNotification
+                )
+            ) { notification in
+                guard notification.object as AnyObject? === player.currentItem else { return }
+                didFinish = true
+            }
+            .onDisappear {
+                player.pause()
+            }
+            .animation(.easeInOut(duration: 0.22), value: didFinish)
+    }
+
+    private func replay() {
+        didFinish = false
+        player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { finished in
+            guard finished else { return }
+            DispatchQueue.main.async {
+                player.play()
+            }
         }
     }
 }
@@ -39,8 +141,10 @@ struct ExportScreen: View {
                     ExportOptionCard(
                         source: model.previewSource(at: 0),
                         title: "Free Reel",
-                        subtitle: "9:16 · 720p · up to 0:30",
-                        badge: "FREE · WATERMARKED",
+                        subtitle: model.freeExportIsFullLength
+                            ? "9:16 · 720p · \(model.freeExportDurationText) complete"
+                            : "9:16 · 720p · \(model.freeExportDurationText) story cut",
+                        badge: model.freeExportEndingBadge,
                         badgeColor: TR.keep,
                         watermark: true,
                         accessibilityID: "export-standard"
@@ -49,13 +153,16 @@ struct ExportScreen: View {
                     }
 
                     ExportOptionCard(
-                        source: model.previewSource(at: 2),
+                        source: model.fullStoryHighlightPhotos.first?.source
+                            ?? model.previewSource(at: 2),
                         title: "Full Story",
-                        subtitle: "9:16 · 1080p · full length",
+                        subtitle: "9:16 · 1080p · \(model.filmDurationText) complete",
                         badge: "MEMORIES PRO · NO WATERMARK",
                         badgeColor: TR.accent,
                         highlighted: true,
                         showsChevron: true,
+                        highlightPhotos: model.fullStoryHighlightPhotos,
+                        highlightText: fullStoryTeaserText,
                         accessibilityID: "export-hd"
                     ) {
                         model.requestExport(.highDefinition, isPremium: purchases.isPremium)
@@ -90,6 +197,17 @@ struct ExportScreen: View {
             Text(model.exportErrorMessage ?? "Please try again.")
         }
     }
+
+    private var fullStoryTeaserText: String {
+        let count = model.fullStoryExclusiveMomentCount
+        if count > 0 {
+            return "\(count) more moment\(count == 1 ? "" : "s") · +\(model.fullStoryExtraDurationText)"
+        }
+        if model.fullStoryExtraDurationSeconds > 0.01 {
+            return "Full pacing restored · +\(model.fullStoryExtraDurationText)"
+        }
+        return "Every moment in 1080p, without the watermark"
+    }
 }
 
 private struct ExportOptionCard: View {
@@ -101,42 +219,58 @@ private struct ExportOptionCard: View {
     var watermark = false
     var highlighted = false
     var showsChevron = false
+    var highlightPhotos: [ReelPhoto] = []
+    var highlightText: String? = nil
     var accessibilityID: String? = nil
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 14) {
-                ZStack(alignment: .topTrailing) {
-                    PhotoAssetView(source: source)
-                    if watermark {
-                        Text(TR.appName)
-                            .font(TR.ui(6, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .padding(4)
-                            .background(.black.opacity(0.45))
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                            .padding(5)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 14) {
+                    ZStack(alignment: .topTrailing) {
+                        PhotoAssetView(source: source)
+                        if watermark {
+                            Text(TR.appName)
+                                .font(TR.ui(6, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .padding(4)
+                                .background(.black.opacity(0.45))
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                                .padding(5)
+                        }
+                    }
+                    .frame(width: 74, height: 96)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(title)
+                            .font(TR.ui(18, weight: .semibold))
+                        Text(subtitle)
+                            .font(TR.ui(13))
+                            .foregroundStyle(.white.opacity(0.63))
+                        MetadataText(text: badge, color: badgeColor)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.76)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer()
+
+                    if showsChevron {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(TR.accent.opacity(0.72))
                     }
                 }
-                .frame(width: 74, height: 96)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(title)
-                        .font(TR.ui(18, weight: .semibold))
-                    Text(subtitle)
-                        .font(TR.ui(13))
-                        .foregroundStyle(.white.opacity(0.63))
-                    MetadataText(text: badge, color: badgeColor)
-                }
-
-                Spacer()
-
-                if showsChevron {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(TR.accent.opacity(0.72))
+                if let highlightText, !highlightPhotos.isEmpty {
+                    Divider()
+                        .overlay(.white.opacity(0.10))
+                    FullStoryHighlightStrip(
+                        photos: highlightPhotos,
+                        text: highlightText
+                    )
                 }
             }
             .foregroundStyle(TR.cream)
@@ -145,6 +279,50 @@ private struct ExportOptionCard: View {
         }
         .buttonStyle(TactileButtonStyle())
         .accessibilityIdentifier(accessibilityID ?? "")
+    }
+}
+
+private struct FullStoryHighlightStrip: View {
+    let photos: [ReelPhoto]
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 11) {
+            HStack(spacing: 4) {
+                ForEach(Array(photos.prefix(3))) { photo in
+                    ZStack(alignment: .bottomTrailing) {
+                        PhotoAssetView(source: photo.source)
+                            .frame(width: 34, height: 44)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        if photo.isVideo {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 6, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(4)
+                                .background(.black.opacity(0.74), in: Circle())
+                                .padding(3)
+                        }
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                MetadataText(text: "Only in Full Story", color: TR.accent)
+                Text(text)
+                    .font(TR.ui(12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 0)
+
+            Image(systemName: "lock.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(TR.accent)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Only in Full Story. \(text)")
+        .accessibilityIdentifier("full-story-highlight")
     }
 }
 
@@ -380,10 +558,6 @@ struct PaywallScreen: View {
     @State private var showsPrivacyPolicy = false
     @State private var didResumeExport = false
 
-    private var requirement: ExportPremiumRequirement {
-        model.pendingExportPremiumRequirement
-    }
-
     private var selectedPackage: Package? {
         purchases.packages.first { $0.identifier == selectedPackageID }
             ?? purchases.packages.first
@@ -425,15 +599,26 @@ struct PaywallScreen: View {
                             metricPill(symbol: "clock", text: model.filmDurationText)
                         }
 
-                        Text(requirement.reasonText)
+                        Text(paywallSummary)
                             .font(TR.ui(14, weight: .medium))
                             .foregroundStyle(.white.opacity(0.76))
                             .lineSpacing(4)
+                            .accessibilityIdentifier("paywall-free-summary")
+                    }
 
-                        Text("Or export a free \(durationText(requirement.freeDurationLimit)) cut below. Memories keeps moments from across your story—not just the beginning.")
-                            .font(TR.ui(12))
-                            .foregroundStyle(.white.opacity(0.54))
-                            .lineSpacing(3)
+                    if !model.fullStoryHighlightPhotos.isEmpty,
+                       model.fullStoryExtraDurationSeconds > 0.01 {
+                        FullStoryHighlightStrip(
+                            photos: model.fullStoryHighlightPhotos,
+                            text: fullStoryTeaserText
+                        )
+                        .padding(14)
+                        .background(.white.opacity(0.08))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 17, style: .continuous)
+                                .stroke(TR.accent.opacity(0.28), lineWidth: 1)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
                     }
 
                     HStack(spacing: 12) {
@@ -505,7 +690,7 @@ struct PaywallScreen: View {
                     } label: {
                         VStack(spacing: 3) {
                             Text("Export free version")
-                            Text("Up to 0:30 · 720p · watermark")
+                            Text("\(model.freeExportDurationText) · complete story beat · 720p · watermark")
                                 .font(TR.ui(11, weight: .medium))
                                 .foregroundStyle(.white.opacity(0.58))
                         }
@@ -630,7 +815,7 @@ struct PaywallScreen: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Purchases aren't available yet", systemImage: "cart.badge.questionmark")
                 .font(TR.ui(14, weight: .semibold))
-            Text("You can still export the free 30-second version below.")
+            Text("You can still export the free \(model.freeExportDurationText) version below.")
                 .font(TR.ui(12))
                 .foregroundStyle(.white.opacity(0.58))
                 .lineSpacing(3)
@@ -639,6 +824,18 @@ struct PaywallScreen: View {
         .background(.white.opacity(0.07))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.13), lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var paywallSummary: String {
+        model.freeExportEndingSummary
+    }
+
+    private var fullStoryTeaserText: String {
+        let count = model.fullStoryExclusiveMomentCount
+        if count > 0 {
+            return "\(count) more moment\(count == 1 ? "" : "s") · +\(model.fullStoryExtraDurationText)"
+        }
+        return "Full pacing restored · +\(model.fullStoryExtraDurationText)"
     }
 
     private func selectDefaultPackageIfNeeded() {
@@ -672,10 +869,6 @@ struct PaywallScreen: View {
         model.resumePendingExportAfterPurchase()
     }
 
-    private func durationText(_ seconds: Double) -> String {
-        let rounded = max(0, Int(seconds.rounded()))
-        return String(format: "%d:%02d", rounded / 60, rounded % 60)
-    }
 }
 
 struct RenderingScreen: View {
@@ -785,6 +978,7 @@ struct RenderingScreen: View {
 struct FilmReadyScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @State private var readyFeedback = false
+    @State private var sharePayload: MP4SharePayload?
 
     var body: some View {
         ZStack {
@@ -797,6 +991,12 @@ struct FilmReadyScreen: View {
         }
         .onAppear { readyFeedback.toggle() }
         .sensoryFeedback(.success, trigger: readyFeedback)
+        .sheet(item: $sharePayload) { payload in
+            MP4ShareController(payload: payload) {
+                sharePayload = nil
+            }
+            .ignoresSafeArea()
+        }
         .alert(
             "Couldn't save the film",
             isPresented: Binding(
@@ -820,16 +1020,24 @@ struct FilmReadyScreen: View {
                 .padding(.bottom, compact ? 10 : 20)
                 .trEntrance(0, distance: 6)
 
-            MontageView(
-                photos: model.activeExportPhotos,
-                titleCards: model.activeExportTitleCards,
-                textOverlays: model.activeExportTextOverlays,
-                watermark: model.exportQuality.includesWatermark,
-                showLabels: false,
-                look: model.montageLook,
-                motionIntensity: model.montageMotionIntensity,
-                secondsPerSlide: model.secondsPerPhoto
-            )
+            Group {
+                if let url = model.exportedVideoURL {
+                    RenderedFilmPreview(url: url)
+                } else {
+                    MontageView(
+                        photos: model.activeExportPhotos,
+                        titleCards: model.activeExportTitleCards,
+                        textOverlays: model.activeExportTextOverlays,
+                        watermark: model.exportQuality.includesWatermark,
+                        showLabels: false,
+                        look: model.montageLook,
+                        motionIntensity: model.montageMotionIntensity,
+                        secondsPerSlide: model.secondsPerPhoto,
+                        playbackBehavior: .playOnce,
+                        showsReplayControl: true
+                    )
+                }
+            }
                 .frame(width: previewWidth, height: previewWidth * 14 / 9)
                 .clipShape(RoundedRectangle(cornerRadius: compact ? 18 : 22, style: .continuous))
                 .shadow(color: .black.opacity(0.58), radius: 30, y: 22)
@@ -845,10 +1053,12 @@ struct FilmReadyScreen: View {
 
             VStack(spacing: compact ? 8 : 11) {
                 if let url = model.exportedVideoURL {
-                    ShareLink(
-                        item: TripReelMovieFile(url: url),
-                        preview: SharePreview("\(model.tripShortPlace) · Memories reel")
-                    ) {
+                    Button {
+                        sharePayload = MP4SharePayload(
+                            url: url,
+                            title: "\(model.tripShortPlace) · Memories reel"
+                        )
+                    } label: {
                         Label("Share Reel", systemImage: "square.and.arrow.up")
                             .frame(maxWidth: .infinity)
                     }
@@ -861,7 +1071,7 @@ struct FilmReadyScreen: View {
                         .accessibilityIdentifier("share-film")
                 }
 
-                Text("Choose Instagram, TikTok, Messages or another app.")
+                Text("Instagram or TikTok not shown? Save Video, then upload it from the app.")
                     .font(TR.ui(11))
                     .foregroundStyle(.white.opacity(0.52))
                     .multilineTextAlignment(.center)

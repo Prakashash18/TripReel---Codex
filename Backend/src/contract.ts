@@ -22,7 +22,7 @@ export const LIMITS = Object.freeze({
   maxOpenAIResponseBytes: 128 * 1024,
 });
 
-export const REQUEST_VERSIONS = [1, 2, 3] as const;
+export const REQUEST_VERSIONS = [1, 2, 3, 4] as const;
 export type RequestVersion = (typeof REQUEST_VERSIONS)[number];
 
 export const AI_DIRECTIONS = [
@@ -232,9 +232,19 @@ export interface AIEditDiagnosis {
   issues: AIEditDiagnosisIssue[];
 }
 
+export interface AIEditPreview {
+  endPhotoId: string;
+  reason: string;
+}
+
 export interface AIEditPlanV3 extends Omit<AIEditPlanV2, "version"> {
   version: 3;
   diagnosis: AIEditDiagnosis;
+}
+
+export interface AIEditPlanV4 extends Omit<AIEditPlanV3, "version"> {
+  version: 4;
+  preview: AIEditPreview;
 }
 
 export interface AIEditComparison {
@@ -252,11 +262,13 @@ export interface AIEditComparison {
   materiallyDifferent: boolean;
 }
 
-export type PublicAIEditPlan = AIEditPlanV1 | AIEditPlanV2 | (AIEditPlanV3 & {
+export type ComparativeAIEditPlan = AIEditPlanV3 | AIEditPlanV4;
+
+export type PublicAIEditPlan = AIEditPlanV1 | AIEditPlanV2 | (ComparativeAIEditPlan & {
   comparison: AIEditComparison;
 });
 
-export type AIEditPlan = AIEditPlanV1 | AIEditPlanV2 | AIEditPlanV3;
+export type AIEditPlan = AIEditPlanV1 | AIEditPlanV2 | ComparativeAIEditPlan;
 
 export interface ValidatedPayload {
   version: RequestVersion;
@@ -295,6 +307,7 @@ const PLAN_V2_KEYS = [
   "sequence",
 ] as const;
 const PLAN_V3_KEYS = [...PLAN_V2_KEYS, "diagnosis"] as const;
+const PLAN_V4_KEYS = [...PLAN_V3_KEYS, "preview"] as const;
 const ITEM_KEYS = ["photoId", "order", "durationSeconds", "role", "emphasis", "motion"] as const;
 const STORY_KEYS = ["title", "arc"] as const;
 const TITLE_CARD_KEYS = ["title", "subtitle", "style", "durationSeconds"] as const;
@@ -303,6 +316,7 @@ const SOUNDTRACK_KEYS = ["trackId", "reason"] as const;
 const TREATMENT_KEYS = ["look", "motionIntensity", "reason"] as const;
 const DIAGNOSIS_KEYS = ["verdict", "issues"] as const;
 const DIAGNOSIS_ISSUE_KEYS = ["kind", "title", "detail", "evidencePhotoIds"] as const;
+const PREVIEW_KEYS = ["endPhotoId", "reason"] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -408,7 +422,9 @@ export function parseAIEditPlan(
     return { version: 1, direction, summary, sequence };
   }
 
-  const expectedPlanKeys = requestVersion === 3 ? PLAN_V3_KEYS : PLAN_V2_KEYS;
+  const expectedPlanKeys = requestVersion === 4
+    ? PLAN_V4_KEYS
+    : requestVersion === 3 ? PLAN_V3_KEYS : PLAN_V2_KEYS;
   if (
     !hasExactKeys(value, expectedPlanKeys) ||
     !isRecord(value.story) || !hasExactKeys(value.story, STORY_KEYS) ||
@@ -518,10 +534,34 @@ export function parseAIEditPlan(
       evidencePhotoIds: [...new Set(issue.evidencePhotoIds as string[])],
     });
   }
-  return {
+  const comparativePlan = {
     ...(directorPlan as Omit<AIEditPlanV3, "diagnosis">),
-    version: 3,
+    version: requestVersion,
     diagnosis: { verdict, issues },
+  };
+  if (requestVersion === 3) {
+    return comparativePlan as AIEditPlanV3;
+  }
+
+  const previewValue = value.preview;
+  if (!isRecord(previewValue) || !hasExactKeys(previewValue, PREVIEW_KEYS)) {
+    return null;
+  }
+  const previewReason = cleanText(previewValue.reason, 1, LIMITS.maxReasonCharacters);
+  if (
+    previewReason === null ||
+    typeof previewValue.endPhotoId !== "string" ||
+    !sequence.some((item) => item.photoId === previewValue.endPhotoId)
+  ) {
+    return null;
+  }
+  return {
+    ...(comparativePlan as Omit<AIEditPlanV4, "preview">),
+    version: 4,
+    preview: {
+      endPhotoId: previewValue.endPhotoId,
+      reason: previewReason,
+    },
   };
 }
 
@@ -621,7 +661,7 @@ export function buildAIEditPlanSchema(
     },
     sequence: sequenceSchema(expectedIds, direction),
   };
-  if (requestVersion === 3) {
+  if (requestVersion >= 3) {
     properties.diagnosis = {
       type: "object",
       additionalProperties: false,
@@ -652,12 +692,25 @@ export function buildAIEditPlanSchema(
       required: [...DIAGNOSIS_KEYS],
     };
   }
+  if (requestVersion === 4) {
+    properties.preview = {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        endPhotoId: { type: "string", enum: [...expectedIds] },
+        reason: { type: "string", minLength: 1, maxLength: LIMITS.maxReasonCharacters },
+      },
+      required: [...PREVIEW_KEYS],
+    };
+  }
 
   return {
     type: "object",
     additionalProperties: false,
     properties,
-    required: requestVersion === 3 ? [...PLAN_V3_KEYS] : [...PLAN_V2_KEYS],
+    required: requestVersion === 4
+      ? [...PLAN_V4_KEYS]
+      : requestVersion === 3 ? [...PLAN_V3_KEYS] : [...PLAN_V2_KEYS],
   };
 }
 

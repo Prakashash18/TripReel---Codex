@@ -144,6 +144,11 @@ struct PhotoAssetView: View {
     }
 }
 
+enum MontagePlaybackBehavior: Hashable {
+    case loop
+    case playOnce
+}
+
 struct MontageView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var photos: [ReelPhoto] = []
@@ -156,10 +161,16 @@ struct MontageView: View {
     var look: MontageLook = .story
     var motionIntensity: MontageMotionIntensity = .gentle
     var secondsPerSlide = 2.2
+    var playbackBehavior: MontagePlaybackBehavior = .loop
+    var showsReplayControl = false
+    var onPlaybackStarted: (() -> Void)?
+    var onPlaybackEnded: (() -> Void)?
     @State private var currentIndex = 0
     @State private var motionPhase = false
     @State private var currentPhotoLoadState: PhotoAssetLoadState = .loading(progress: nil)
     @State private var lastReadySlide: MontageSlide?
+    @State private var playbackGeneration = 0
+    @State private var playbackComplete = false
 
     private var timeline: [MontageTimelineItem] {
         if !photos.isEmpty {
@@ -231,6 +242,14 @@ struct MontageView: View {
         )
     }
 
+    private var playbackKey: MontagePlaybackKey {
+        MontagePlaybackKey(
+            content: contentKey,
+            behavior: playbackBehavior,
+            generation: playbackGeneration
+        )
+    }
+
     private var currentMotionKey: MontageMotionPlaybackKey {
         MontageMotionPlaybackKey(
             itemID: currentItem?.id,
@@ -238,7 +257,8 @@ struct MontageView: View {
             intensity: motionIntensity,
             frameStyle: currentSlide?.frameStyle,
             motionStyle: currentSlide?.motionStyle,
-            reduceMotion: motionReduced
+            reduceMotion: motionReduced,
+            generation: playbackGeneration
         )
     }
 
@@ -295,7 +315,7 @@ struct MontageView: View {
                             .padding(.bottom, 18)
                     }
                 }
-                .id("\(slide.id)-\(slide.frameStyle.rawValue)")
+                .id("\(slide.id)-\(slide.frameStyle.rawValue)-\(playbackGeneration)")
                 .transition(motionReduced ? .opacity : slide.motionStyle.transition)
             } else {
                 ZStack {
@@ -356,9 +376,31 @@ struct MontageView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 .padding(16)
             }
+
+            if showsReplayControl,
+               playbackBehavior == .playOnce,
+               playbackComplete {
+                Button {
+                    playbackComplete = false
+                    playbackGeneration &+= 1
+                } label: {
+                    Label("Replay", systemImage: "arrow.counterclockwise")
+                        .font(TR.ui(13, weight: .semibold))
+                        .foregroundStyle(TR.cream)
+                        .padding(.horizontal, 17)
+                        .frame(height: 44)
+                        .background(.black.opacity(0.72))
+                        .overlay(Capsule().stroke(.white.opacity(0.24), lineWidth: 1))
+                        .clipShape(Capsule())
+                        .shadow(color: .black.opacity(0.48), radius: 12, y: 6)
+                }
+                .buttonStyle(TactileButtonStyle(pressedScale: 0.94))
+                .accessibilityHint("Plays this preview again from the beginning")
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
         }
         .background(Color(red: 0.051, green: 0.035, blue: 0.024))
-        .accessibilityHidden(true)
+        .accessibilityHidden(!showsReplayControl)
         .animation(
             motionReduced ? .easeInOut(duration: 0.18) : .easeInOut(duration: 0.46),
             value: currentIndex
@@ -374,27 +416,40 @@ struct MontageView: View {
                 motionPhase = true
             }
         }
-        .task(id: contentKey) {
+        .task(id: playbackKey) {
+            playbackComplete = false
             currentIndex = 0
             lastReadySlide = nil
             prepareLoadStateForCurrentItem()
             guard !timeline.isEmpty else { return }
+            var hasStarted = false
             while !Task.isCancelled {
                 let itemID = currentItem?.id
                 if case .photo = currentItem,
                    !(await waitForCurrentPhoto(itemID: itemID)) {
                     guard !Task.isCancelled else { return }
                     try? await Task.sleep(nanoseconds: 140_000_000)
-                    advanceToNextItem()
+                    guard advanceToNextItem() else {
+                        finishPlayback()
+                        return
+                    }
                     continue
+                }
+                if !hasStarted {
+                    hasStarted = true
+                    onPlaybackStarted?()
                 }
                 let duration = currentItem?.duration(defaultPhotoDuration: secondsPerSlide) ?? secondsPerSlide
                 let delay = UInt64(max(0.6, duration) * 1_000_000_000)
                 try? await Task.sleep(nanoseconds: delay)
                 guard !Task.isCancelled else { return }
-                advanceToNextItem()
+                guard advanceToNextItem() else {
+                    finishPlayback()
+                    return
+                }
             }
         }
+        .animation(.easeInOut(duration: 0.22), value: playbackComplete)
     }
 
     private func preheatUpcomingPhotos() {
@@ -419,8 +474,12 @@ struct MontageView: View {
         }
     }
 
-    private func advanceToNextItem() {
-        guard !timeline.isEmpty else { return }
+    @discardableResult
+    private func advanceToNextItem() -> Bool {
+        guard !timeline.isEmpty else { return false }
+        if playbackBehavior == .playOnce, currentIndex >= timeline.count - 1 {
+            return false
+        }
         let nextIndex = (currentIndex + 1) % timeline.count
         if case let .photo(photo) = timeline[nextIndex], case .bundled = photo.source {
             currentPhotoLoadState = .ready
@@ -430,6 +489,13 @@ struct MontageView: View {
             currentPhotoLoadState = .ready
         }
         currentIndex = nextIndex
+        return true
+    }
+
+    private func finishPlayback() {
+        guard !playbackComplete else { return }
+        playbackComplete = true
+        onPlaybackEnded?()
     }
 
     private func handleLoadState(_ state: PhotoAssetLoadState, for slide: MontageSlide) {
@@ -999,6 +1065,12 @@ private struct MontageContentKey: Hashable {
     let itemDurationsMilliseconds: [Int]
 }
 
+private struct MontagePlaybackKey: Hashable {
+    let content: MontageContentKey
+    let behavior: MontagePlaybackBehavior
+    let generation: Int
+}
+
 private struct MontageMotionPlaybackKey: Hashable {
     let itemID: String?
     let look: MontageLook
@@ -1006,6 +1078,7 @@ private struct MontageMotionPlaybackKey: Hashable {
     let frameStyle: MontageFrameStyle?
     let motionStyle: MontageMotionStyle?
     let reduceMotion: Bool
+    let generation: Int
 }
 
 private struct VideoAssetClipView: View {
@@ -2000,6 +2073,9 @@ struct CircleIconButton: View {
 
 struct PlaybackProgressBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var duration: Double = 13.2
+    var playbackRun = 0
+    var isComplete = false
     @State private var progress: CGFloat = 0
 
     var body: some View {
@@ -2017,19 +2093,30 @@ struct PlaybackProgressBar: View {
             }
         }
         .frame(height: 2)
-        .task(id: reduceMotion) {
+        .task(id: PlaybackProgressKey(reduceMotion: reduceMotion, playbackRun: playbackRun)) {
             if reduceMotion {
-                progress = 0.35
+                progress = isComplete ? 1 : 0
             } else {
                 progress = 0
                 await Task.yield()
                 guard !Task.isCancelled else { return }
-                withAnimation(.linear(duration: 13.2).repeatForever(autoreverses: false)) {
+                withAnimation(.linear(duration: max(0.6, duration))) {
                     progress = 1
                 }
             }
         }
+        .onChange(of: isComplete) { _, complete in
+            guard complete else { return }
+            withAnimation(.easeOut(duration: reduceMotion ? 0 : 0.16)) {
+                progress = 1
+            }
+        }
     }
+}
+
+private struct PlaybackProgressKey: Hashable {
+    let reduceMotion: Bool
+    let playbackRun: Int
 }
 
 /// Plays bundled, attributed CC BY 4.0 music without a network connection.
@@ -2040,14 +2127,17 @@ final class LocalSoundtrackPlayer: ObservableObject {
 
     private var player: AVAudioPlayer?
     private var activeTrackID: String?
+    private var finishTask: Task<Void, Never>?
 
-    func play(track: MusicTrack?, volume: Float = 0.82) {
+    func play(track: MusicTrack?, volume: Float = 0.82, restart: Bool = false) {
         guard let track, let resourceName = track.resourceName else {
             stop()
             return
         }
+        finishTask?.cancel()
+        finishTask = nil
         let safeVolume = min(1, max(0, volume))
-        if activeTrackID == track.id, isPlaying {
+        if activeTrackID == track.id, isPlaying, !restart {
             player?.volume = safeVolume
             return
         }
@@ -2079,6 +2169,25 @@ final class LocalSoundtrackPlayer: ObservableObject {
         }
     }
 
+    func finishNaturally(fadeDuration: TimeInterval = 0.9) {
+        guard let player, player.isPlaying else {
+            stop()
+            return
+        }
+        finishTask?.cancel()
+        let duration = max(0.15, fadeDuration)
+        player.setVolume(0, fadeDuration: duration)
+        finishTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            self?.stop()
+        }
+    }
+
     func toggle(track: MusicTrack?, volume: Float = 0.82) {
         if let player, isPlaying {
             player.pause()
@@ -2097,6 +2206,8 @@ final class LocalSoundtrackPlayer: ObservableObject {
     }
 
     private func stop(deactivateSession: Bool) {
+        finishTask?.cancel()
+        finishTask = nil
         player?.stop()
         player = nil
         isPlaying = false

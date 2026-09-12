@@ -4,6 +4,8 @@ import SwiftUI
 struct FirstWatchScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @StateObject private var soundtrack = LocalSoundtrackPlayer()
+    @State private var playbackRun = 0
+    @State private var playbackComplete = false
 
     private var firstCut: TripEditSnapshot? {
         model.firstCutSnapshot
@@ -26,6 +28,10 @@ struct FirstWatchScreen: View {
         (firstCut?.keptPhotos ?? model.keptPhotos).contains(where: \.isVideo) ? 0.42 : 0.82
     }
 
+    private var firstCutDurationSeconds: Double {
+        firstCut?.durationSeconds ?? model.filmDurationSeconds
+    }
+
     var body: some View {
         ZStack {
             MontageView(
@@ -34,7 +40,22 @@ struct FirstWatchScreen: View {
                 textOverlays: firstCut?.textOverlays ?? model.textOverlays,
                 look: firstCut?.montageLook ?? model.montageLook,
                 motionIntensity: firstCut?.motionIntensity ?? model.montageMotionIntensity,
-                secondsPerSlide: firstCut.map { 1.85 - ($0.pace * 1.25) } ?? model.secondsPerPhoto
+                secondsPerSlide: firstCut.map { 1.85 - ($0.pace * 1.25) } ?? model.secondsPerPhoto,
+                playbackBehavior: .playOnce,
+                showsReplayControl: true,
+                onPlaybackStarted: {
+                    playbackComplete = false
+                    playbackRun &+= 1
+                    soundtrack.play(
+                        track: firstCutTrack,
+                        volume: soundtrackVolume,
+                        restart: true
+                    )
+                },
+                onPlaybackEnded: {
+                    playbackComplete = true
+                    soundtrack.finishNaturally()
+                }
             )
                 .ignoresSafeArea()
 
@@ -44,6 +65,7 @@ struct FirstWatchScreen: View {
                 endPoint: .bottom
             )
             .ignoresSafeArea()
+            .allowsHitTesting(false)
 
             VStack(spacing: 0) {
                 VStack(spacing: 7) {
@@ -61,7 +83,11 @@ struct FirstWatchScreen: View {
 
                 VStack(alignment: .leading, spacing: 15) {
                     VStack(spacing: 12) {
-                        PlaybackProgressBar()
+                        PlaybackProgressBar(
+                            duration: firstCutDurationSeconds,
+                            playbackRun: playbackRun,
+                            isComplete: playbackComplete
+                        )
                         HStack {
                             MetadataText(
                                 text: firstCutMediaSummary,
@@ -108,9 +134,6 @@ struct FirstWatchScreen: View {
             .accessibilityLabel(soundtrack.isPlaying ? "Pause soundtrack" : "Play soundtrack")
             .accessibilityHint(firstCutTrack.map { "Soundtrack: \($0.name)" } ?? "No soundtrack selected")
             .accessibilityIdentifier("first-watch-audio")
-        }
-        .task(id: firstCutTrack?.id) {
-            soundtrack.play(track: firstCutTrack, volume: soundtrackVolume)
         }
         .onDisappear {
             soundtrack.stop()
@@ -435,7 +458,7 @@ private struct AICutPhotoSelectionCard: View {
                     Text(selectionSummary)
                         .font(TR.ui(11))
                         .foregroundStyle(.white.opacity(0.56))
-                    Text("Photos or sampled video frames only")
+                    Text("Ranked on device for quality & relevance")
                         .font(TR.ui(10, weight: .medium))
                         .foregroundStyle(TR.keep.opacity(0.82))
                 }
@@ -469,36 +492,9 @@ private struct AICutPhotoSelectionCard: View {
 }
 
 private struct AICutPhotoSelectionSheet: View {
-    private enum PrivacyReviewPrompt: Identifiable {
-        case moment(String)
-        case all(Int)
-
-        var id: String {
-            switch self {
-            case let .moment(photoID): "moment-\(photoID)"
-            case .all: "all"
-            }
-        }
-
-        var title: String {
-            switch self {
-            case .moment: "Share this moment?"
-            case let .all(count): "Include \(count) text-heavy moment\(count == 1 ? "" : "s")?"
-            }
-        }
-
-        var actionTitle: String {
-            switch self {
-            case .moment: "Share preview"
-            case .all: "Include & select all"
-            }
-        }
-    }
-
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var privacyReviewPrompt: PrivacyReviewPrompt?
 
     private let columns = Array(
         repeating: GridItem(.flexible(), spacing: 8),
@@ -524,16 +520,12 @@ private struct AICutPhotoSelectionSheet: View {
                         .foregroundStyle(selectionIsFull ? TR.accent : .white.opacity(0.64))
 
                     HStack(spacing: 8) {
-                        selectionAction("Suggested", identifier: "ai-photos-suggested") {
+                        selectionAction("Best moments", identifier: "ai-photos-suggested") {
                             model.selectSuggestedAICutPhotos()
                         }
 
-                        selectionAction("Select all", identifier: "ai-photos-select-all") {
-                            if model.aiCutPrivacyReviewPhotoCount > 0 {
-                                privacyReviewPrompt = .all(model.aiCutPrivacyReviewPhotoCount)
-                            } else {
-                                model.selectAllAICutPhotos(approvingPrivacyReview: false)
-                            }
+                        selectionAction(selectAllTitle, identifier: "ai-photos-select-all") {
+                            model.selectAllAICutPhotos()
                         }
 
                         selectionAction("Clear", identifier: "ai-photos-clear") {
@@ -563,12 +555,8 @@ private struct AICutPhotoSelectionSheet: View {
                     Text("Deselect one moment to choose another")
                         .font(TR.ui(11))
                         .foregroundStyle(.white.opacity(0.52))
-                } else if model.aiCutPrivacyReviewPhotoCount > 0 {
-                    Text("REVIEW moments need your approval before sharing")
-                        .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.52))
                 } else {
-                    Text("Only selected previews go to OpenAI")
+                    Text("Chosen on this iPhone for quality, relevance & variety")
                         .font(TR.ui(11))
                         .foregroundStyle(.white.opacity(0.52))
                 }
@@ -586,23 +574,6 @@ private struct AICutPhotoSelectionSheet: View {
             .background(TR.sheet.opacity(0.94))
         }
         .accessibilityIdentifier("ai-photo-selection-sheet")
-        .alert(item: $privacyReviewPrompt) { prompt in
-            Alert(
-                title: Text(prompt.title),
-                message: Text("On-device checks found substantial text, which could include personal information. If you continue, only reduced previews are sent to OpenAI for this cut."),
-                primaryButton: .default(Text(prompt.actionTitle)) {
-                    withAnimation(reduceMotion ? nil : TRMotion.selection) {
-                        switch prompt {
-                        case let .moment(photoID):
-                            model.approveAndSelectAICutPhoto(photoID)
-                        case .all:
-                            model.selectAllAICutPhotos(approvingPrivacyReview: true)
-                        }
-                    }
-                },
-                secondaryButton: .cancel()
-            )
-        }
     }
 
     private func photoCell(_ option: AICutPhotoOption) -> some View {
@@ -615,10 +586,8 @@ private struct AICutPhotoSelectionSheet: View {
                     model.toggleAICutPhotoSelection(option.id)
                 } else if !canSelect {
                     return
-                } else if !option.requiresPrivacyReview {
-                    model.toggleAICutPhotoSelection(option.id)
                 } else {
-                    privacyReviewPrompt = .moment(option.id)
+                    model.toggleAICutPhotoSelection(option.id)
                 }
             }
         } label: {
@@ -660,19 +629,6 @@ private struct AICutPhotoSelectionSheet: View {
                         .padding(7)
                 }
 
-                if option.requiresPrivacyReview {
-                    Text("REVIEW")
-                        .font(TR.mono(8, weight: .semibold))
-                        .tracking(0.8)
-                        .foregroundStyle(TR.ink)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 5)
-                        .background(TR.accent)
-                        .clipShape(Capsule())
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                        .padding(7)
-                }
-
                 if option.photo.isVideo {
                     Label("CLIP", systemImage: "play.fill")
                         .font(TR.mono(8, weight: .semibold))
@@ -696,11 +652,7 @@ private struct AICutPhotoSelectionSheet: View {
                 : "More Moments \(option.photo.isVideo ? "video clip" : "photo")"
         )
         .accessibilityValue(selected ? "Selected" : "Not selected")
-        .accessibilityHint(
-            option.requiresPrivacyReview
-                ? "Double tap to review before sharing this text-heavy moment"
-                : (canSelect ? "Double tap to toggle" : "Deselect another photo first")
-        )
+        .accessibilityHint(canSelect ? "Double tap to toggle" : "Deselect another moment first")
         .accessibilityIdentifier("ai-photo-\(option.id)")
     }
 
@@ -728,9 +680,16 @@ private struct AICutPhotoSelectionSheet: View {
 
     private var selectionSummary: String {
         if model.aiCutAvailablePhotoCount > model.aiCutPhotoSelectionLimit {
-            return "\(model.aiCutSelectedPhotoCount) selected · max \(model.aiCutPhotoSelectionLimit)"
+            return "\(model.aiCutSelectedPhotoCount) of \(model.aiCutAvailablePhotoCount) · best matches first"
         }
-        return "\(model.aiCutSelectedPhotoCount) selected · \(model.aiCutAvailablePhotoCount) available"
+        return "\(model.aiCutSelectedPhotoCount) of \(model.aiCutAvailablePhotoCount) · quality + relevance"
+    }
+
+    private var selectAllTitle: String {
+        if model.aiCutAvailablePhotoCount > model.aiCutPhotoSelectionLimit {
+            return "Fill \(model.aiCutPhotoSelectionLimit)"
+        }
+        return "Select all"
     }
 }
 
@@ -1188,10 +1147,6 @@ struct AICutComparisonScreen: View {
         model.musicTrack(withID: snapshot?.selectedTrackID)
     }
 
-    private var audioTaskID: String {
-        "\(previewSource.rawValue)-\(previewTrack?.id ?? "none")"
-    }
-
     private var previewSoundtrackVolume: Float {
         snapshot?.keptPhotos.contains(where: \.isVideo) == true ? 0.42 : 0.82
     }
@@ -1257,7 +1212,19 @@ struct AICutComparisonScreen: View {
                             showLabels: false,
                             look: snapshot.montageLook,
                             motionIntensity: snapshot.motionIntensity,
-                            secondsPerSlide: 1.85 - (snapshot.pace * 1.25)
+                            secondsPerSlide: 1.85 - (snapshot.pace * 1.25),
+                            playbackBehavior: .playOnce,
+                            showsReplayControl: true,
+                            onPlaybackStarted: {
+                                soundtrack.play(
+                                    track: previewTrack,
+                                    volume: previewSoundtrackVolume,
+                                    restart: true
+                                )
+                            },
+                            onPlaybackEnded: {
+                                soundtrack.finishNaturally()
+                            }
                         )
                         .id(previewSource)
                         .frame(height: 270)
@@ -1375,8 +1342,8 @@ struct AICutComparisonScreen: View {
             }
         }
         .animation(reduceMotion ? nil : TRMotion.selection, value: previewSource)
-        .task(id: audioTaskID) {
-            soundtrack.play(track: previewTrack, volume: previewSoundtrackVolume)
+        .onChange(of: previewSource) { _, _ in
+            soundtrack.stop()
         }
         .onDisappear { soundtrack.stop() }
         .accessibilityIdentifier("ai-comparison-screen")
@@ -2442,14 +2409,9 @@ struct SecondWatchScreen: View {
             FullFilmPreview()
                 .environmentObject(model)
         }
-        .task(id: model.selectedTrackID) {
-            soundtrack.play(track: model.selectedTrack, volume: model.previewSoundtrackVolume)
-        }
         .onChange(of: showFullPreview) { _, isShowing in
             if isShowing {
                 soundtrack.stop()
-            } else {
-                soundtrack.play(track: model.selectedTrack, volume: model.previewSoundtrackVolume)
             }
         }
         .onDisappear {
@@ -2501,7 +2463,19 @@ struct SecondWatchScreen: View {
                     showLabels: false,
                     look: model.montageLook,
                     motionIntensity: model.montageMotionIntensity,
-                    secondsPerSlide: model.secondsPerPhoto
+                    secondsPerSlide: model.secondsPerPhoto,
+                    playbackBehavior: .playOnce,
+                    showsReplayControl: true,
+                    onPlaybackStarted: {
+                        soundtrack.play(
+                            track: model.selectedTrack,
+                            volume: model.previewSoundtrackVolume,
+                            restart: true
+                        )
+                    },
+                    onPlaybackEnded: {
+                        soundtrack.finishNaturally()
+                    }
                 )
                 .id(previewIdentity)
                 .frame(width: previewHeight * 9 / 16, height: previewHeight)
@@ -2662,7 +2636,7 @@ struct SecondWatchScreen: View {
     }
 
     private var previewIdentity: String {
-        "\(selectedPhotoID ?? "film")-\(model.montageLook.rawValue)-\(model.montageMotionIntensity.rawValue)"
+        "\(selectedPhotoID ?? "film")-\(model.montageLook.rawValue)-\(model.montageMotionIntensity.rawValue)-\(model.selectedTrackID ?? "none")"
     }
 
     private var trackSuffix: String {
@@ -2826,6 +2800,7 @@ private struct FullFilmPreview: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var soundtrack = LocalSoundtrackPlayer()
     @State private var controlsVisible = true
+    @State private var playbackComplete = false
 
     var body: some View {
         ZStack {
@@ -2838,7 +2813,22 @@ private struct FullFilmPreview: View {
                 showLabels: false,
                 look: model.montageLook,
                 motionIntensity: model.montageMotionIntensity,
-                secondsPerSlide: model.secondsPerPhoto
+                secondsPerSlide: model.secondsPerPhoto,
+                playbackBehavior: .playOnce,
+                showsReplayControl: true,
+                onPlaybackStarted: {
+                    playbackComplete = false
+                    soundtrack.play(
+                        track: model.selectedTrack,
+                        volume: model.previewSoundtrackVolume,
+                        restart: true
+                    )
+                },
+                onPlaybackEnded: {
+                    playbackComplete = true
+                    controlsVisible = true
+                    soundtrack.finishNaturally()
+                }
             )
             .ignoresSafeArea()
 
@@ -2850,6 +2840,7 @@ private struct FullFilmPreview: View {
                         controlsVisible.toggle()
                     }
                 }
+                .allowsHitTesting(!playbackComplete)
 
             if controlsVisible {
                 LinearGradient(
@@ -2895,9 +2886,6 @@ private struct FullFilmPreview: View {
                 .padding(.vertical, 10)
                 .transition(.opacity)
             }
-        }
-        .task(id: model.selectedTrackID) {
-            soundtrack.play(track: model.selectedTrack, volume: model.previewSoundtrackVolume)
         }
         .task(id: controlsVisible) {
             guard controlsVisible, !voiceOverEnabled else { return }
@@ -3019,7 +3007,9 @@ private struct PhotoEditorSheet: View {
                 showLabels: false,
                 look: .story,
                 motionIntensity: model.montageMotionIntensity,
-                secondsPerSlide: model.duration(for: photo)
+                secondsPerSlide: model.duration(for: photo),
+                playbackBehavior: .playOnce,
+                showsReplayControl: true
             )
             .overlay(alignment: .topLeading) {
                 if photo.usesAutomaticPeopleFraming {
@@ -3382,7 +3372,9 @@ private struct FilmStyleSheet: View {
                 showLabels: false,
                 look: model.montageLook,
                 motionIntensity: model.montageMotionIntensity,
-                secondsPerSlide: max(1.15, model.secondsPerPhoto)
+                secondsPerSlide: max(1.15, model.secondsPerPhoto),
+                playbackBehavior: .playOnce,
+                showsReplayControl: true
             )
             .frame(width: 126, height: 224)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))

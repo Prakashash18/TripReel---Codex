@@ -186,12 +186,8 @@ final class TripReelFlowUITests: XCTestCase {
 
         XCTAssertTrue(screen("paywall-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Export the full story"].exists)
-        XCTAssertTrue(
-            app.staticTexts
-                .matching(NSPredicate(format: "label CONTAINS[c] %@", "export a free 0:30 cut"))
-                .firstMatch
-                .exists
-        )
+        XCTAssertTrue(screen("paywall-free-summary").exists)
+        XCTAssertTrue(screen("full-story-highlight").exists)
         let freeExport = screen("export-free-from-paywall")
         XCTAssertTrue(freeExport.exists)
         XCTAssertTrue(app.buttons["Restore purchases"].exists)
@@ -248,8 +244,11 @@ final class TripReelFlowUITests: XCTestCase {
 
         XCTAssertTrue(screen("ai-photo-selection-sheet").waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Deselect one moment to choose another"].exists)
-        XCTAssertTrue(app.buttons["Suggested"].exists)
-        XCTAssertTrue(app.buttons["Select all"].exists)
+        XCTAssertTrue(app.buttons["Best moments"].exists)
+        let bulkSelection = app.buttons
+            .matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "Select all", "Fill "))
+            .firstMatch
+        XCTAssertTrue(bulkSelection.exists)
         XCTAssertTrue(app.buttons["Clear"].exists)
         attachScreenshot(named: "AI exact photo selection")
     }

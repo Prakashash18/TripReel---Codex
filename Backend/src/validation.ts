@@ -469,10 +469,10 @@ export function validatePayload(value: unknown): ValidatedPayload {
   }
 
   if (
-    (value.version === 3 && !hasDirectorRequestShape && !hasDirectorContextRequestShape) ||
-    (value.version !== 3 && (hasDirectorRequestShape || hasDirectorContextRequestShape))
+    (value.version >= 3 && !hasDirectorRequestShape && !hasDirectorContextRequestShape) ||
+    (value.version < 3 && (hasDirectorRequestShape || hasDirectorContextRequestShape))
   ) {
-    throw new RequestProblem(400, "invalid_request", "Version 3 requires a First Cut baseline.");
+    throw new RequestProblem(400, "invalid_request", "Director request versions require a First Cut baseline.");
   }
 
   let storyContext: string | undefined;
@@ -526,11 +526,11 @@ export function validatePayload(value: unknown): ValidatedPayload {
         `photos[${index}] contains unsupported fields.`,
       );
     }
-    if (value.version === 3 && !hasDirectorShape) {
+    if (value.version >= 3 && !hasDirectorShape) {
       throw new RequestProblem(400, "invalid_photo_context", `photos[${index}].context is required.`);
     }
-    if (value.version !== 3 && hasDirectorShape) {
-      throw new RequestProblem(400, "invalid_photo_context", "Photo context requires request version 3.");
+    if (value.version < 3 && hasDirectorShape) {
+      throw new RequestProblem(400, "invalid_photo_context", "Photo context requires a Director request version.");
     }
     const localSelection: LocalSelection = (hasCurrentShape || hasDirectorShape) &&
       typeof photo.localSelection === "string" &&
@@ -584,7 +584,7 @@ export function validatePayload(value: unknown): ValidatedPayload {
     });
   }
 
-  const baseline = value.version === 3
+  const baseline = value.version >= 3
     ? validateBaseline(value.baseline, ids)
     : undefined;
   if (baseline !== undefined) {

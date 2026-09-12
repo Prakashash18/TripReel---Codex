@@ -1,6 +1,6 @@
 import type {
   AIEditComparison,
-  AIEditPlanV3,
+  ComparativeAIEditPlan,
   FirstCutInput,
   PhotoInput,
 } from "./contract.ts";
@@ -32,7 +32,7 @@ function baselineTitleSignature(baseline: FirstCutInput, kind: "opening" | "chap
     .join("|");
 }
 
-function aiTitleSignatures(plan: AIEditPlanV3): Record<"opening" | "chapter" | "ending", string> {
+function aiTitleSignatures(plan: ComparativeAIEditPlan): Record<"opening" | "chapter" | "ending", string> {
   const chapterIsDistinct = plan.sequence.length >= 5 &&
     normalizedText(plan.story.title) !== normalizedText(plan.hook.title);
   return {
@@ -51,7 +51,7 @@ function aiTitleSignatures(plan: AIEditPlanV3): Record<"opening" | "chapter" | "
 export function compareAICut(
   baseline: FirstCutInput,
   photos: readonly PhotoInput[],
-  plan: AIEditPlanV3,
+  plan: ComparativeAIEditPlan,
 ): AIEditComparison {
   const baselineByID = new Map(baseline.sequence.map((item) => [item.photoId, item]));
   const baselineIndex = new Map(baseline.sequence.map((item, index) => [item.photoId, index]));

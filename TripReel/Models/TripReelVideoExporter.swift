@@ -104,7 +104,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
 
     init(
         imageManager: PHImageManager = PHCachingImageManager(),
-        frameRate: Int32 = 12
+        frameRate: Int32 = 30
     ) {
         self.imageManager = imageManager
         self.frameRate = max(8, frameRate)
@@ -442,7 +442,10 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                     let generator = AVAssetImageGenerator(asset: videoAsset)
                     generator.appliesPreferredTrackTransform = true
                     generator.maximumSize = outputSize
-                    let tolerance = CMTime(value: 1, timescale: frameRate)
+                    // Keep video sampling within half of a 30 fps frame. The old
+                    // one-output-frame tolerance could repeat nearby source
+                    // frames and made motion in the saved reel appear uneven.
+                    let tolerance = CMTime(value: 1, timescale: 60)
                     generator.requestedTimeToleranceBefore = tolerance
                     generator.requestedTimeToleranceAfter = tolerance
                     videoGenerator = generator
@@ -1095,6 +1098,21 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 }
             }
             mixParameters.append(sourceParameters)
+        }
+
+        if let soundtrackParameters {
+            let fadeDuration = CMTimeMinimum(
+                CMTime(seconds: 1.1, preferredTimescale: 600),
+                CMTimeMultiplyByFloat64(videoDuration, multiplier: 0.18)
+            )
+            if fadeDuration > .zero {
+                let fadeStart = CMTimeSubtract(videoDuration, fadeDuration)
+                soundtrackParameters.setVolumeRamp(
+                    fromStartVolume: 0.68,
+                    toEndVolume: 0,
+                    timeRange: CMTimeRange(start: fadeStart, duration: fadeDuration)
+                )
+            }
         }
 
         guard let exportSession = AVAssetExportSession(

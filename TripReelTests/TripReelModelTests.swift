@@ -1,6 +1,7 @@
 import CoreVideo
 import Photos
 import UIKit
+import UniformTypeIdentifiers
 import XCTest
 @testable import TripReel
 
@@ -8,6 +9,19 @@ import XCTest
 final class TripReelModelTests: XCTestCase {
     private func makeModel() -> TripReelModel {
         TripReelModel(arguments: [], useDemoData: true)
+    }
+
+    func testShareProviderAdvertisesAnExplicitMP4Movie() {
+        let videoURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("share-provider-test.mp4")
+        let provider = MP4ShareProviderFactory.makeProvider(
+            for: videoURL,
+            suggestedName: "Memories-Reel"
+        )
+
+        XCTAssertEqual(provider.suggestedName, "Memories-Reel.mp4")
+        XCTAssertEqual(provider.registeredTypeIdentifiers, [UTType.mpeg4Movie.identifier])
+        XCTAssertTrue(provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier))
     }
 
     func testVideoFrameCopyDoesNotTurnUIKitArtworkUpsideDown() throws {
@@ -425,6 +439,18 @@ final class TripReelModelTests: XCTestCase {
         player.stop()
     }
 
+    func testBundledSoundtrackCanFadeAndFinishInsteadOfLoopingForever() async throws {
+        let model = makeModel()
+        let track = try XCTUnwrap(model.selectedTrack)
+        let player = LocalSoundtrackPlayer()
+
+        player.play(track: track)
+        player.finishNaturally(fadeDuration: 0.15)
+        try await Task.sleep(nanoseconds: 260_000_000)
+
+        XCTAssertFalse(player.isPlaying)
+    }
+
     func testRestartReturnsToTripsAndClearsCleanupState() {
         let model = makeModel()
         model.cleanupShowsGrid = true
@@ -615,12 +641,27 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertFalse(model.exportQuality.includesWatermark)
     }
 
-    func testFreeExportIncludesTwentyFourPhotosAndThirtySeconds() {
+    func testStandardExportAlwaysHasAFreePath() {
         XCTAssertNil(ExportAccessPolicy.premiumRequirement(
             photoCount: 24,
             durationSeconds: 30,
             quality: .standard
         ))
+    }
+
+    func testHDRequirementUsesTheStorySelectedFreeCut() throws {
+        let requirement = try XCTUnwrap(ExportAccessPolicy.premiumRequirement(
+            photoCount: 12,
+            durationSeconds: 28,
+            freePhotoCount: 10,
+            freeDurationSeconds: 23.4,
+            quality: .hd
+        ))
+
+        XCTAssertEqual(requirement.freePhotoLimit, 10)
+        XCTAssertEqual(requirement.freeDurationLimit, 23.4, accuracy: 0.001)
+        XCTAssertTrue(requirement.exceedsPhotoLimit)
+        XCTAssertTrue(requirement.exceedsDurationLimit)
     }
 
     func testLongerOrLargerStandardExportUsesAutomaticFreeCut() {
@@ -970,7 +1011,16 @@ final class TripReelModelTests: XCTestCase {
         model.startBuild(trip: trip)
         model.titleCards = [.opening, .place, .ending]
         let expectedFirstID = try XCTUnwrap(model.keptPhotos.first?.id)
-        let expectedLastID = try XCTUnwrap(model.keptPhotos.last?.id)
+
+        XCTAssertLessThan(model.freeExportDurationSeconds, model.filmDurationSeconds)
+        XCTAssertGreaterThanOrEqual(model.freeExportMomentCount, 31)
+        XCTAssertLessThan(model.freeExportMomentCount, model.keptCount)
+        XCTAssertGreaterThanOrEqual(model.fullStoryExclusiveMomentCount, 1)
+        XCTAssertLessThanOrEqual(model.fullStoryExclusiveMomentCount, 5)
+        XCTAssertFalse(model.fullStoryHighlightPhotos.isEmpty)
+        let expectedPhotoIDs = Array(
+            model.keptPhotos.prefix(model.freeExportMomentCount)
+        ).map(\.id)
 
         model.requestExport(.standard, isPremium: false)
         for _ in 0..<100 where model.screen != .done {
@@ -981,16 +1031,16 @@ final class TripReelModelTests: XCTestCase {
         let recordedRequest = await exporter.lastRequest
         let request = try XCTUnwrap(recordedRequest)
         XCTAssertEqual(request.quality, .standard)
-        XCTAssertEqual(request.photos.count, ExportAccessPolicy.freePhotoLimit)
+        XCTAssertEqual(request.photos.map(\.id), expectedPhotoIDs)
         XCTAssertEqual(request.photos.first?.id, expectedFirstID)
-        XCTAssertEqual(request.photos.last?.id, expectedLastID)
+        XCTAssertFalse(request.titleCards.contains(where: { $0.kind == .ending }))
         let duration = MontageTimelineBuilder.make(
             photos: request.photos,
             titleCards: request.titleCards
         ).reduce(0) { total, item in
             total + item.duration(defaultPhotoDuration: request.secondsPerPhoto)
         }
-        XCTAssertLessThanOrEqual(duration, ExportAccessPolicy.freeDurationLimit + 0.001)
+        XCTAssertEqual(duration, model.freeExportDurationSeconds, accuracy: 0.001)
         XCTAssertEqual(model.activeExportDurationSeconds, duration, accuracy: 0.001)
     }
 
@@ -1583,12 +1633,199 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertFalse(recommendation.isVisionBased)
     }
 
+    func testAICutRecommendationPrefersQualityOverFirstCutMembership() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let weakFirstCut = makeAsset("weak-first", start: start, minutes: 0)
+        let strongMoreMoment = makeAsset("strong-more", start: start, minutes: 20)
+        let candidates = [
+            AICutMomentCandidate(
+                photo: makeReelPhoto(from: weakFirstCut),
+                asset: weakFirstCut,
+                localSelection: .firstCut
+            ),
+            AICutMomentCandidate(
+                photo: makeReelPhoto(from: strongMoreMoment),
+                asset: strongMoreMoment,
+                localSelection: .morePhotos
+            )
+        ]
+        let insights = [
+            weakFirstCut.id: MontagePhotoInsight(
+                memoryScore: 0.18,
+                aestheticScore: 0.22,
+                contentKind: .moment
+            ),
+            strongMoreMoment.id: MontagePhotoInsight(
+                memoryScore: 0.95,
+                aestheticScore: 0.94,
+                contentKind: .scenery
+            )
+        ]
+
+        let recommendation = AICutMomentRecommender.recommend(
+            candidates: candidates,
+            insights: insights,
+            direction: .surpriseMe,
+            limit: 1
+        )
+
+        XCTAssertEqual(recommendation.map { $0.photo.id }, [strongMoreMoment.id])
+    }
+
+    func testAICutRecommendationIncludesRelevantPeopleAndVideo() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let scenic = makeAsset("scenic", start: start, minutes: 0)
+        let people = makeAsset("people", start: start, minutes: 15)
+        let video = makeAsset(
+            "video",
+            start: start,
+            minutes: 30,
+            mediaKind: .video,
+            sourceDurationSeconds: 12
+        )
+        let candidates = [scenic, people, video].map {
+            AICutMomentCandidate(
+                photo: makeReelPhoto(from: $0),
+                asset: $0,
+                localSelection: .firstCut
+            )
+        }
+        let insights = [
+            scenic.id: MontagePhotoInsight(
+                memoryScore: 0.94,
+                aestheticScore: 0.94,
+                contentKind: .scenery
+            ),
+            people.id: MontagePhotoInsight(
+                memoryScore: 0.76,
+                aestheticScore: 0.74,
+                contentKind: .people,
+                peopleCount: 4
+            ),
+            video.id: MontagePhotoInsight(
+                memoryScore: 0.72,
+                aestheticScore: 0.70,
+                contentKind: .moment
+            )
+        ]
+
+        let recommendation = AICutMomentRecommender.recommend(
+            candidates: candidates,
+            insights: insights,
+            direction: .people,
+            limit: 2
+        )
+        let selectedIDs = Set(recommendation.map { $0.photo.id })
+
+        XCTAssertEqual(selectedIDs, [people.id, video.id])
+    }
+
+    func testFreeExportPlannerHonorsASafeAIDirectedEnding() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let photos = (0..<12).map {
+            makeReelPhoto(from: makeAsset("preview-\($0)", start: start, minutes: $0))
+        }
+
+        let decision = FreeExportStoryPlanner.decide(
+            photos: photos,
+            titleCards: [],
+            textOverlays: [],
+            insights: [:],
+            preferredEndPhotoID: photos[9].id,
+            preferredReason: "  The first payoff lands here.  "
+        )
+
+        XCTAssertEqual(decision.endPhotoID, photos[9].id)
+        XCTAssertEqual(decision.reason, "The first payoff lands here.")
+        XCTAssertEqual(decision.source, .aiDirector)
+    }
+
+    func testFreeExportPlannerRejectsAnAICutThatWouldHideTooMuch() throws {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let photos = (0..<12).map {
+            makeReelPhoto(from: makeAsset("guardrail-\($0)", start: start, minutes: $0))
+        }
+
+        let decision = FreeExportStoryPlanner.decide(
+            photos: photos,
+            titleCards: [],
+            textOverlays: [],
+            insights: [:],
+            preferredEndPhotoID: photos[2].id,
+            preferredReason: "End very early."
+        )
+
+        let selectedIndex = try XCTUnwrap(
+            photos.firstIndex { $0.id == decision.endPhotoID }
+        )
+        XCTAssertEqual(decision.source, .onDevice)
+        XCTAssertLessThanOrEqual(
+            photos.count - selectedIndex - 1,
+            2,
+            "Only the bounded final story window may be omitted"
+        )
+    }
+
+    func testFreeExportPlannerUsesLocalQualityToFindTheStrongerLateBeat() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let photos = (0..<12).map {
+            makeReelPhoto(from: makeAsset("quality-\($0)", start: start, minutes: $0))
+        }
+        let insights = [
+            photos[9].id: MontagePhotoInsight(
+                memoryScore: 0.18,
+                aestheticScore: 0.24,
+                contentKind: .moment
+            ),
+            photos[10].id: MontagePhotoInsight(
+                memoryScore: 0.96,
+                aestheticScore: 0.92,
+                contentKind: .people,
+                peopleCount: 4
+            )
+        ]
+
+        let decision = FreeExportStoryPlanner.decide(
+            photos: photos,
+            titleCards: [],
+            textOverlays: [],
+            insights: insights,
+            preferredEndPhotoID: nil,
+            preferredReason: nil
+        )
+
+        XCTAssertEqual(decision.endPhotoID, photos[10].id)
+        XCTAssertEqual(decision.reason, "Ends on a strong people moment.")
+        XCTAssertEqual(decision.source, .onDevice)
+    }
+
+    func testFreeExportPlannerKeepsAShortStoryWhole() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let photos = (0..<5).map {
+            makeReelPhoto(from: makeAsset("short-\($0)", start: start, minutes: $0))
+        }
+
+        let decision = FreeExportStoryPlanner.decide(
+            photos: photos,
+            titleCards: [],
+            textOverlays: [],
+            insights: [:],
+            preferredEndPhotoID: photos[1].id,
+            preferredReason: "Too early"
+        )
+
+        XCTAssertEqual(decision.endPhotoID, photos.last?.id)
+        XCTAssertEqual(decision.reason, "This story is strongest kept whole.")
+    }
+
     private func makeAsset(
         _ id: String,
         start: Date,
         minutes: Int,
         width: Int = 4_032,
-        height: Int = 3_024
+        height: Int = 3_024,
+        mediaKind: LibraryMediaKind = .photo,
+        sourceDurationSeconds: Double = 0
     ) -> TripAsset {
         TripAsset(
             id: id,
@@ -1596,7 +1833,9 @@ final class TripReelModelTests: XCTestCase {
             creationDate: start.addingTimeInterval(Double(minutes) * 60),
             filename: "\(id).HEIC",
             pixelWidth: width,
-            pixelHeight: height
+            pixelHeight: height,
+            mediaKind: mediaKind,
+            sourceDurationSeconds: sourceDurationSeconds
         )
     }
 
@@ -1610,7 +1849,10 @@ final class TripReelModelTests: XCTestCase {
             pixelWidth: asset.pixelWidth,
             pixelHeight: asset.pixelHeight,
             frameStyle: .fullBleed,
-            motionStyle: .zoomIn
+            motionStyle: .zoomIn,
+            durationSeconds: asset.isVideo ? 2.5 : nil,
+            mediaKind: asset.mediaKind,
+            sourceDurationSeconds: asset.sourceDurationSeconds
         )
     }
 

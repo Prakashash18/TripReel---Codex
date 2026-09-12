@@ -28,18 +28,24 @@ struct ExportPremiumRequirement: Equatable, Sendable {
 }
 
 enum ExportAccessPolicy {
-    /// A free export is long enough to tell a complete short story while still
-    /// leaving a clear reason to upgrade for fuller memories.
-    static let freePhotoLimit = 24
-    static let freeDurationLimit: Double = 30
-
     static func premiumRequirement(
         photoCount: Int,
         durationSeconds: Double,
+        freePhotoCount: Int? = nil,
+        freeDurationSeconds: Double? = nil,
         quality: ExportQuality
     ) -> ExportPremiumRequirement? {
         let safePhotoCount = max(photoCount, 0)
         let safeDuration = max(durationSeconds.isFinite ? durationSeconds : 0, 0)
+        let safeFreePhotoCount = min(
+            safePhotoCount,
+            max(0, freePhotoCount ?? safePhotoCount)
+        )
+        let suppliedFreeDuration = freeDurationSeconds ?? safeDuration
+        let safeFreeDuration = min(
+            safeDuration,
+            max(suppliedFreeDuration.isFinite ? suppliedFreeDuration : 0, 0)
+        )
         let requiresHighDefinition = quality == .hd
 
         // Standard always has a usable free path. The model turns a longer
@@ -48,8 +54,8 @@ enum ExportAccessPolicy {
         return ExportPremiumRequirement(
             photoCount: safePhotoCount,
             durationSeconds: safeDuration,
-            freePhotoLimit: freePhotoLimit,
-            freeDurationLimit: freeDurationLimit,
+            freePhotoLimit: safeFreePhotoCount,
+            freeDurationLimit: safeFreeDuration,
             requiresHighDefinition: requiresHighDefinition
         )
     }

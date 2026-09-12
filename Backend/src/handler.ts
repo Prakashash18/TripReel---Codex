@@ -688,7 +688,7 @@ async function performAnalysis(
     throw error;
   }
   let publicPlan: PublicAIEditPlan;
-  if (analysis.version === 3) {
+  if (analysis.version === 3 || analysis.version === 4) {
     if (payload.baseline === undefined) {
       throw new ServiceProblem(502, "invalid_upstream_response", "The analysis provider returned an invalid response.");
     }

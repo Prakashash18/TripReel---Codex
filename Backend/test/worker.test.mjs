@@ -168,9 +168,9 @@ function firstCutBaseline(ids) {
   };
 }
 
-function comparativePayload(ids, direction = "better_story", selections = []) {
+function comparativePayload(ids, direction = "better_story", selections = [], version = 3) {
   return {
-    version: 3,
+    version,
     direction,
     baseline: firstCutBaseline(ids.filter((_id, index) => (selections[index] ?? "first_cut") === "first_cut")),
     photos: ids.map((id, index) => ({
@@ -182,10 +182,10 @@ function comparativePayload(ids, direction = "better_story", selections = []) {
   };
 }
 
-function comparativePlan(ids, direction = "better_story") {
-  return {
+function comparativePlan(ids, direction = "better_story", version = 3) {
+  const plan = {
     ...directorPlan(ids, direction),
-    version: 3,
+    version,
     diagnosis: {
       verdict: "The First Cut has a steady rhythm but needs a clearer emotional build.",
       issues: [{
@@ -196,6 +196,13 @@ function comparativePlan(ids, direction = "better_story") {
       }],
     },
   };
+  if (version === 4) {
+    plan.preview = {
+      endPhotoId: ids[Math.max(0, ids.length - 2)],
+      reason: "The first payoff lands here before the final resolution.",
+    };
+  }
+  return plan;
 }
 
 function openAISuccess(editPlan) {
@@ -480,6 +487,7 @@ test("version 3 critiques the submitted First Cut and returns Worker-measured ch
   assert.match(upstream.input[0].content[3].text, /coarse on-device context/u);
   assert.equal(upstream.text.format.schema.properties.version.const, 3);
   assert.ok(upstream.text.format.schema.properties.diagnosis);
+  assert.equal(upstream.text.format.schema.properties.preview, undefined);
 
   const body = await response.json();
   assert.equal(body.plan.version, 3);
@@ -489,6 +497,31 @@ test("version 3 critiques the submitted First Cut and returns Worker-measured ch
   assert.ok(body.plan.comparison.reorderedCount > 0);
   assert.equal(body.plan.comparison.materiallyDifferent, true);
   assert.equal(body.retention.openAIStore, false);
+});
+
+test("version 4 adds a natural preview ending without changing version 3", async () => {
+  const ids = ["p0", "p1", "p2", "p3"];
+  const requestPayload = comparativePayload(ids, "better_story", [], 4);
+  const expected = comparativePlan(ids, "better_story", 4);
+  let upstream;
+  const response = await handleRequest(
+    analyzeRequest(requestPayload),
+    ENV,
+    async (_url, init) => {
+      upstream = JSON.parse(init.body);
+      return openAISuccess(expected);
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(upstream.text.format.schema.properties.version.const, 4);
+  assert.ok(upstream.text.format.schema.properties.diagnosis);
+  assert.ok(upstream.text.format.schema.properties.preview);
+  assert.match(upstream.instructions, /strongest natural stopping beat for a useful free reel/u);
+  const body = await response.json();
+  assert.equal(body.plan.version, 4);
+  assert.equal(body.plan.preview.endPhotoId, "p2");
+  assert.equal(body.plan.comparison.firstCutPhotoCount, 4);
 });
 
 test("version 3 rejects metadata-like context and computes comparison independently", () => {
@@ -511,6 +544,28 @@ test("version 3 rejects metadata-like context and computes comparison independen
   assert.equal(comparison.aiCutPhotoCount, 2);
   assert.equal(comparison.reorderedCount, 1);
   assert.equal(Object.hasOwn(candidate, "comparison"), false);
+
+  const versionFourCandidate = comparativePlan(["p1", "p0"], "better_story", 4);
+  const parsedVersionFour = parseAIEditPlan(
+    versionFourCandidate,
+    ["p0", "p1"],
+    "better_story",
+    4,
+  );
+  assert.equal(parsedVersionFour.version, 4);
+  assert.equal(parsedVersionFour.preview.endPhotoId, "p1");
+
+  const missingPreview = structuredClone(versionFourCandidate);
+  delete missingPreview.preview;
+  assert.equal(parseAIEditPlan(missingPreview, ["p0", "p1"], "better_story", 4), null);
+
+  const previewOutsideSequence = comparativePlan(["p0", "p1", "p2"], "better_story", 4);
+  previewOutsideSequence.sequence = previewOutsideSequence.sequence.slice(0, 2);
+  previewOutsideSequence.preview.endPhotoId = "p2";
+  assert.equal(
+    parseAIEditPlan(previewOutsideSequence, ["p0", "p1", "p2"], "better_story", 4),
+    null,
+  );
 });
 
 test("version 3 runs one critic revision when the first draft is only cosmetic", async () => {

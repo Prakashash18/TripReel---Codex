@@ -331,6 +331,16 @@ struct AICutDiagnosis: Codable, Hashable, Sendable {
     let issues: [AICutDiagnosisIssue]
 }
 
+struct AICutPreviewPlan: Codable, Hashable, Sendable {
+    let endPhotoID: String
+    let reason: String
+
+    enum CodingKeys: String, CodingKey {
+        case endPhotoID = "endPhotoId"
+        case reason
+    }
+}
+
 /// Computed by TripReel's Worker from the submitted First Cut and returned AI
 /// timeline. These figures are never self-reported by the model.
 struct AICutComparison: Codable, Hashable, Sendable {
@@ -360,6 +370,7 @@ struct AICutEditPlan: Codable, Hashable, Sendable {
     let sequence: [AICutPlanItem]
     let diagnosis: AICutDiagnosis?
     let comparison: AICutComparison?
+    let preview: AICutPreviewPlan?
 
     init(
         version: Int,
@@ -372,7 +383,8 @@ struct AICutEditPlan: Codable, Hashable, Sendable {
         treatment: AICutTreatmentPlan,
         sequence: [AICutPlanItem],
         diagnosis: AICutDiagnosis? = nil,
-        comparison: AICutComparison? = nil
+        comparison: AICutComparison? = nil,
+        preview: AICutPreviewPlan? = nil
     ) {
         self.version = version
         self.direction = direction
@@ -385,6 +397,7 @@ struct AICutEditPlan: Codable, Hashable, Sendable {
         self.sequence = sequence
         self.diagnosis = diagnosis
         self.comparison = comparison
+        self.preview = preview
     }
 }
 
@@ -406,6 +419,7 @@ enum AICutPlanValidationError: Error, Equatable {
     case invalidTreatment
     case invalidDiagnosis
     case invalidComparison
+    case invalidPreview
 }
 
 enum AICutPlanValidator {
@@ -417,7 +431,9 @@ enum AICutPlanValidator {
         requestedIDs: Set<String>,
         direction: AICutDirection
     ) throws -> AICutEditPlan {
-        guard plan.version == 2 || plan.version == 3 else { throw AICutPlanValidationError.invalidVersion }
+        guard [2, 3, 4].contains(plan.version) else {
+            throw AICutPlanValidationError.invalidVersion
+        }
         guard plan.direction == direction else { throw AICutPlanValidationError.mismatchedDirection }
         guard !plan.sequence.isEmpty else { throw AICutPlanValidationError.emptySequence }
         guard plan.sequence.count <= requestedIDs.count,
@@ -454,7 +470,8 @@ enum AICutPlanValidator {
 
         let diagnosis: AICutDiagnosis?
         let comparison: AICutComparison?
-        if plan.version == 3 {
+        let preview: AICutPreviewPlan?
+        if plan.version >= 3 {
             guard let sourceDiagnosis = plan.diagnosis,
                   let verdict = normalizedText(sourceDiagnosis.verdict, minimum: 1, maximum: 180),
                   (1...3).contains(sourceDiagnosis.issues.count) else {
@@ -493,9 +510,27 @@ enum AICutPlanValidator {
             }
             diagnosis = AICutDiagnosis(verdict: verdict, issues: issues)
             comparison = sourceComparison
+            if plan.version == 4, let sourcePreview = plan.preview {
+                guard let reason = normalizedText(
+                    sourcePreview.reason,
+                    minimum: 1,
+                    maximum: 180
+                ), requestedIDs.contains(sourcePreview.endPhotoID) else {
+                    throw AICutPlanValidationError.invalidPreview
+                }
+                preview = AICutPreviewPlan(
+                    endPhotoID: sourcePreview.endPhotoID,
+                    reason: reason
+                )
+            } else if plan.version == 4 {
+                throw AICutPlanValidationError.invalidPreview
+            } else {
+                preview = nil
+            }
         } else {
             diagnosis = nil
             comparison = nil
+            preview = nil
         }
 
         let ordered = plan.sequence.sorted { $0.order < $1.order }
@@ -508,6 +543,9 @@ enum AICutPlanValidator {
         }
         guard Set(ids).count == ids.count else {
             throw AICutPlanValidationError.duplicatePhotoID
+        }
+        guard preview.map({ ids.contains($0.endPhotoID) }) ?? true else {
+            throw AICutPlanValidationError.invalidPreview
         }
         guard ordered.count >= minimumSequenceCount(
             requestedCount: requestedIDs.count,
@@ -557,7 +595,8 @@ enum AICutPlanValidator {
                 )
             },
             diagnosis: diagnosis,
-            comparison: comparison
+            comparison: comparison,
+            preview: preview
         )
     }
 
@@ -831,65 +870,81 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
             }
         }
 
-        let requestVersion = baseline == nil ? 2 : 3
-
-        let requestBody = CloudRequest(
-            version: requestVersion,
-            direction: direction,
-            storyContext: normalizedStoryContext,
-            baseline: baseline,
-            photos: photos.map {
-                CloudRequest.Photo(
-                    id: $0.id,
-                    imageBase64: $0.jpegData.base64EncodedString(),
-                    localSelection: $0.localSelection,
-                    context: $0.context
-                )
-            }
-        )
-        let encodedBody = try JSONEncoder().encode(requestBody)
+        // Version 4 adds an AI-selected story ending. If the app reaches an
+        // older Worker first, retry the unchanged version-3 contract so app
+        // and backend releases can safely arrive in either order.
+        let requestVersions = baseline == nil ? [2] : [4, 3]
         var responseData: Data?
 
-        for attempt in 0..<2 {
-            var request = URLRequest(url: endpoint)
-            request.httpMethod = "POST"
-            request.timeoutInterval = 35
-            request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.setValue("TripReel-iOS/\(requestVersion)", forHTTPHeaderField: "X-TripReel-Client")
+        versionLoop: for requestVersion in requestVersions {
+            let requestBody = CloudRequest(
+                version: requestVersion,
+                direction: direction,
+                storyContext: normalizedStoryContext,
+                baseline: baseline,
+                photos: photos.map {
+                    CloudRequest.Photo(
+                        id: $0.id,
+                        imageBase64: $0.jpegData.base64EncodedString(),
+                        localSelection: $0.localSelection,
+                        context: $0.context
+                    )
+                }
+            )
+            let encodedBody = try JSONEncoder().encode(requestBody)
 
-            let authorizationHeaders = try await authorizer.authorizationHeaders(for: encodedBody)
-            guard !authorizationHeaders.isEmpty else { throw CloudPhotoAnalysisError.notConfigured }
-            for (name, value) in authorizationHeaders {
-                guard Self.allowedAuthorizationHeaderNames.contains(name.lowercased()),
-                      !value.contains("\n"), !value.contains("\r") else {
+            for attempt in 0..<2 {
+                var request = URLRequest(url: endpoint)
+                request.httpMethod = "POST"
+                request.timeoutInterval = 35
+                request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue("application/json", forHTTPHeaderField: "Accept")
+                request.setValue(
+                    "TripReel-iOS/\(requestVersion)",
+                    forHTTPHeaderField: "X-TripReel-Client"
+                )
+
+                let authorizationHeaders = try await authorizer.authorizationHeaders(for: encodedBody)
+                guard !authorizationHeaders.isEmpty else {
                     throw CloudPhotoAnalysisError.notConfigured
                 }
-                request.setValue(value, forHTTPHeaderField: name)
-            }
-            request.httpBody = encodedBody
+                for (name, value) in authorizationHeaders {
+                    guard Self.allowedAuthorizationHeaderNames.contains(name.lowercased()),
+                          !value.contains("\n"), !value.contains("\r") else {
+                        throw CloudPhotoAnalysisError.notConfigured
+                    }
+                    request.setValue(value, forHTTPHeaderField: name)
+                }
+                request.httpBody = encodedBody
 
-            // Never log the request, response body, image data, or asset identifiers.
-            let (data, response) = try await session.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw CloudPhotoAnalysisError.invalidResponse
+                // Never log the request, response body, image data, or asset identifiers.
+                let (data, response) = try await session.data(for: request)
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw CloudPhotoAnalysisError.invalidResponse
+                }
+                if (200..<300).contains(httpResponse.statusCode) {
+                    responseData = data
+                    break versionLoop
+                }
+                let serverCode = HTTPTripReelAppAttestBackendClient.errorCode(from: data)
+                if requestVersion == 4,
+                   httpResponse.statusCode == 400,
+                   serverCode == "invalid_request" {
+                    break
+                }
+                if attempt == 0,
+                   await authorizer.recoverAuthorization(
+                       afterStatusCode: httpResponse.statusCode,
+                       responseBody: data
+                   ) {
+                    continue
+                }
+                throw CloudPhotoAnalysisError.server(
+                    statusCode: httpResponse.statusCode,
+                    code: serverCode
+                )
             }
-            if (200..<300).contains(httpResponse.statusCode) {
-                responseData = data
-                break
-            }
-            if attempt == 0,
-               await authorizer.recoverAuthorization(
-                   afterStatusCode: httpResponse.statusCode,
-                   responseBody: data
-               ) {
-                continue
-            }
-            throw CloudPhotoAnalysisError.server(
-                statusCode: httpResponse.statusCode,
-                code: HTTPTripReelAppAttestBackendClient.errorCode(from: data)
-            )
         }
 
         guard let data = responseData else { throw CloudPhotoAnalysisError.invalidResponse }
@@ -1011,6 +1066,9 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
               ]) || (version == 3 && Set(plan.keys) == [
                   "version", "direction", "summary", "story", "hook", "ending",
                   "soundtrack", "treatment", "sequence", "diagnosis", "comparison"
+              ]) || (version == 4 && Set(plan.keys) == [
+                  "version", "direction", "summary", "story", "hook", "ending",
+                  "soundtrack", "treatment", "sequence", "diagnosis", "comparison", "preview"
               ])),
               let story = plan["story"] as? [String: Any],
               Set(story.keys) == ["title", "arc"],
@@ -1026,7 +1084,10 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
               sequence.allSatisfy({ item in
                   Set(item.keys) == ["photoId", "order", "durationSeconds", "role", "emphasis", "motion"]
               }),
-              (version != 3 || Self.hasExactDirectorFields(plan)),
+              (version < 3 || Self.hasExactDirectorFields(
+                  plan,
+                  requiresPreview: version == 4
+              )),
               let retention = root["retention"] as? [String: Any],
               Set(retention.keys) == ["proxyStored", "openAIStore", "abuseMonitoring"] else {
             return false
@@ -1034,7 +1095,10 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
         return true
     }
 
-    private static func hasExactDirectorFields(_ plan: [String: Any]) -> Bool {
+    private static func hasExactDirectorFields(
+        _ plan: [String: Any],
+        requiresPreview: Bool
+    ) -> Bool {
         guard let diagnosis = plan["diagnosis"] as? [String: Any],
               Set(diagnosis.keys) == ["verdict", "issues"],
               let issues = diagnosis["issues"] as? [[String: Any]],
@@ -1047,6 +1111,10 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
                   "reorderedCount", "retimedCount", "motionChangedCount", "titleChangedCount",
                   "soundtrackChanged", "treatmentChanged", "score", "materiallyDifferent"
               ] else { return false }
+        if requiresPreview {
+            guard let preview = plan["preview"] as? [String: Any],
+                  Set(preview.keys) == ["endPhotoId", "reason"] else { return false }
+        }
         return true
     }
 

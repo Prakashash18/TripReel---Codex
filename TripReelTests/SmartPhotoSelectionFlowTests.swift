@@ -351,7 +351,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         XCTAssertEqual(allRequestedIDs, ["camera", "camera"])
     }
 
-    func testTextHeavyMemoryCanStayInFirstCutButIsBlockedFromAIPayload() async throws {
+    func testTextHeavyMeaningfulMemoryCanBeConsideredByAIDirector() async throws {
         let preferences = makePreferences()
         defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
         let cloud = CloudAnalysisSpy()
@@ -374,23 +374,20 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         model.openAICutDirections()
         model.useCloudEnhancement()
         XCTAssertEqual(model.aiCutPhotoOptions.count, 2)
-        XCTAssertEqual(model.aiCutSelectedPhotoCount, 1)
-        XCTAssertEqual(model.aiCutPrivacyReviewPhotoCount, 1)
-        XCTAssertTrue(
-            model.aiCutPhotoOptions.first(where: { $0.id == "asset-0" })?.requiresPrivacyReview == true
-        )
+        XCTAssertEqual(model.aiCutSelectedPhotoCount, 2)
+        XCTAssertTrue(model.aiCutPhotoOptions.allSatisfy(\.isRecommended))
         model.selectAICutDirection(.betterStory)
         model.continueWithAICutDirection()
         try await waitUntil { model.screen == .aiComparison }
 
         let wireIDs = await cloud.observedWireIDs()
         let requestedIDs = await thumbnails.observedRequestedIDs()
-        XCTAssertEqual(wireIDs, ["p0"])
-        XCTAssertEqual(requestedIDs, ["asset-0", "asset-1", "asset-1"])
+        XCTAssertEqual(wireIDs, ["p0", "p1"])
+        XCTAssertEqual(requestedIDs, ["asset-0", "asset-1", "asset-0", "asset-1"])
         XCTAssertEqual(model.firstCutSnapshot?.keptPhotos.count, 2)
     }
 
-    func testUserCanApproveEveryTextHeavyFirstCutMomentForAIDirector() async throws {
+    func testMeaningfulTextDoesNotOverrideQualityBasedMomentSelection() async throws {
         let preferences = makePreferences()
         defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
         let cloud = CloudAnalysisSpy()
@@ -411,16 +408,15 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
 
         XCTAssertEqual(model.firstCutSnapshot?.keptPhotos.count, 26)
         XCTAssertEqual(model.aiCutPhotoOptions.count, 26)
-        XCTAssertEqual(model.aiCutSelectedPhotoCount, 25)
-        XCTAssertEqual(model.aiCutPrivacyReviewPhotoCount, 1)
+        XCTAssertEqual(model.aiCutSelectedPhotoCount, 26)
 
-        // The ordinary toggle cannot bypass the extra privacy acknowledgement.
+        // Text visible within a meaningful event photo does not create a
+        // separate selection rule after the user has consented to previews.
         model.toggleAICutPhotoSelection("asset-0")
         XCTAssertFalse(model.selectedAICutPhotoIDs.contains("asset-0"))
 
-        model.selectAllAICutPhotos(approvingPrivacyReview: true)
+        model.selectAllAICutPhotos()
         XCTAssertEqual(model.aiCutSelectedPhotoCount, 26)
-        XCTAssertEqual(model.aiCutPrivacyReviewPhotoCount, 0)
 
         model.selectAICutDirection(.people)
         model.continueWithAICutDirection()
@@ -476,7 +472,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         model.go(.trips)
     }
 
-    func testCloudRemixBalancesFirstCutWithSafeMorePhotosAndCanRestoreThem() async throws {
+    func testCloudRemixRanksAcrossFirstCutAndMoreMoments() async throws {
         let preferences = makePreferences()
         defer { preferences.removePersistentDomain(forName: preferencesSuiteName) }
         let cloud = CloudAnalysisSpy()
@@ -504,11 +500,11 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
 
         let localSelections = await cloud.observedLocalSelections()
         let storyContexts = await cloud.observedStoryContexts()
-        XCTAssertEqual(localSelections.filter { $0 == .firstCut }.count, 26)
-        XCTAssertEqual(localSelections.filter { $0 == .morePhotos }.count, 10)
+        XCTAssertEqual(localSelections.filter { $0 == .firstCut }.count, 30)
+        XCTAssertEqual(localSelections.filter { $0 == .morePhotos }.count, 6)
         XCTAssertEqual(storyContexts, ["Our students’ competition day"])
         let aiIDs = Set(try XCTUnwrap(model.aiCutSnapshot).keptPhotos.map(\.id))
-        XCTAssertEqual(aiIDs.intersection(morePhotoIDs), morePhotoIDs)
+        XCTAssertEqual(aiIDs.intersection(morePhotoIDs).count, 6)
         XCTAssertEqual(aiIDs.count, CloudPhotoAnalysisClient.maximumBatchSize)
         XCTAssertTrue(try XCTUnwrap(model.aiCutSnapshot).titleCards.contains(.place))
         XCTAssertEqual(model.aiCutSnapshot?.titleDrafts[.place]?.title, "People make the moment")
@@ -526,8 +522,8 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
 
         model.useAICut()
         XCTAssertEqual(model.screen, .export)
-        XCTAssertNil(model.smartSelectionSummary)
-        XCTAssertTrue(model.visibleExcludedPhotos.isEmpty)
+        XCTAssertEqual(model.smartSelectionSummary, "4 moments left in More Moments")
+        XCTAssertEqual(model.visibleExcludedPhotos.count, 4)
     }
 
     func testUserChoosesExactPhotosSentToAIDirector() async throws {

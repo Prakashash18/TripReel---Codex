@@ -610,6 +610,165 @@ enum AIVideoMomentRecommender {
     }
 }
 
+struct AICutMomentCandidate: Hashable, Sendable {
+    let photo: ReelPhoto
+    let asset: TripAsset
+    let localSelection: CloudPhotoLocalSelection
+}
+
+/// Chooses the previews offered to AI using the same private Vision signals
+/// that shape the local cut. Quality and story relevance lead the ranking;
+/// chronology, media type and perceptual similarity keep the result varied.
+enum AICutMomentRecommender {
+    static func recommend(
+        candidates: [AICutMomentCandidate],
+        insights: [String: MontagePhotoInsight],
+        direction: AICutDirection,
+        limit: Int
+    ) -> [AICutMomentCandidate] {
+        guard limit > 0 else { return [] }
+
+        var seen = Set<String>()
+        var remaining = candidates.filter { seen.insert($0.photo.id).inserted }
+        var selected: [AICutMomentCandidate] = []
+        selected.reserveCapacity(min(limit, remaining.count))
+
+        while selected.count < limit, !remaining.isEmpty {
+            let bestIndex = remaining.indices.max { left, right in
+                let leftScore = score(
+                    remaining[left],
+                    selected: selected,
+                    insights: insights,
+                    direction: direction
+                )
+                let rightScore = score(
+                    remaining[right],
+                    selected: selected,
+                    insights: insights,
+                    direction: direction
+                )
+                if leftScore != rightScore { return leftScore < rightScore }
+                return stableOrder(remaining[right], remaining[left])
+            } ?? remaining.startIndex
+            selected.append(remaining.remove(at: bestIndex))
+        }
+
+        return selected
+    }
+
+    private static func score(
+        _ candidate: AICutMomentCandidate,
+        selected: [AICutMomentCandidate],
+        insights: [String: MontagePhotoInsight],
+        direction: AICutDirection
+    ) -> Double {
+        let insight = insights[candidate.photo.id] ?? MontagePhotoInsight()
+        var value = (0.56 * insight.memoryScore) + (0.32 * insight.aestheticScore)
+
+        // First Cut membership is useful evidence, but never outranks a much
+        // stronger locally omitted moment on its own.
+        if candidate.localSelection == .firstCut { value += 0.07 }
+        if candidate.photo.isVideo { value += direction == .dynamic ? 0.25 : 0.13 }
+        if candidate.photo.isSimilar { value -= 0.10 }
+
+        switch direction {
+        case .people:
+            if insight.contentKind == .people { value += 0.30 }
+            value += min(0.14, Double(insight.peopleCount) * 0.035)
+        case .calm:
+            if insight.contentKind == .scenery { value += 0.26 }
+            if insight.contentKind == .food { value += 0.04 }
+        case .dynamic:
+            if insight.contentKind == .people || insight.contentKind == .moment {
+                value += 0.08
+            }
+        case .betterStory:
+            if insight.contentKind == .people || insight.contentKind == .scenery {
+                value += 0.09
+            }
+        case .surpriseMe:
+            if insight.contentKind != .moment { value += 0.06 }
+        }
+
+        let selectedKinds = Set(selected.map {
+            insights[$0.photo.id]?.contentKind ?? .moment
+        })
+        if !selectedKinds.contains(insight.contentKind) { value += 0.12 }
+        if candidate.photo.isVideo, !selected.contains(where: { $0.photo.isVideo }) {
+            value += 0.12
+        }
+        if !selected.isEmpty,
+           !selected.contains(where: {
+               orientationBucket($0.photo) == orientationBucket(candidate.photo)
+           }) {
+            value += 0.035
+        }
+
+        value += temporalDiversityBonus(for: candidate, selected: selected)
+        if selected.contains(where: {
+            areNearDuplicates(candidate, $0, insights: insights)
+        }) {
+            value -= 0.78
+        }
+        return value
+    }
+
+    private static func temporalDiversityBonus(
+        for candidate: AICutMomentCandidate,
+        selected: [AICutMomentCandidate]
+    ) -> Double {
+        guard let date = candidate.asset.creationDate else { return 0 }
+        let distances = selected.compactMap { other in
+            other.asset.creationDate.map { abs($0.timeIntervalSince(date)) }
+        }
+        guard let nearest = distances.min() else { return 0.08 }
+        return min(0.12, nearest / (4 * 60 * 60) * 0.12)
+    }
+
+    private static func areNearDuplicates(
+        _ first: AICutMomentCandidate,
+        _ second: AICutMomentCandidate,
+        insights: [String: MontagePhotoInsight]
+    ) -> Bool {
+        guard let firstInsight = insights[first.photo.id],
+              let secondInsight = insights[second.photo.id],
+              let firstPrint = firstInsight.featurePrint,
+              let secondPrint = secondInsight.featurePrint else {
+            return false
+        }
+        return NativePhotoSimilarity.areSimilar(
+            first.asset,
+            firstPrint: firstPrint,
+            second.asset,
+            secondPrint: secondPrint,
+            firstProtectsPeople: firstInsight.peopleCount > 0,
+            secondProtectsPeople: secondInsight.peopleCount > 0
+        )
+    }
+
+    private static func orientationBucket(_ photo: ReelPhoto) -> Int {
+        if photo.aspectRatio < 0.88 { return 0 }
+        if photo.aspectRatio > 1.25 { return 2 }
+        return 1
+    }
+
+    private static func stableOrder(
+        _ left: AICutMomentCandidate,
+        _ right: AICutMomentCandidate
+    ) -> Bool {
+        switch (left.asset.creationDate, right.asset.creationDate) {
+        case let (leftDate?, rightDate?) where leftDate != rightDate:
+            return leftDate < rightDate
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        default:
+            return left.photo.id < right.photo.id
+        }
+    }
+}
+
 struct MontagePlanItem: Hashable, Sendable {
     let asset: TripAsset
     let frameStyle: MontageFrameStyle
@@ -1440,11 +1599,169 @@ enum ExportIntent: Equatable, Sendable {
     }
 }
 
+enum FreeExportEndingSource: Hashable, Sendable {
+    case aiDirector
+    case onDevice
+}
+
+struct FreeExportStoryDecision: Hashable, Sendable {
+    let endPhotoID: String?
+    let reason: String
+    let source: FreeExportEndingSource
+}
+
+/// Finds a complete late-story beat instead of shortening a reel to a fixed
+/// duration. The AI may nominate a beat, but the device enforces a narrow,
+/// creator-friendly tail so an unsafe suggestion can never hide too much.
+enum FreeExportStoryPlanner {
+    static func decide(
+        photos: [ReelPhoto],
+        titleCards: [MontageTitleCard],
+        textOverlays: [MontageTextOverlay],
+        insights: [String: MontagePhotoInsight],
+        preferredEndPhotoID: String?,
+        preferredReason: String?
+    ) -> FreeExportStoryDecision {
+        guard let finalPhoto = photos.last else {
+            return FreeExportStoryDecision(
+                endPhotoID: nil,
+                reason: "There are no moments to trim.",
+                source: .onDevice
+            )
+        }
+
+        // Very short stories are already previews in their own right.
+        guard photos.count >= 6 else {
+            return FreeExportStoryDecision(
+                endPhotoID: finalPhoto.id,
+                reason: "This story is strongest kept whole.",
+                source: .onDevice
+            )
+        }
+
+        // The recommendation may only land in the final story window. The
+        // window grows slowly and tops out at five omitted moments, so the
+        // free version always retains most of the creator's edit.
+        let maximumOmittedMoments = min(5, max(1, photos.count / 6))
+        let earliestSafeIndex = photos.count - maximumOmittedMoments - 1
+        let safeIndices = earliestSafeIndex..<(photos.count - 1)
+
+        if let preferredEndPhotoID,
+           let preferredIndex = photos.firstIndex(where: { $0.id == preferredEndPhotoID }) {
+            if preferredIndex == photos.count - 1 {
+                return FreeExportStoryDecision(
+                    endPhotoID: finalPhoto.id,
+                    reason: normalizedReason(preferredReason) ?? "The complete story has the strongest ending.",
+                    source: .aiDirector
+                )
+            }
+            if safeIndices.contains(preferredIndex) {
+                return FreeExportStoryDecision(
+                    endPhotoID: preferredEndPhotoID,
+                    reason: normalizedReason(preferredReason) ?? "The AI Director found a complete story beat here.",
+                    source: .aiDirector
+                )
+            }
+        }
+
+        let overlayPhotoIDs = Set(textOverlays.map(\.photoID))
+        let chapterAnchors = Set(titleCards.compactMap { card in
+            card.kind == .place ? card.afterPhotoID : nil
+        })
+        let bestIndex = safeIndices.max { left, right in
+            let leftScore = boundaryScore(
+                at: left,
+                photos: photos,
+                insights: insights,
+                overlayPhotoIDs: overlayPhotoIDs,
+                chapterAnchors: chapterAnchors
+            )
+            let rightScore = boundaryScore(
+                at: right,
+                photos: photos,
+                insights: insights,
+                overlayPhotoIDs: overlayPhotoIDs,
+                chapterAnchors: chapterAnchors
+            )
+            if leftScore != rightScore { return leftScore < rightScore }
+            return left > right
+        } ?? safeIndices.lowerBound
+        let endingPhoto = photos[bestIndex]
+        let endingInsight = insights[endingPhoto.id] ?? MontagePhotoInsight()
+        let reason: String
+        if chapterAnchors.contains(endingPhoto.id) {
+            reason = "Ends at a complete chapter break."
+        } else if endingPhoto.isVideo {
+            reason = "Ends after a complete motion beat."
+        } else if endingInsight.contentKind == .people {
+            reason = "Ends on a strong people moment."
+        } else {
+            reason = "Ends on a natural story beat."
+        }
+        return FreeExportStoryDecision(
+            endPhotoID: endingPhoto.id,
+            reason: reason,
+            source: .onDevice
+        )
+    }
+
+    private static func boundaryScore(
+        at index: Int,
+        photos: [ReelPhoto],
+        insights: [String: MontagePhotoInsight],
+        overlayPhotoIDs: Set<String>,
+        chapterAnchors: Set<String>
+    ) -> Double {
+        let photo = photos[index]
+        let nextPhoto = photos[index + 1]
+        let insight = insights[photo.id] ?? MontagePhotoInsight()
+        let nextInsight = insights[nextPhoto.id] ?? MontagePhotoInsight()
+        var score = (0.55 * insight.memoryScore) + (0.30 * insight.aestheticScore)
+
+        if insight.contentKind == .people { score += 0.14 }
+        if insight.peopleCount > 1 { score += 0.08 }
+        if photo.isVideo { score += 0.12 }
+        if overlayPhotoIDs.contains(photo.id) { score += 0.18 }
+        if chapterAnchors.contains(photo.id) { score += 0.26 }
+        if insight.contentKind != nextInsight.contentKind { score += 0.15 }
+        let currentScenes = sceneSignature(insight)
+        let nextScenes = sceneSignature(nextInsight)
+        if !currentScenes.isEmpty,
+           !nextScenes.isEmpty,
+           currentScenes.isDisjoint(with: nextScenes) {
+            score += 0.10
+        }
+        if nextPhoto.isSimilar { score += 0.06 }
+        if photo.isSimilar { score -= 0.10 }
+
+        // When two beats are equally strong, leave a little more of the final
+        // reveal for Full Story without making that commercial goal dominant.
+        score += Double(photos.count - index - 1) * 0.025
+        return score
+    }
+
+    private static func sceneSignature(_ insight: MontagePhotoInsight) -> Set<String> {
+        Set(insight.classifications.prefix(3).map {
+            $0.identifier.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        })
+    }
+
+    private static func normalizedReason(_ value: String?) -> String? {
+        let normalized = value?
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard let normalized, !normalized.isEmpty else { return nil }
+        return String(normalized.prefix(180))
+    }
+}
+
 private struct PreparedExportContent: Sendable {
     let photos: [ReelPhoto]
     let titleCards: [MontageTitleCard]
     let textOverlays: [MontageTextOverlay]
     let durationSeconds: Double
+    let storyDecision: FreeExportStoryDecision?
 }
 
 enum TripCutSource: String, Equatable, Sendable {
@@ -1472,6 +1789,8 @@ struct TripEditSnapshot: Hashable, Sendable {
     let textOverlays: [MontageTextOverlay]
     let selectedTrackID: String?
     let cutToBeat: Bool
+    let freePreviewEndPhotoID: String?
+    let freePreviewReason: String?
 
     var keptPhotos: [ReelPhoto] {
         photos.filter { !cutPhotoIDs.contains($0.id) }
@@ -1887,14 +2206,14 @@ struct AICutFailure: Hashable, Sendable {
 
 private struct AICutCandidatePhoto: Sendable {
     let photo: ReelPhoto
+    let asset: TripAsset
     let localSelection: CloudPhotoLocalSelection
-    let requiresPrivacyReview: Bool
 }
 
 struct AICutPhotoOption: Identifiable, Hashable, Sendable {
     let photo: ReelPhoto
     let localSelection: CloudPhotoLocalSelection
-    let requiresPrivacyReview: Bool
+    let isRecommended: Bool
 
     var id: String { photo.id }
 }
@@ -2034,10 +2353,11 @@ final class TripReelModel: ObservableObject {
     private var activeVideoClips: [String: VideoClipDescriptor] = [:]
     private var activeVideoCloudPreviews: [String: PreparedPhotoThumbnail] = [:]
     private var cloudBlockedPhotoIDs: Set<String> = []
-    private var explicitlyApprovedAICutPhotoIDs: Set<String> = []
     private var aiCutConsentGranted = false
     private var manuallyIncludedPhotoIDs: Set<String> = []
     private var photoEditOverrides: [String: PhotoEditOverride] = [:]
+    private var freePreviewEndPhotoID: String?
+    private var freePreviewReason: String?
     private let videoExporter: any TripReelVideoExporting
 
     private static let cloudPreferenceKey = "tripreel.cloud-photo-analysis-preference.v1"
@@ -2270,6 +2590,77 @@ final class TripReelModel: ObservableObject {
         return photoDuration + titleDuration
     }
 
+    var freeExportDurationSeconds: Double {
+        preparedExportContent(for: .standard).durationSeconds
+    }
+
+    var freeExportDurationText: String {
+        Self.durationText(seconds: freeExportDurationSeconds)
+    }
+
+    var freeExportIsFullLength: Bool {
+        freeExportDurationSeconds >= filmDurationSeconds - 0.01
+    }
+
+    var freeExportEndingBadge: String {
+        guard !freeExportIsFullLength else { return "FREE · FULL LENGTH · WATERMARKED" }
+        let source = preparedExportContent(for: .standard).storyDecision?.source
+        return source == .aiDirector
+            ? "FREE · AI ENDING · WATERMARKED"
+            : "FREE · SMART ENDING · WATERMARKED"
+    }
+
+    var freeExportEndingSummary: String {
+        guard !freeExportIsFullLength else {
+            return "Your whole film fits in Free Reel. Pro adds 1080p and removes the watermark."
+        }
+        let count = fullStoryExclusiveMomentCount
+        let additional = count > 0
+            ? " Full Story adds " + String(count) + " more moment"
+                + (count == 1 ? "" : "s") + " (+\(fullStoryExtraDurationText))."
+            : " Full Story keeps the complete ending (+\(fullStoryExtraDurationText))."
+        let source = preparedExportContent(for: .standard).storyDecision?.source
+        let opening = source == .aiDirector
+            ? "AI Director chose a complete stopping beat at \(freeExportDurationText)."
+            : "Free Reel ends on a complete story beat at \(freeExportDurationText)."
+        return opening + additional
+    }
+
+    var freeExportEndingReason: String {
+        preparedExportContent(for: .standard).storyDecision?.reason
+            ?? "Ends on a complete story beat."
+    }
+
+    var freeExportMomentCount: Int {
+        preparedExportContent(for: .standard).photos.count
+    }
+
+    var fullStoryExclusiveMomentCount: Int {
+        max(0, keptCount - freeExportMomentCount)
+    }
+
+    var fullStoryExtraDurationSeconds: Double {
+        max(0, filmDurationSeconds - freeExportDurationSeconds)
+    }
+
+    var fullStoryExtraDurationText: String {
+        guard fullStoryExtraDurationSeconds > 0.01 else { return "0:00" }
+        return Self.durationText(seconds: fullStoryExtraDurationSeconds)
+    }
+
+    var fullStoryHighlightPhotos: [ReelPhoto] {
+        let freeIDs = Set(preparedExportContent(for: .standard).photos.map(\.id))
+        let omitted = keptPhotos.filter { !freeIDs.contains($0.id) }
+        let candidates = omitted.isEmpty && fullStoryExtraDurationSeconds > 0.01
+            ? keptPhotos
+            : omitted
+        return Array(
+            candidates.sorted {
+                fullStoryHighlightScore(for: $0) > fullStoryHighlightScore(for: $1)
+            }.prefix(3)
+        )
+    }
+
     var activeExportDurationText: String {
         Self.durationText(seconds: activeExportDurationSeconds)
     }
@@ -2318,7 +2709,9 @@ final class TripReelModel: ObservableObject {
             ),
             textOverlays: textOverlays,
             selectedTrackID: selectedTrackID,
-            cutToBeat: cutToBeat
+            cutToBeat: cutToBeat,
+            freePreviewEndPhotoID: freePreviewEndPhotoID,
+            freePreviewReason: freePreviewReason
         )
     }
 
@@ -2333,6 +2726,8 @@ final class TripReelModel: ObservableObject {
         textOverlays = snapshot.textOverlays
         selectedTrackID = snapshot.selectedTrackID
         cutToBeat = snapshot.cutToBeat
+        freePreviewEndPhotoID = snapshot.freePreviewEndPhotoID
+        freePreviewReason = snapshot.freePreviewReason
         selectedCutSource = source
         currentPhotoIndex = 0
         history = []
@@ -2756,12 +3151,32 @@ final class TripReelModel: ObservableObject {
     }
 
     var aiCutPhotoOptions: [AICutPhotoOption] {
-        availableAICutCandidatePhotos().map {
+        let candidates = availableAICutCandidatePhotos()
+        let recommendation = recommendedAICutCandidatePhotos(from: candidates)
+        let recommendedIDs = Set(recommendation.map { $0.photo.id })
+        let recommendationRank = Dictionary(
+            uniqueKeysWithValues: recommendation.enumerated().map { ($0.element.photo.id, $0.offset) }
+        )
+        let sourceRank = Dictionary(
+            uniqueKeysWithValues: candidates.enumerated().map { ($0.element.photo.id, $0.offset) }
+        )
+
+        return candidates.sorted { left, right in
+            switch (recommendationRank[left.photo.id], recommendationRank[right.photo.id]) {
+            case let (leftRank?, rightRank?):
+                return leftRank < rightRank
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            case (nil, nil):
+                return (sourceRank[left.photo.id] ?? 0) < (sourceRank[right.photo.id] ?? 0)
+            }
+        }.map {
             AICutPhotoOption(
                 photo: $0.photo,
                 localSelection: $0.localSelection,
-                requiresPrivacyReview: $0.requiresPrivacyReview
-                    && !explicitlyApprovedAICutPhotoIDs.contains($0.photo.id)
+                isRecommended: recommendedIDs.contains($0.photo.id)
             )
         }
     }
@@ -2776,10 +3191,6 @@ final class TripReelModel: ObservableObject {
 
     var aiCutAvailablePhotoCount: Int {
         aiCutPhotoOptions.count
-    }
-
-    var aiCutPrivacyReviewPhotoCount: Int {
-        aiCutPhotoOptions.filter(\.requiresPrivacyReview).count
     }
 
     var aiVideoPhotoOptions: [ReelPhoto] {
@@ -2886,7 +3297,15 @@ final class TripReelModel: ObservableObject {
     }
 
     func selectAICutDirection(_ direction: AICutDirection) {
+        let candidates = availableAICutCandidatePhotos()
+        let previousRecommendation = Set(
+            recommendedAICutCandidatePhotos(from: candidates).map { $0.photo.id }
+        )
+        let wasUsingRecommendation = selectedAICutPhotoIDs == previousRecommendation
         selectedAICutDirection = direction
+        if wasUsingRecommendation {
+            resetAICutPhotoSelection()
+        }
     }
 
     func continueWithAICutDirection() {
@@ -2895,37 +3314,21 @@ final class TripReelModel: ObservableObject {
     }
 
     func toggleAICutPhotoSelection(_ photoID: String) {
-        guard let option = aiCutPhotoOptions.first(where: { $0.id == photoID }) else { return }
+        guard aiCutPhotoOptions.contains(where: { $0.id == photoID }) else { return }
         if selectedAICutPhotoIDs.contains(photoID) {
             selectedAICutPhotoIDs.remove(photoID)
-        } else if !option.requiresPrivacyReview,
-                  selectedAICutPhotoIDs.count < aiCutPhotoSelectionLimit {
+        } else if selectedAICutPhotoIDs.count < aiCutPhotoSelectionLimit {
             selectedAICutPhotoIDs.insert(photoID)
         }
     }
 
-    func approveAndSelectAICutPhoto(_ photoID: String) {
-        guard selectedAICutPhotoIDs.count < aiCutPhotoSelectionLimit,
-              availableAICutCandidatePhotos().contains(where: {
-                  $0.photo.id == photoID && $0.requiresPrivacyReview
-              }) else { return }
-        explicitlyApprovedAICutPhotoIDs.insert(photoID)
-        selectedAICutPhotoIDs.insert(photoID)
-    }
-
-    func selectAllAICutPhotos(approvingPrivacyReview: Bool) {
+    func selectAllAICutPhotos() {
         let options = availableAICutCandidatePhotos()
-        if approvingPrivacyReview {
-            explicitlyApprovedAICutPhotoIDs.formUnion(
-                options.filter(\.requiresPrivacyReview).map { $0.photo.id }
-            )
-        }
-        let selectable = options.filter {
-            !$0.requiresPrivacyReview
-                || explicitlyApprovedAICutPhotoIDs.contains($0.photo.id)
-        }
         selectedAICutPhotoIDs = Set(
-            Self.evenlySampled(selectable, limit: aiCutPhotoSelectionLimit)
+            qualityRankedAICutCandidatePhotos(
+                from: options,
+                limit: aiCutPhotoSelectionLimit
+            )
                 .map { $0.photo.id }
         )
     }
@@ -2973,7 +3376,6 @@ final class TripReelModel: ObservableObject {
             return
         }
         let sourceAssets = sourceTrip.assets
-        let assetsByID = Dictionary(uniqueKeysWithValues: sourceAssets.map { ($0.id, $0) })
         let allPhotos = applyingPhotoEdits(
             to: Self.makeReelPhotos(
                 from: sourceTrip,
@@ -2982,16 +3384,19 @@ final class TripReelModel: ObservableObject {
             )
         )
         let allPhotosByID = Dictionary(uniqueKeysWithValues: allPhotos.map { ($0.id, $0) })
+        let selectionRank = Dictionary(
+            uniqueKeysWithValues: aiCutPhotoOptions.enumerated().map { ($0.element.id, $0.offset) }
+        )
         let selectedOptions = availableAICutCandidatePhotos().filter {
             selectedAICutPhotoIDs.contains($0.photo.id)
-                && (!$0.requiresPrivacyReview
-                    || explicitlyApprovedAICutPhotoIDs.contains($0.photo.id))
+        }.sorted {
+            (selectionRank[$0.photo.id] ?? .max) < (selectionRank[$1.photo.id] ?? .max)
         }
         let candidates = selectedOptions.compactMap { candidate -> AICutCandidate? in
-            guard let asset = assetsByID[candidate.photo.id], !asset.isScreenshot else { return nil }
+            guard !candidate.asset.isScreenshot else { return nil }
             return AICutCandidate(
                 photo: candidate.photo,
-                asset: asset,
+                asset: candidate.asset,
                 localSelection: candidate.localSelection
             )
         }
@@ -3464,7 +3869,11 @@ final class TripReelModel: ObservableObject {
                 plannedPhotos: plannedPhotos
             ),
             selectedTrackID: validated.soundtrack.trackID.rawValue,
-            cutToBeat: true
+            cutToBeat: true,
+            freePreviewEndPhotoID: validated.preview.flatMap {
+                localIDsByWireID[$0.endPhotoID]
+            },
+            freePreviewReason: validated.preview?.reason
         )
     }
 
@@ -3841,106 +4250,60 @@ final class TripReelModel: ObservableObject {
         return allPhotos.compactMap { photo in
             guard eligibleIDs.contains(photo.id),
                   let asset = assetsByID[photo.id],
-                  !asset.isScreenshot else { return nil }
-            let requiresPrivacyReview = cloudBlockedPhotoIDs.contains(photo.id)
-            // A protected omission remains private. A protected moment already
-            // present in First Cut is shown so the user can explicitly approve
-            // its reduced preview instead of wondering where it went.
-            guard firstCutIDs.contains(photo.id) || !requiresPrivacyReview else { return nil }
+                  !asset.isScreenshot,
+                  !cloudBlockedPhotoIDs.contains(photo.id) else { return nil }
             return AICutCandidatePhoto(
                 photo: photo,
-                localSelection: firstCutIDs.contains(photo.id) ? .firstCut : .morePhotos,
-                requiresPrivacyReview: requiresPrivacyReview
+                asset: asset,
+                localSelection: firstCutIDs.contains(photo.id) ? .firstCut : .morePhotos
             )
         }
+    }
+
+    private func recommendedAICutCandidatePhotos(
+        from candidates: [AICutCandidatePhoto]
+    ) -> [AICutCandidatePhoto] {
+        let firstCutCount = candidates.filter { $0.localSelection == .firstCut }.count
+        let moreMomentsCount = candidates.count - firstCutCount
+        let reconsiderationCount = min(
+            moreMomentsCount,
+            max(4, firstCutCount / 3)
+        )
+        let contextFloor = min(candidates.count, 12)
+        let targetCount = min(
+            aiCutPhotoSelectionLimit,
+            max(firstCutCount + reconsiderationCount, contextFloor)
+        )
+        return qualityRankedAICutCandidatePhotos(from: candidates, limit: targetCount)
+    }
+
+    private func qualityRankedAICutCandidatePhotos(
+        from candidates: [AICutCandidatePhoto],
+        limit: Int
+    ) -> [AICutCandidatePhoto] {
+        let candidatesByID = Dictionary(
+            uniqueKeysWithValues: candidates.map { ($0.photo.id, $0) }
+        )
+        let ranked = AICutMomentRecommender.recommend(
+            candidates: candidates.map {
+                AICutMomentCandidate(
+                    photo: $0.photo,
+                    asset: $0.asset,
+                    localSelection: $0.localSelection
+                )
+            },
+            insights: activePhotoInsights,
+            direction: selectedAICutDirection ?? recommendedAICutDirection,
+            limit: limit
+        )
+        return ranked.compactMap { candidatesByID[$0.photo.id] }
     }
 
     private func resetAICutPhotoSelection() {
-        explicitlyApprovedAICutPhotoIDs = []
-        guard let firstCutSnapshot else {
-            selectedAICutPhotoIDs = []
-            return
-        }
         let options = availableAICutCandidatePhotos()
-        let eligibleFirstCutIDs = Set(
-            options.filter { $0.localSelection == .firstCut }.map { $0.photo.id }
-        )
-        let morePhotos = options.filter { $0.localSelection == .morePhotos }.map(\.photo)
         selectedAICutPhotoIDs = Set(
-            Self.balancedAICandidatePhotos(
-                firstCut: firstCutSnapshot.keptPhotos.filter { photo in
-                    eligibleFirstCutIDs.contains(photo.id)
-                },
-                morePhotos: morePhotos,
-                blockedIDs: cloudBlockedPhotoIDs,
-                limit: aiCutPhotoSelectionLimit
-            ).map { $0.photo.id }
+            recommendedAICutCandidatePhotos(from: options).map { $0.photo.id }
         )
-    }
-
-    /// Gives the AI a balanced view of the local First Cut and safe, locally
-    /// analyzed omissions. When one pool is small, the other fills the unused
-    /// slots. This makes a 3-of-26 local cut become 3 First Cut + 23 More Photos
-    /// candidates instead of hiding those 23 moments from the visual editor.
-    private static func balancedAICandidatePhotos(
-        firstCut: [ReelPhoto],
-        morePhotos: [ReelPhoto],
-        blockedIDs: Set<String>,
-        limit: Int
-    ) -> [AICutCandidatePhoto] {
-        guard limit > 0 else { return [] }
-
-        let eligibleFirstCut = firstCut.filter { !blockedIDs.contains($0.id) }
-        let firstCutIDs = Set(eligibleFirstCut.map(\.id))
-        let eligibleMorePhotos = morePhotos.filter {
-            !blockedIDs.contains($0.id) && !firstCutIDs.contains($0.id)
-        }
-
-        let desiredMoreCount = min(eligibleMorePhotos.count, limit / 2)
-        var firstCount = min(eligibleFirstCut.count, limit - desiredMoreCount)
-        var moreCount = desiredMoreCount
-        var unfilled = limit - firstCount - moreCount
-        if unfilled > 0 {
-            let additionalMore = min(unfilled, eligibleMorePhotos.count - moreCount)
-            moreCount += additionalMore
-            unfilled -= additionalMore
-        }
-        if unfilled > 0 {
-            firstCount += min(unfilled, eligibleFirstCut.count - firstCount)
-        }
-
-        let selectedFirstCut = evenlySampled(eligibleFirstCut, limit: firstCount).map {
-            AICutCandidatePhoto(
-                photo: $0,
-                localSelection: .firstCut,
-                requiresPrivacyReview: false
-            )
-        }
-        let selectedMorePhotos = evenlySampled(eligibleMorePhotos, limit: moreCount).map {
-            AICutCandidatePhoto(
-                photo: $0,
-                localSelection: .morePhotos,
-                requiresPrivacyReview: false
-            )
-        }
-
-        var interleaved: [AICutCandidatePhoto] = []
-        interleaved.reserveCapacity(selectedFirstCut.count + selectedMorePhotos.count)
-        for index in 0..<max(selectedFirstCut.count, selectedMorePhotos.count) {
-            if index < selectedFirstCut.count { interleaved.append(selectedFirstCut[index]) }
-            if index < selectedMorePhotos.count { interleaved.append(selectedMorePhotos[index]) }
-        }
-        return interleaved
-    }
-
-    private static func evenlySampled<Element>(_ values: [Element], limit: Int) -> [Element] {
-        guard limit > 0 else { return [] }
-        guard values.count > limit else { return values }
-        guard limit > 1 else { return [values[values.count / 2]] }
-        return (0..<limit).map { index in
-            let position = Double(index) * Double(values.count - 1) / Double(limit - 1)
-            return values[Int(position.rounded())]
-        }
     }
 
     private static func choreographedMotionStyle(
@@ -4051,7 +4414,9 @@ final class TripReelModel: ObservableObject {
                 )
             ],
             selectedTrackID: "simplicity",
-            cutToBeat: true
+            cutToBeat: true,
+            freePreviewEndPhotoID: included.dropLast().last?.id,
+            freePreviewReason: "Ends after the first complete emotional beat."
         )
         aiCutSummary = "A tighter alternative with a stronger opening, fewer repeated moments and a quicker finish."
         aiCutRecommendations = [
@@ -4229,10 +4594,18 @@ final class TripReelModel: ObservableObject {
                 analyzedCount += 1
                 nativeResults[asset.id] = nativeResult
                 montageInsights[asset.id] = MontagePhotoInsight(result: nativeResult)
-                if nativeResult.cloudReviewGate.disposition == .blockedSensitiveContent {
-                    // The optional director sees only locally approved previews.
-                    // A meaningful photo may remain in First Cut while its
-                    // document/text content is still withheld from the cloud.
+
+                // Dense text alone must not disqualify a strong event, place
+                // or people moment. Only text-heavy frames with no meaningful
+                // visual evidence stay out of the optional cloud candidate set.
+                let protectsMemory = nativeResult.tags.contains(.people)
+                    || nativeResult.tags.contains(.groupPhoto)
+                    || nativeResult.tags.contains(.scenery)
+                    || nativeResult.tags.contains(.food)
+                    || nativeResult.tags.contains(.strongMemory)
+                    || nativeResult.tags.contains(.visuallyAppealing)
+                if nativeResult.cloudReviewGate.disposition == .blockedSensitiveContent,
+                   !protectsMemory {
                     cloudBlockedPhotoIDs.insert(asset.id)
                 }
 
@@ -4782,8 +5155,9 @@ final class TripReelModel: ObservableObject {
         history = []
         cleanupSelection = []
         selectedCutSource = .firstCut
+        freePreviewEndPhotoID = nil
+        freePreviewReason = nil
         selectedAICutPhotoIDs = []
-        explicitlyApprovedAICutPhotoIDs = []
         aiCutStoryContext = ""
         aiCutConsentGranted = false
         aiCutSnapshot = nil
@@ -4993,6 +5367,8 @@ final class TripReelModel: ObservableObject {
         let requirement = ExportAccessPolicy.premiumRequirement(
             photoCount: keptCount,
             durationSeconds: filmDurationSeconds,
+            freePhotoCount: freeExportMomentCount,
+            freeDurationSeconds: freeExportDurationSeconds,
             quality: intent.quality
         )
 
@@ -5010,12 +5386,14 @@ final class TripReelModel: ObservableObject {
         ExportAccessPolicy.premiumRequirement(
             photoCount: keptCount,
             durationSeconds: filmDurationSeconds,
+            freePhotoCount: freeExportMomentCount,
+            freeDurationSeconds: freeExportDurationSeconds,
             quality: (pendingExportIntent ?? .highDefinition).quality
         ) ?? ExportPremiumRequirement(
             photoCount: keptCount,
             durationSeconds: filmDurationSeconds,
-            freePhotoLimit: ExportAccessPolicy.freePhotoLimit,
-            freeDurationLimit: ExportAccessPolicy.freeDurationLimit,
+            freePhotoLimit: freeExportMomentCount,
+            freeDurationLimit: freeExportDurationSeconds,
             requiresHighDefinition: true
         )
     }
@@ -5147,80 +5525,67 @@ final class TripReelModel: ObservableObject {
                 photos: fullPhotos,
                 titleCards: fullTitleCards,
                 textOverlays: textOverlays,
-                durationSeconds: filmDurationSeconds
+                durationSeconds: filmDurationSeconds,
+                storyDecision: nil
             )
         }
 
-        // A free export is a complete short reel, not a hard cutoff of the
-        // first 30 seconds. Sampling across the existing edit preserves its
-        // beginning, middle and ending while keeping the user's chosen order.
-        var freePhotos = evenlySampled(
-            fullPhotos,
-            limit: ExportAccessPolicy.freePhotoLimit
+        let decision = FreeExportStoryPlanner.decide(
+            photos: fullPhotos,
+            titleCards: fullTitleCards,
+            textOverlays: textOverlays,
+            insights: activePhotoInsights,
+            preferredEndPhotoID: freePreviewEndPhotoID,
+            preferredReason: freePreviewReason
         )
-        var freeTitleCards = fullTitleCards
-
-        let photoMinimums = freePhotos.map { $0.isVideo ? 0.8 : 0.6 }
-        let desiredPhotoDurations = zip(freePhotos, photoMinimums).map { pair in
-            max(pair.1, duration(for: pair.0))
-        }
-        let titleMinimums = freeTitleCards.map { _ in 0.9 }
-        let desiredTitleDurations = zip(freeTitleCards, titleMinimums).map { pair in
-            max(pair.1, pair.0.duration)
-        }
-
-        let minimumTotal = photoMinimums.reduce(0, +) + titleMinimums.reduce(0, +)
-        let desiredTotal = desiredPhotoDurations.reduce(0, +) + desiredTitleDurations.reduce(0, +)
-        let extraNeeded = max(0, desiredTotal - minimumTotal)
-        let extraAvailable = max(0, ExportAccessPolicy.freeDurationLimit - minimumTotal)
-        let expansion = extraNeeded > 0 ? min(1, extraAvailable / extraNeeded) : 0
-
-        for index in freePhotos.indices {
-            let minimum = photoMinimums[index]
-            freePhotos[index].durationSeconds = minimum
-                + ((desiredPhotoDurations[index] - minimum) * expansion)
-        }
-        freeTitleCards = freeTitleCards.enumerated().map { index, card in
-            let minimum = titleMinimums[index]
-            return MontageTitleCard(
-                kind: card.kind,
-                title: card.title,
-                subtitle: card.subtitle,
-                style: card.style,
-                duration: minimum + ((desiredTitleDurations[index] - minimum) * expansion),
-                afterPhotoID: card.afterPhotoID
+        guard let endPhotoID = decision.endPhotoID,
+              let endIndex = fullPhotos.firstIndex(where: { $0.id == endPhotoID }),
+              endIndex < fullPhotos.count - 1 else {
+            return PreparedExportContent(
+                photos: fullPhotos,
+                titleCards: fullTitleCards,
+                textOverlays: textOverlays,
+                durationSeconds: filmDurationSeconds,
+                storyDecision: decision
             )
         }
 
+        // Preserve the real edit exactly and end after the chosen moment. A
+        // chapter card stays only when its anchor is inside this cut; the full
+        // ending card belongs to Full Story unless the entire film is present.
+        let freePhotos = Array(fullPhotos.prefix(endIndex + 1))
         let includedPhotoIDs = Set(freePhotos.map(\.id))
+        let freeTitleCards = fullTitleCards.filter { card in
+            switch card.kind {
+            case .opening:
+                true
+            case .place:
+                card.afterPhotoID.map(includedPhotoIDs.contains) ?? (freePhotos.count > 1)
+            case .ending:
+                false
+            }
+        }
         let freeTextOverlays = textOverlays.filter { includedPhotoIDs.contains($0.photoID) }
-        let totalDuration = freePhotos.reduce(0) { $0 + ($1.durationSeconds ?? secondsPerPhoto) }
+        let totalDuration = freePhotos.reduce(0) { $0 + duration(for: $1) }
             + freeTitleCards.reduce(0) { $0 + $1.duration }
 
         return PreparedExportContent(
             photos: freePhotos,
             titleCards: freeTitleCards,
             textOverlays: freeTextOverlays,
-            durationSeconds: min(totalDuration, ExportAccessPolicy.freeDurationLimit)
+            durationSeconds: totalDuration,
+            storyDecision: decision
         )
     }
 
-    private func evenlySampled(_ photos: [ReelPhoto], limit: Int) -> [ReelPhoto] {
-        guard limit > 0, photos.count > limit else { return photos }
-        guard limit > 1 else { return Array(photos.prefix(1)) }
-
-        var result: [ReelPhoto] = []
-        result.reserveCapacity(limit)
-        var previousIndex = -1
-        for slot in 0..<limit {
-            let progress = Double(slot) / Double(limit - 1)
-            var index = Int((progress * Double(photos.count - 1)).rounded())
-            index = max(index, previousIndex + 1)
-            index = min(index, photos.count - (limit - slot))
-            result.append(photos[index])
-            previousIndex = index
-        }
-        return result
+    private func fullStoryHighlightScore(for photo: ReelPhoto) -> Double {
+        let insight = activePhotoInsights[photo.id] ?? MontagePhotoInsight()
+        var score = (0.58 * insight.memoryScore) + (0.32 * insight.aestheticScore)
+        if insight.contentKind == .people { score += 0.16 }
+        if insight.peopleCount > 1 { score += 0.08 }
+        if photo.isVideo { score += 0.12 }
+        if photo.isSimilar { score -= 0.10 }
+        return score
     }
 
     func cancelRender() {
@@ -5403,7 +5768,6 @@ final class TripReelModel: ObservableObject {
         aiCutFailure = nil
         aiCutProgress = 0
         selectedAICutPhotoIDs = []
-        explicitlyApprovedAICutPhotoIDs = []
         aiCutStoryContext = ""
         aiCutConsentGranted = false
         aiVideoGenerationID = UUID()
