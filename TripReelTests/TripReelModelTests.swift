@@ -958,6 +958,32 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertTrue(model.history.isEmpty)
     }
 
+    func testFilmStudioCanRemoveAndRestoreAMomentWithoutDeletingItsSource() throws {
+        let model = makeModel()
+        let photo = try XCTUnwrap(model.keptPhotos.first)
+        let originalCount = model.photos.count
+
+        XCTAssertTrue(model.removeMomentFromFilm(id: photo.id))
+        XCTAssertFalse(model.keptPhotos.contains(where: { $0.id == photo.id }))
+        XCTAssertTrue(model.cutPhotoIDs.contains(photo.id))
+        XCTAssertEqual(model.photos.count, originalCount)
+
+        XCTAssertTrue(model.restoreMomentToFilm(id: photo.id))
+        XCTAssertTrue(model.keptPhotos.contains(where: { $0.id == photo.id }))
+        XCTAssertFalse(model.cutPhotoIDs.contains(photo.id))
+        XCTAssertEqual(model.photos.count, originalCount)
+    }
+
+    func testFilmStudioWillNotRemoveTheFinalMoment() throws {
+        let model = makeModel()
+        let finalMoment = try XCTUnwrap(model.photos.first)
+        model.cutPhotoIDs = Set(model.photos.dropFirst().map(\.id))
+
+        XCTAssertEqual(model.keptCount, 1)
+        XCTAssertFalse(model.removeMomentFromFilm(id: finalMoment.id))
+        XCTAssertEqual(model.keptPhotos.map(\.id), [finalMoment.id])
+    }
+
     func testFilmStudioTimelineReordersOnlyKeptPhotoSlots() throws {
         let model = makeModel()
         let original = model.photos

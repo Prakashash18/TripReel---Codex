@@ -2451,6 +2451,10 @@ private struct AdvancedTimingSheet: View {
     }
 }
 
+private struct RecentlyRemovedFilmMoment: Identifiable, Equatable {
+    let id: String
+}
+
 struct SecondWatchScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -2458,8 +2462,11 @@ struct SecondWatchScreen: View {
     @State private var showMusic = false
     @State private var showStyle = false
     @State private var showPhotoEditor = false
+    @State private var showClipManager = false
     @State private var showFullPreview = false
     @State private var selectedPhotoID: String?
+    @State private var recentlyRemovedMoment: RecentlyRemovedFilmMoment?
+    @State private var removalFeedback = 0
     @StateObject private var soundtrack = LocalSoundtrackPlayer()
 
     var body: some View {
@@ -2471,6 +2478,42 @@ struct SecondWatchScreen: View {
                     studioContent(previewHeight: min(392, proxy.size.height * 0.47), compact: false)
                     studioContent(previewHeight: min(292, proxy.size.height * 0.39), compact: true)
                 }
+            }
+
+            if let recentlyRemovedMoment {
+                HStack(spacing: 12) {
+                    Image(systemName: "trash.slash")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(TR.accent)
+
+                    Text("Removed from this film")
+                        .font(TR.ui(12, weight: .semibold))
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    Button("Undo") {
+                        undoRemoval(recentlyRemovedMoment)
+                    }
+                    .font(TR.ui(12, weight: .bold))
+                    .foregroundStyle(TR.accent)
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("studio-undo-remove")
+                }
+                .foregroundStyle(TR.cream)
+                .padding(.horizontal, 16)
+                .frame(height: 50)
+                .background(.ultraThinMaterial)
+                .background(TR.sheet.opacity(0.88))
+                .overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1))
+                .clipShape(Capsule())
+                .shadow(color: .black.opacity(0.50), radius: 18, y: 9)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 72)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .zIndex(20)
+                .accessibilityLabel("Moment removed from this film")
             }
         }
         .fullScreenCover(isPresented: $showTitles) {
@@ -2501,6 +2544,14 @@ struct SecondWatchScreen: View {
                 .presentationCornerRadius(26)
                 .presentationBackground(TR.sheet)
         }
+        .sheet(isPresented: $showClipManager) {
+            FilmMomentManagerSheet()
+                .environmentObject(model)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(26)
+                .presentationBackground(TR.sheet)
+        }
         .fullScreenCover(isPresented: $showFullPreview) {
             FullFilmPreview()
                 .environmentObject(model)
@@ -2513,6 +2564,15 @@ struct SecondWatchScreen: View {
         .onDisappear {
             soundtrack.stop()
         }
+        .task(id: recentlyRemovedMoment?.id) {
+            guard let removalID = recentlyRemovedMoment?.id else { return }
+            try? await Task.sleep(nanoseconds: 4_500_000_000)
+            guard !Task.isCancelled, recentlyRemovedMoment?.id == removalID else { return }
+            withAnimation(reduceMotion ? nil : TRMotion.overlay) {
+                recentlyRemovedMoment = nil
+            }
+        }
+        .sensoryFeedback(.impact(weight: .medium), trigger: removalFeedback)
         .onChange(of: model.keptPhotos.map(\.id)) { _, ids in
             if let selectedPhotoID, !ids.contains(selectedPhotoID) {
                 self.selectedPhotoID = nil
@@ -2656,6 +2716,7 @@ struct SecondWatchScreen: View {
                 selectedPhotoID: $selectedPhotoID,
                 onOpenTitles: { showTitles = true },
                 onOpenMusic: { showMusic = true },
+                onAddMoments: { showClipManager = true },
                 onMove: { sourceID, targetID in
                     model.moveKeptPhoto(id: sourceID, before: targetID)
                     selectedPhotoID = sourceID
@@ -2672,30 +2733,59 @@ struct SecondWatchScreen: View {
     }
 
     private var studioToolDock: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                studioTool("Moments", symbol: "photo.stack", identifier: "studio-tool-photos") {
-                    model.editPhotoSelection()
+        Group {
+            if let selectedPhoto {
+                HStack(spacing: 24) {
+                    studioTool("Edit", symbol: "slider.horizontal.3", identifier: "studio-clip-edit") {
+                        showPhotoEditor = true
+                    }
+
+                    studioTool(
+                        "Remove",
+                        symbol: "trash",
+                        identifier: "studio-clip-remove",
+                        tint: TR.cut,
+                        disabled: model.keptCount <= 1
+                    ) {
+                        removeSelectedMoment(selectedPhoto)
+                    }
+
+                    studioTool("Done", symbol: "checkmark", identifier: "studio-clip-done") {
+                        withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                            selectedPhotoID = nil
+                        }
+                    }
                 }
-                studioTool("Crop", symbol: "crop.rotate", identifier: "studio-tool-framing") {
-                    selectedPhotoID = selectedPhotoID ?? model.keptPhotos.first?.id
-                    showPhotoEditor = true
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 18)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("studio-clip-actions")
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        studioTool("Clips", symbol: "rectangle.stack", identifier: "studio-tool-clips") {
+                            showClipManager = true
+                        }
+                        studioTool("Text", symbol: "textformat", identifier: "studio-tool-titles") {
+                            showTitles = true
+                        }
+                        studioTool("Music", symbol: "music.note", identifier: "studio-tool-music") {
+                            showMusic = true
+                        }
+                        studioTool("Style", symbol: "wand.and.stars", identifier: "studio-tool-style") {
+                            showStyle = true
+                        }
+                        studioTool("Pace", symbol: "metronome", identifier: "studio-tool-pace") {
+                            model.go(.pace)
+                        }
+                    }
+                    .padding(.horizontal, 18)
                 }
-                studioTool("Text", symbol: "textformat", identifier: "studio-tool-titles") {
-                    showTitles = true
-                }
-                studioTool("Music", symbol: "music.note", identifier: "studio-tool-music") {
-                    showMusic = true
-                }
-                studioTool("Style", symbol: "wand.and.stars", identifier: "studio-tool-style") {
-                    showStyle = true
-                }
-                studioTool("Pace", symbol: "metronome", identifier: "studio-tool-pace") {
-                    model.go(.pace)
-                }
+                .transition(.opacity)
             }
-            .padding(.horizontal, 18)
         }
+        .animation(reduceMotion ? nil : TRMotion.selection, value: selectedPhotoID)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("studio-edit-menu")
     }
@@ -2704,6 +2794,8 @@ struct SecondWatchScreen: View {
         _ title: String,
         symbol: String,
         identifier: String,
+        tint: Color = TR.cream.opacity(0.78),
+        disabled: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -2716,19 +2808,25 @@ struct SecondWatchScreen: View {
                 Text(title)
                     .font(TR.ui(9, weight: .semibold))
             }
-            .foregroundStyle(TR.cream.opacity(0.78))
+            .foregroundStyle(tint)
             .frame(width: 54)
         }
         .buttonStyle(TactileButtonStyle(pressedScale: 0.93))
+        .disabled(disabled)
+        .opacity(disabled ? 0.32 : 1)
         .accessibilityIdentifier(identifier)
     }
 
+    private var selectedPhoto: ReelPhoto? {
+        guard let selectedPhotoID else { return nil }
+        return model.keptPhotos.first(where: { $0.id == selectedPhotoID })
+    }
+
     private var previewPhotos: [ReelPhoto] {
-        guard let selectedPhotoID,
-              let photo = model.keptPhotos.first(where: { $0.id == selectedPhotoID }) else {
+        guard let selectedPhoto else {
             return model.keptPhotos
         }
-        return [photo]
+        return [selectedPhoto]
     }
 
     private var previewIdentity: String {
@@ -2740,6 +2838,30 @@ struct SecondWatchScreen: View {
         return " · \(track.name)"
     }
 
+    private func removeSelectedMoment(_ photo: ReelPhoto) {
+        let keptPhotos = model.keptPhotos
+        guard keptPhotos.count > 1,
+              let index = keptPhotos.firstIndex(where: { $0.id == photo.id }) else { return }
+        let adjacentID = index < keptPhotos.count - 1
+            ? keptPhotos[index + 1].id
+            : keptPhotos[index - 1].id
+        guard model.removeMomentFromFilm(id: photo.id) else { return }
+
+        withAnimation(reduceMotion ? nil : TRMotion.selection) {
+            selectedPhotoID = adjacentID
+            recentlyRemovedMoment = RecentlyRemovedFilmMoment(id: photo.id)
+        }
+        removalFeedback += 1
+    }
+
+    private func undoRemoval(_ moment: RecentlyRemovedFilmMoment) {
+        guard model.restoreMomentToFilm(id: moment.id) else { return }
+        withAnimation(reduceMotion ? nil : TRMotion.selection) {
+            selectedPhotoID = moment.id
+            recentlyRemovedMoment = nil
+        }
+        removalFeedback += 1
+    }
 }
 
 private struct FilmStudioTimeline: View {
@@ -2751,6 +2873,7 @@ private struct FilmStudioTimeline: View {
     @Binding var selectedPhotoID: String?
     let onOpenTitles: () -> Void
     let onOpenMusic: () -> Void
+    let onAddMoments: () -> Void
     let onMove: (String, String) -> Void
 
     var body: some View {
@@ -2758,7 +2881,7 @@ private struct FilmStudioTimeline: View {
             HStack {
                 MetadataText(text: "TIMELINE", color: .white.opacity(0.45))
                 Spacer()
-                Text(selectedPhotoID == nil ? "Tap a clip · drag to reorder" : "Clip selected · tap Crop to edit")
+                Text(timelineHint)
                     .font(TR.ui(9, weight: .medium))
                     .foregroundStyle(selectedPhotoID == nil ? .white.opacity(0.38) : TR.accent.opacity(0.85))
             }
@@ -2778,6 +2901,27 @@ private struct FilmStudioTimeline: View {
                                 )
                             }
                         }
+
+                        Button(action: onAddMoments) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 15, weight: .semibold))
+                                Text("Add")
+                                    .font(TR.ui(9, weight: .semibold))
+                            }
+                            .foregroundStyle(TR.cream.opacity(0.68))
+                            .frame(width: 58, height: 62)
+                            .background(.white.opacity(0.055))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                                    .foregroundStyle(.white.opacity(0.22))
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        }
+                        .buttonStyle(TactileButtonStyle(pressedScale: 0.95))
+                        .accessibilityLabel("Add or remove clips")
+                        .accessibilityIdentifier("studio-add-clips")
                     }
                     .padding(.horizontal, 20)
                 }
@@ -2825,6 +2969,14 @@ private struct FilmStudioTimeline: View {
         MontageTimelineBuilder.make(photos: photos, titleCards: titleCards)
     }
 
+    private var timelineHint: String {
+        guard let selectedPhotoID,
+              let index = photos.firstIndex(where: { $0.id == selectedPhotoID }) else {
+            return "Tap a clip to edit · hold to reorder"
+        }
+        return "Clip \(index + 1) selected · actions below"
+    }
+
     private func titleClip(_ card: MontageTitleCard) -> some View {
         Button(action: onOpenTitles) {
             VStack(spacing: 4) {
@@ -2849,7 +3001,7 @@ private struct FilmStudioTimeline: View {
     private func photoClip(_ photo: ReelPhoto, index: Int) -> some View {
         Button {
             withAnimation(reduceMotion ? nil : TRMotion.selection) {
-                selectedPhotoID = selectedPhotoID == photo.id ? nil : photo.id
+                selectedPhotoID = photo.id
             }
         } label: {
             ZStack(alignment: .bottomLeading) {
@@ -2886,6 +3038,143 @@ private struct FilmStudioTimeline: View {
             return true
         }
         .accessibilityLabel("Clip \(index + 1), \(photo.label)")
+        .accessibilityValue(selectedPhotoID == photo.id ? "Selected" : "Not selected")
+        .accessibilityHint("Double tap to show Edit and Remove below. Hold and drag to reorder.")
+        .accessibilityIdentifier("studio-clip-\(photo.id)")
+    }
+}
+
+private struct FilmMomentManagerSheet: View {
+    @EnvironmentObject private var model: TripReelModel
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let columns = Array(
+        repeating: GridItem(.flexible(), spacing: 8),
+        count: 3
+    )
+
+    var body: some View {
+        ZStack {
+            WarmBackground(variant: .cleanup)
+
+            VStack(spacing: 0) {
+                SheetHeader(title: "Clips") { dismiss() }
+                    .padding(.horizontal, 22)
+                    .padding(.top, 20)
+
+                HStack(alignment: .firstTextBaseline) {
+                    Text("\(model.keptCount) in this film")
+                        .font(TR.ui(12, weight: .semibold))
+                        .foregroundStyle(TR.accent)
+                    Spacer()
+                    Text("Tap to add or remove")
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.48))
+                }
+                .padding(.horizontal, 22)
+                .padding(.top, 10)
+                .padding(.bottom, 12)
+
+                ScrollView(showsIndicators: false) {
+                    LazyVGrid(columns: columns, spacing: 8) {
+                        ForEach(model.photos) { photo in
+                            momentCell(photo)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 26)
+                }
+            }
+        }
+        .foregroundStyle(TR.cream)
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 5) {
+                Text("Changes only this film. Your originals stay in Photos.")
+                    .font(TR.ui(11))
+                    .foregroundStyle(.white.opacity(0.54))
+                    .multilineTextAlignment(.center)
+
+                Text("Hold and drag clips in the timeline to reorder them.")
+                    .font(TR.ui(10))
+                    .foregroundStyle(.white.opacity(0.38))
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 10)
+            .padding(.bottom, 9)
+            .frame(maxWidth: .infinity)
+            .background(.ultraThinMaterial)
+            .background(TR.sheet.opacity(0.94))
+        }
+        .accessibilityIdentifier("film-moment-manager-sheet")
+    }
+
+    private func momentCell(_ photo: ReelPhoto) -> some View {
+        let isIncluded = !model.cutPhotoIDs.contains(photo.id)
+        let canRemove = !isIncluded || model.keptCount > 1
+
+        return Button {
+            guard canRemove else { return }
+            withAnimation(reduceMotion ? nil : TRMotion.selection) {
+                _ = model.setMomentIncludedInFilm(!isIncluded, id: photo.id)
+            }
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                PhotoAssetView(source: photo.source, dim: !isIncluded)
+                    .aspectRatio(1, contentMode: .fill)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(
+                                isIncluded ? TR.accent : .white.opacity(0.10),
+                                lineWidth: isIncluded ? 2 : 1
+                            )
+                    }
+
+                Image(systemName: isIncluded ? "checkmark.circle.fill" : "plus.circle.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(
+                        isIncluded ? TR.ink : TR.cream,
+                        isIncluded ? TR.accent : .black.opacity(0.58)
+                    )
+                    .padding(7)
+
+                if photo.isVideo {
+                    Label("CLIP", systemImage: "play.fill")
+                        .font(TR.mono(8, weight: .semibold))
+                        .tracking(0.6)
+                        .foregroundStyle(TR.cream)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 5)
+                        .background(.black.opacity(0.66))
+                        .clipShape(Capsule())
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        .padding(7)
+                }
+
+                if isIncluded, !canRemove {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(TR.cream)
+                        .padding(7)
+                        .background(.black.opacity(0.62))
+                        .clipShape(Circle())
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        .padding(7)
+                }
+            }
+            .aspectRatio(1, contentMode: .fit)
+        }
+        .buttonStyle(TactileButtonStyle(pressedScale: 0.96))
+        .accessibilityLabel("\(photo.isVideo ? "Video clip" : "Photo"), \(photo.label)")
+        .accessibilityValue(isIncluded ? "In film" : "Not in film")
+        .accessibilityHint(
+            canRemove
+                ? (isIncluded ? "Double tap to remove from this film" : "Double tap to add to this film")
+                : "At least one moment must stay in the film"
+        )
+        .accessibilityIdentifier("film-moment-\(photo.id)")
     }
 }
 

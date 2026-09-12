@@ -5297,6 +5297,35 @@ final class TripReelModel: ObservableObject {
         go(.cut, direction: .forward)
     }
 
+    /// Clip-level editing removes a moment from the working film without
+    /// touching its source in Photos. Keeping the asset in `photos` makes the
+    /// action instantly reversible and lets the clip manager add it back.
+    @discardableResult
+    func setMomentIncludedInFilm(_ included: Bool, id: String) -> Bool {
+        guard photos.contains(where: { $0.id == id }) else { return false }
+
+        if included {
+            guard cutPhotoIDs.contains(id) else { return false }
+            cutPhotoIDs.remove(id)
+        } else {
+            guard !cutPhotoIDs.contains(id), keptCount > 1 else { return false }
+            cutPhotoIDs.insert(id)
+        }
+
+        selectedCutSource = .working
+        return true
+    }
+
+    @discardableResult
+    func removeMomentFromFilm(id: String) -> Bool {
+        setMomentIncludedInFilm(false, id: id)
+    }
+
+    @discardableResult
+    func restoreMomentToFilm(id: String) -> Bool {
+        setMomentIncludedInFilm(true, id: id)
+    }
+
     func finishPhotoSelection() {
         history.removeAll()
         currentPhotoIndex = min(currentPhotoIndex, max(0, photos.count - 1))

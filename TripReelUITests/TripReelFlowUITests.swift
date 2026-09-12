@@ -72,15 +72,14 @@ final class TripReelFlowUITests: XCTestCase {
 
         let editMenu = screen("studio-edit-menu")
         XCTAssertTrue(editMenu.waitForExistence(timeout: 3))
-        screen("studio-tool-photos").tap()
-        XCTAssertTrue(screen("cut-screen").waitForExistence(timeout: 3))
-
-        app.buttons["Cut photo"].tap()
-        let doneSelecting = screen("finish-photo-selection-button")
-        expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: doneSelecting)
-        waitForExpectations(timeout: 2)
-        doneSelecting.tap()
-        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
+        let firstClip = button(startingWith: "Clip 1,")
+        XCTAssertTrue(firstClip.waitForExistence(timeout: 3))
+        firstClip.tap()
+        XCTAssertTrue(screen("studio-clip-remove").waitForExistence(timeout: 2))
+        screen("studio-clip-remove").tap()
+        XCTAssertTrue(screen("studio-undo-remove").waitForExistence(timeout: 2))
+        screen("studio-undo-remove").tap()
+        screen("studio-clip-done").tap()
 
         screen("studio-edit-menu").swipeLeft()
         screen("studio-tool-pace").tap()
@@ -128,7 +127,7 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("trips-screen").exists)
     }
 
-    func testFilmStudioOffersFullPreviewAndPhotoSelectionLoop() {
+    func testFilmStudioOffersFullPreviewAndClipManager() {
         launchApp(at: "secondWatch")
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
 
@@ -137,9 +136,9 @@ final class TripReelFlowUITests: XCTestCase {
         app.buttons["Close preview"].tap()
 
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
-        screen("studio-tool-photos").tap()
-        XCTAssertTrue(screen("cut-screen").waitForExistence(timeout: 3))
-        screen("finish-photo-selection-button").tap()
+        screen("studio-tool-clips").tap()
+        XCTAssertTrue(screen("film-moment-manager-sheet").waitForExistence(timeout: 3))
+        app.buttons["Done"].tap()
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
     }
 
