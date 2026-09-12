@@ -623,17 +623,17 @@ final class TripReelModelTests: XCTestCase {
         ))
     }
 
-    func testLongerOrLargerStandardExportRequiresPremium() {
-        XCTAssertTrue(ExportAccessPolicy.premiumRequirement(
+    func testLongerOrLargerStandardExportUsesAutomaticFreeCut() {
+        XCTAssertNil(ExportAccessPolicy.premiumRequirement(
             photoCount: 25,
             durationSeconds: 30,
             quality: .standard
-        )?.exceedsPhotoLimit == true)
-        XCTAssertTrue(ExportAccessPolicy.premiumRequirement(
+        ))
+        XCTAssertNil(ExportAccessPolicy.premiumRequirement(
             photoCount: 24,
             durationSeconds: 30.01,
             quality: .standard
-        )?.exceedsDurationLimit == true)
+        ))
     }
 
     func testHDAlwaysRequiresPremium() {
@@ -938,6 +938,102 @@ final class TripReelModelTests: XCTestCase {
         let savedURL = await exporter.savedURL
         XCTAssertTrue(saved)
         XCTAssertEqual(savedURL, model.exportedVideoURL)
+    }
+
+    func testStandardExportBuildsACompleteFreeCutWithinLimits() async throws {
+        let exporter = RecordingVideoExporter()
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            videoExporter: exporter
+        )
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let assets = (0..<36).map { index in
+            TripAsset(
+                id: "free-\(index)",
+                source: .bundled("my-khe-beach"),
+                creationDate: date.addingTimeInterval(Double(index) * 60),
+                filename: "IMG_\(index).JPG",
+                pixelWidth: 1_024,
+                pixelHeight: 1_536
+            )
+        }
+        let trip = Trip(
+            id: "free-export-trip",
+            place: "Singapore",
+            dates: "Today",
+            startDate: date,
+            endDate: date.addingTimeInterval(35 * 60),
+            assets: assets,
+            coverID: assets[18].id
+        )
+        model.startBuild(trip: trip)
+        model.titleCards = [.opening, .place, .ending]
+        let expectedFirstID = try XCTUnwrap(model.keptPhotos.first?.id)
+        let expectedLastID = try XCTUnwrap(model.keptPhotos.last?.id)
+
+        model.requestExport(.standard, isPremium: false)
+        for _ in 0..<100 where model.screen != .done {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(model.screen, .done)
+        let recordedRequest = await exporter.lastRequest
+        let request = try XCTUnwrap(recordedRequest)
+        XCTAssertEqual(request.quality, .standard)
+        XCTAssertEqual(request.photos.count, ExportAccessPolicy.freePhotoLimit)
+        XCTAssertEqual(request.photos.first?.id, expectedFirstID)
+        XCTAssertEqual(request.photos.last?.id, expectedLastID)
+        let duration = MontageTimelineBuilder.make(
+            photos: request.photos,
+            titleCards: request.titleCards
+        ).reduce(0) { total, item in
+            total + item.duration(defaultPhotoDuration: request.secondsPerPhoto)
+        }
+        XCTAssertLessThanOrEqual(duration, ExportAccessPolicy.freeDurationLimit + 0.001)
+        XCTAssertEqual(model.activeExportDurationSeconds, duration, accuracy: 0.001)
+    }
+
+    func testDecliningProImmediatelyExportsTheFreeVersion() async throws {
+        let exporter = RecordingVideoExporter()
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            videoExporter: exporter
+        )
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let asset = TripAsset(
+            id: "free-fallback",
+            source: .bundled("my-khe-beach"),
+            creationDate: date,
+            filename: "IMG_FREE.JPG",
+            pixelWidth: 1_024,
+            pixelHeight: 1_536
+        )
+        model.startBuild(trip: Trip(
+            id: "paywall-trip",
+            place: "Singapore",
+            dates: "Today",
+            startDate: date,
+            endDate: date,
+            assets: [asset],
+            coverID: asset.id
+        ))
+
+        model.requestExport(.highDefinition, isPremium: false)
+        XCTAssertEqual(model.screen, .paywall)
+
+        model.exportFreeVersionInsteadOfUpgrading()
+        for _ in 0..<100 where model.screen != .done {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(model.screen, .done)
+        XCTAssertNil(model.pendingExportIntent)
+        XCTAssertEqual(model.exportQuality, .standard)
+        let recordedRequest = await exporter.lastRequest
+        let request = try XCTUnwrap(recordedRequest)
+        XCTAssertEqual(request.quality, .standard)
     }
 
     func testUnavailableExportPhotoOffersOneTapRetryWithoutLosingQuality() async throws {

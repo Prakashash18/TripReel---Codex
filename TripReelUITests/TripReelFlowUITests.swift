@@ -108,15 +108,13 @@ final class TripReelFlowUITests: XCTestCase {
         studioExport.tap()
         XCTAssertTrue(screen("export-screen").waitForExistence(timeout: 3))
 
-        let standardExport = app.buttons
-            .matching(NSPredicate(format: "label CONTAINS[c] %@", "Standard"))
-            .firstMatch
+        let standardExport = screen("export-standard")
         XCTAssertTrue(standardExport.waitForExistence(timeout: 2))
         standardExport.tap()
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
 
-        app.buttons["Save"].tap()
+        button(startingWith: "Save Video").tap()
         XCTAssertTrue(screen("cleanup-screen").waitForExistence(timeout: 3))
     }
 
@@ -183,19 +181,24 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
     }
 
-    func testPaywallExplainsTheFreeLimitAndKeepsEditingAvailable() {
+    func testPaywallExplainsTheFreeLimitAndExportsItImmediately() {
         launchApp(at: "paywall")
 
         XCTAssertTrue(screen("paywall-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Keep the whole story"].exists)
+        XCTAssertTrue(app.staticTexts["Export the full story"].exists)
         XCTAssertTrue(
             app.staticTexts
-                .matching(NSPredicate(format: "label CONTAINS[c] %@", "up to 24 moments and 0:30"))
+                .matching(NSPredicate(format: "label CONTAINS[c] %@", "export a free 0:30 cut"))
                 .firstMatch
                 .exists
         )
-        XCTAssertTrue(app.buttons["Not now"].exists)
+        let freeExport = screen("export-free-from-paywall")
+        XCTAssertTrue(freeExport.exists)
         XCTAssertTrue(app.buttons["Restore purchases"].exists)
+
+        freeExport.tap()
+        XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
+        XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
     }
 
     func testAIConsentComesBeforeDirectionAndDeclineReturnsSafely() {
@@ -316,17 +319,18 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
     }
 
-    func testCapCutPathRendersACompatibleMovie() {
-        launchApp(at: "export", premium: true)
+    func testExportOffersOneFreeAndOneProVideoChoice() {
+        launchApp(at: "export")
         XCTAssertTrue(screen("export-screen").waitForExistence(timeout: 3))
+        XCTAssertTrue(screen("export-standard").exists)
+        XCTAssertTrue(screen("export-hd").exists)
+        XCTAssertFalse(screen("export-project").exists)
 
-        screen("export-project").tap()
-        let renderForCapCut = screen("render-capcut-video")
-        XCTAssertTrue(renderForCapCut.waitForExistence(timeout: 3))
-        XCTAssertFalse(app.staticTexts["CapCut, InShot, spreadsheets"].exists)
-
-        renderForCapCut.tap()
+        screen("export-standard").tap()
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
+        XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
+        XCTAssertTrue(button(startingWith: "Share Reel").exists)
+        XCTAssertTrue(button(startingWith: "Save Video").exists)
     }
 
     func testCleanupShowsDestructiveWarningBeforePhotosRequest() {

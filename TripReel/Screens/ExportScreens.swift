@@ -16,15 +16,6 @@ struct TripReelMovieFile: Transferable, Sendable {
 struct ExportScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @EnvironmentObject private var purchases: RevenueCatPurchaseService
-    @State private var showProjectSheet = false
-
-    private var standardNeedsPro: Bool {
-        ExportAccessPolicy.premiumRequirement(
-            photoCount: model.keptCount,
-            durationSeconds: model.filmDurationSeconds,
-            quality: .standard
-        ) != nil
-    }
 
     var body: some View {
         ZStack {
@@ -47,10 +38,10 @@ struct ExportScreen: View {
                 VStack(spacing: 14) {
                     ExportOptionCard(
                         source: model.previewSource(at: 0),
-                        title: "Standard",
-                        subtitle: "9:16 · 720p · watermarked",
-                        badge: standardNeedsPro ? "PRO · FULL LENGTH" : "FREE",
-                        badgeColor: standardNeedsPro ? TR.accent : TR.keep,
+                        title: "Free Reel",
+                        subtitle: "9:16 · 720p · up to 0:30",
+                        badge: "FREE · WATERMARKED",
+                        badgeColor: TR.keep,
                         watermark: true,
                         accessibilityID: "export-standard"
                     ) {
@@ -59,9 +50,9 @@ struct ExportScreen: View {
 
                     ExportOptionCard(
                         source: model.previewSource(at: 2),
-                        title: "HD",
-                        subtitle: "9:16 · 1080p · no watermark",
-                        badge: "PRO",
+                        title: "Full Story",
+                        subtitle: "9:16 · 1080p · full length",
+                        badge: "MEMORIES PRO · NO WATERMARK",
                         badgeColor: TR.accent,
                         highlighted: true,
                         showsChevron: true,
@@ -70,44 +61,9 @@ struct ExportScreen: View {
                         model.requestExport(.highDefinition, isPremium: purchases.isPremium)
                     }
 
-                    Button {
-                        showProjectSheet = true
-                    } label: {
-                        HStack(spacing: 14) {
-                            Image(systemName: "rectangle.stack.badge.play")
-                                .font(.system(size: 25, weight: .light))
-                                .foregroundStyle(.white.opacity(0.67))
-                                .frame(width: 74, height: 96)
-                                .background(.white.opacity(0.05))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.10), lineWidth: 1))
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Continue editing")
-                                    .font(TR.ui(18, weight: .semibold))
-                                Text("CapCut video or professional timeline files")
-                                    .font(TR.ui(13))
-                                    .foregroundStyle(.white.opacity(0.62))
-                                    .lineSpacing(2)
-                                MetadataText(text: "Timeline files free", color: TR.keep)
-                            }
-
-                            Spacer(minLength: 4)
-
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.34))
-                        }
-                        .foregroundStyle(TR.cream)
-                        .padding(14)
-                        .glassCard(cornerRadius: 20)
-                    }
-                    .buttonStyle(TactileButtonStyle())
-                    .accessibilityIdentifier("export-project")
-
-                    Text("The watermark sits in the top-right corner, as shown.")
+                    Text("Both export as vertical videos ready for Instagram, TikTok or Photos.")
                         .font(TR.ui(12))
-                        .foregroundStyle(.white.opacity(0.43))
+                        .foregroundStyle(.white.opacity(0.54))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 16)
                 }
@@ -116,14 +72,6 @@ struct ExportScreen: View {
 
                 Spacer(minLength: 12)
             }
-        }
-        .sheet(isPresented: $showProjectSheet) {
-            ProjectFormatSheet()
-                .environmentObject(model)
-                .presentationDetents([.fraction(0.74)])
-                .presentationDragIndicator(.visible)
-                .presentationCornerRadius(26)
-                .presentationBackground(TR.sheet)
         }
         .alert(
             model.exportErrorTitle,
@@ -448,7 +396,7 @@ struct PaywallScreen: View {
                 titleCards: model.montageTitleCards,
                 textOverlays: model.textOverlays,
                 dim: true,
-                watermark: true,
+                watermark: false,
                 look: model.montageLook,
                 motionIntensity: model.montageMotionIntensity,
                 secondsPerSlide: model.secondsPerPhoto
@@ -467,7 +415,7 @@ struct PaywallScreen: View {
 
                     VStack(alignment: .leading, spacing: 10) {
                         MetadataText(text: "Memories Pro", color: TR.accent)
-                        Text("Keep the whole story")
+                        Text("Export the full story")
                             .font(TR.display(38))
                             .tracking(-0.5)
                             .fixedSize(horizontal: false, vertical: true)
@@ -482,7 +430,7 @@ struct PaywallScreen: View {
                             .foregroundStyle(.white.opacity(0.76))
                             .lineSpacing(4)
 
-                        Text("Free exports include up to \(requirement.freePhotoLimit) moments and \(durationText(requirement.freeDurationLimit)). Previewing and editing stay free.")
+                        Text("Or export a free \(durationText(requirement.freeDurationLimit)) cut below. Memories keeps moments from across your story—not just the beginning.")
                             .font(TR.ui(12))
                             .foregroundStyle(.white.opacity(0.54))
                             .lineSpacing(3)
@@ -544,7 +492,7 @@ struct PaywallScreen: View {
                                     .controlSize(.small)
                                     .tint(TR.ink)
                             }
-                            Text(purchases.isPurchasing ? "Connecting to App Store…" : "Unlock & export")
+                            Text(purchases.isPurchasing ? "Connecting to App Store…" : "Unlock full story")
                                 .frame(maxWidth: .infinity)
                         }
                     }
@@ -552,18 +500,28 @@ struct PaywallScreen: View {
                     .disabled(selectedPackage == nil || purchases.isPurchasing)
                     .accessibilityIdentifier("purchase-memories-pro")
 
-                    HStack {
-                        Button("Restore purchases") {
-                            restorePurchases()
+                    Button {
+                        model.exportFreeVersionInsteadOfUpgrading()
+                    } label: {
+                        VStack(spacing: 3) {
+                            Text("Export free version")
+                            Text("Up to 0:30 · 720p · watermark")
+                                .font(TR.ui(11, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.58))
                         }
-                        .disabled(!purchases.isConfigured || purchases.isPurchasing)
-                        Spacer()
-                        Button("Not now") {
-                            model.keepEditingInsteadOfUpgrading()
-                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(GlassButtonStyle())
+                    .disabled(purchases.isPurchasing)
+                    .accessibilityIdentifier("export-free-from-paywall")
+
+                    Button("Restore purchases") {
+                        restorePurchases()
                     }
                     .font(TR.ui(13, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.62))
+                    .frame(maxWidth: .infinity)
+                    .disabled(!purchases.isConfigured || purchases.isPurchasing)
                     .buttonStyle(.plain)
 
                     VStack(spacing: 7) {
@@ -672,7 +630,7 @@ struct PaywallScreen: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Purchases aren't available yet", systemImage: "cart.badge.questionmark")
                 .font(TR.ui(14, weight: .semibold))
-            Text("You can keep editing, or shorten this reel to the free export limit and try again.")
+            Text("You can still export the free 30-second version below.")
                 .font(TR.ui(12))
                 .foregroundStyle(.white.opacity(0.58))
                 .lineSpacing(3)
@@ -731,9 +689,9 @@ struct RenderingScreen: View {
 
             VStack(spacing: 0) {
                 MontageView(
-                    photos: model.keptPhotos,
-                    titleCards: model.montageTitleCards,
-                    textOverlays: model.textOverlays,
+                    photos: model.activeExportPhotos,
+                    titleCards: model.activeExportTitleCards,
+                    textOverlays: model.activeExportTextOverlays,
                     showLabels: false,
                     look: model.montageLook,
                     motionIntensity: model.montageMotionIntensity,
@@ -857,15 +815,15 @@ struct FilmReadyScreen: View {
         VStack(spacing: 0) {
             Spacer(minLength: compact ? 4 : 10)
 
-            MetadataText(text: "\(model.tripShortPlace) · \(model.filmDurationText)", color: .white.opacity(0.57))
+            MetadataText(text: "\(model.activeExportMediaSummary) · \(model.activeExportDurationText)", color: .white.opacity(0.57))
                 .padding(.horizontal, 62)
                 .padding(.bottom, compact ? 10 : 20)
                 .trEntrance(0, distance: 6)
 
             MontageView(
-                photos: model.keptPhotos,
-                titleCards: model.montageTitleCards,
-                textOverlays: model.textOverlays,
+                photos: model.activeExportPhotos,
+                titleCards: model.activeExportTitleCards,
+                textOverlays: model.activeExportTextOverlays,
                 watermark: model.exportQuality.includesWatermark,
                 showLabels: false,
                 look: model.montageLook,
@@ -877,7 +835,7 @@ struct FilmReadyScreen: View {
                 .shadow(color: .black.opacity(0.58), radius: 30, y: 22)
                 .trEntrance(1, distance: 12)
 
-            Text(model.exportHandoff == .capCut ? "Ready for CapCut" : "Your film is ready")
+            Text("Ready to share")
                 .font(TR.display(compact ? 27 : 30))
                 .multilineTextAlignment(.center)
                 .padding(.top, compact ? 12 : 20)
@@ -886,83 +844,44 @@ struct FilmReadyScreen: View {
             Spacer(minLength: compact ? 4 : 14)
 
             VStack(spacing: compact ? 8 : 11) {
-                if model.exportHandoff == .capCut {
-                    Text("Share the MP4 and choose CapCut. If it isn't listed, save it and import from Photos inside CapCut.")
-                        .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.53))
-                        .multilineTextAlignment(.center)
-                        .lineSpacing(3)
-
-                    HStack(spacing: 10) {
-                        if let url = model.exportedVideoURL {
-                            ShareLink(
-                                item: TripReelMovieFile(url: url),
-                                preview: SharePreview("\(model.tripShortPlace) · Memories film")
-                            ) {
-                                Text("Choose CapCut")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(CreamButtonStyle())
-                            .accessibilityIdentifier("share-film")
-                        } else {
-                            Button("Choose CapCut") { }
-                                .buttonStyle(CreamButtonStyle())
-                                .disabled(true)
-                        }
-
-                        Button {
-                            saveFilm()
-                        } label: {
-                            HStack(spacing: 8) {
-                                if model.isSavingExport {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                        .tint(TR.cream)
-                                }
-                                Text(model.isSavingExport ? "Saving…" : "Save to Photos")
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
-                        .buttonStyle(GlassButtonStyle())
-                        .disabled(model.isSavingExport)
-                        .accessibilityIdentifier("save-film")
+                if let url = model.exportedVideoURL {
+                    ShareLink(
+                        item: TripReelMovieFile(url: url),
+                        preview: SharePreview("\(model.tripShortPlace) · Memories reel")
+                    ) {
+                        Label("Share Reel", systemImage: "square.and.arrow.up")
+                            .frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(CreamButtonStyle())
+                    .accessibilityIdentifier("share-film")
                 } else {
-                    HStack(spacing: 10) {
-                        Button {
-                            saveFilm()
-                        } label: {
-                            HStack(spacing: 8) {
-                                if model.isSavingExport {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                        .tint(TR.ink)
-                                }
-                                Text(model.isSavingExport ? "Saving…" : "Save")
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
+                    Button("Share Reel") { }
                         .buttonStyle(CreamButtonStyle())
-                        .disabled(model.isSavingExport)
-                        .accessibilityIdentifier("save-film")
+                        .disabled(true)
+                        .accessibilityIdentifier("share-film")
+                }
 
-                        if let url = model.exportedVideoURL {
-                            ShareLink(
-                                item: TripReelMovieFile(url: url),
-                                preview: SharePreview("\(model.tripShortPlace) · Memories film")
-                            ) {
-                                Text("Share MP4")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(GlassButtonStyle())
-                            .accessibilityIdentifier("share-film")
-                        } else {
-                            Button("Share MP4") { }
-                                .buttonStyle(GlassButtonStyle())
-                                .disabled(true)
+                Text("Choose Instagram, TikTok, Messages or another app.")
+                    .font(TR.ui(11))
+                    .foregroundStyle(.white.opacity(0.52))
+                    .multilineTextAlignment(.center)
+
+                Button {
+                    saveFilm()
+                } label: {
+                    HStack(spacing: 8) {
+                        if model.isSavingExport {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(TR.cream)
                         }
+                        Label(model.isSavingExport ? "Saving…" : "Save Video", systemImage: "square.and.arrow.down")
+                            .frame(maxWidth: .infinity)
                     }
                 }
+                .buttonStyle(GlassButtonStyle())
+                .disabled(model.isSavingExport)
+                .accessibilityIdentifier("save-film")
 
                 Button("Make another") {
                     model.restart()

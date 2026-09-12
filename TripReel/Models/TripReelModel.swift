@@ -1440,6 +1440,13 @@ enum ExportIntent: Equatable, Sendable {
     }
 }
 
+private struct PreparedExportContent: Sendable {
+    let photos: [ReelPhoto]
+    let titleCards: [MontageTitleCard]
+    let textOverlays: [MontageTextOverlay]
+    let durationSeconds: Double
+}
+
 enum TripCutSource: String, Equatable, Sendable {
     case firstCut
     case aiCut
@@ -1968,6 +1975,10 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var photoAnalysisFollowUp: PhotoAnalysisFollowUp?
     @Published var isSmartSelectionReviewPresented = false
     @Published private(set) var exportedVideoURL: URL?
+    @Published private(set) var activeExportPhotos: [ReelPhoto] = []
+    @Published private(set) var activeExportTitleCards: [MontageTitleCard] = []
+    @Published private(set) var activeExportTextOverlays: [MontageTextOverlay] = []
+    @Published private(set) var activeExportDurationSeconds = 0.0
     @Published private(set) var exportErrorMessage: String?
     @Published private(set) var exportErrorTitle = "Export couldn't finish"
     @Published private(set) var exportCanRetryPhotoDownload = false
@@ -2254,6 +2265,18 @@ final class TripReelModel: ObservableObject {
         let titleDuration = montageTitleCards.reduce(0) { $0 + $1.duration }
         let photoDuration = keptPhotos.reduce(0) { $0 + duration(for: $1) }
         return photoDuration + titleDuration
+    }
+
+    var activeExportDurationText: String {
+        Self.durationText(seconds: activeExportDurationSeconds)
+    }
+
+    var activeExportMediaSummary: String {
+        let videoCount = activeExportPhotos.filter(\.isVideo).count
+        return Trip.mediaCountText(
+            photoCount: max(0, activeExportPhotos.count - videoCount),
+            videoCount: videoCount
+        )
     }
 
     var firstCutDurationText: String {
@@ -4684,6 +4707,10 @@ final class TripReelModel: ObservableObject {
         exportHandoff = .normal
         pendingExportIntent = nil
         exportedVideoURL = nil
+        activeExportPhotos = []
+        activeExportTitleCards = []
+        activeExportTextOverlays = []
+        activeExportDurationSeconds = 0
         exportErrorMessage = nil
         exportSaveMessage = nil
         workTask?.cancel()
@@ -4941,6 +4968,13 @@ final class TripReelModel: ObservableObject {
         go(.export, direction: .backward)
     }
 
+    /// Keeps the upgrade optional: declining Pro immediately renders a real,
+    /// self-contained free cut instead of sending the user back to editing.
+    func exportFreeVersionInsteadOfUpgrading() {
+        pendingExportIntent = nil
+        startRender(hd: false, handoff: .normal)
+    }
+
     func startRender(hd: Bool = false) {
         startRender(hd: hd, handoff: .normal)
     }
@@ -4955,14 +4989,20 @@ final class TripReelModel: ObservableObject {
         exportGeneration = generation
         exportQuality = hd ? .hd : .standard
         exportHandoff = handoff
+        let content = preparedExportContent(for: exportQuality)
+        activeExportPhotos = content.photos
+        activeExportTitleCards = content.titleCards
+        activeExportTextOverlays = content.textOverlays
+        activeExportDurationSeconds = content.durationSeconds
+        exportedVideoURL = nil
         renderProgress = 0
         exportErrorMessage = nil
         exportErrorTitle = "Export couldn't finish"
         exportCanRetryPhotoDownload = false
         exportProgressPhase = .preparingPhotos(
             ready: 0,
-            total: keptPhotos.count,
-            currentLabel: keptPhotos.first?.label,
+            total: content.photos.count,
+            currentLabel: content.photos.first?.label,
             downloadProgress: nil
         )
         exportSaveMessage = nil
@@ -4984,16 +5024,16 @@ final class TripReelModel: ObservableObject {
             return
         }
 
-        guard !keptPhotos.isEmpty else {
+        guard !content.photos.isEmpty else {
             exportErrorMessage = "Keep at least one photo or video before exporting."
             go(.export)
             return
         }
 
         let request = TripReelVideoExportRequest(
-            photos: keptPhotos,
-            titleCards: montageTitleCards,
-            textOverlays: textOverlays,
+            photos: content.photos,
+            titleCards: content.titleCards,
+            textOverlays: content.textOverlays,
             secondsPerPhoto: secondsPerPhoto,
             look: montageLook,
             motionIntensity: montageMotionIntensity,
@@ -5034,6 +5074,90 @@ final class TripReelModel: ObservableObject {
                 self.go(.export)
             }
         }
+    }
+
+    private func preparedExportContent(for quality: ExportQuality) -> PreparedExportContent {
+        let fullPhotos = keptPhotos
+        let fullTitleCards = montageTitleCards
+        guard quality == .standard else {
+            return PreparedExportContent(
+                photos: fullPhotos,
+                titleCards: fullTitleCards,
+                textOverlays: textOverlays,
+                durationSeconds: filmDurationSeconds
+            )
+        }
+
+        // A free export is a complete short reel, not a hard cutoff of the
+        // first 30 seconds. Sampling across the existing edit preserves its
+        // beginning, middle and ending while keeping the user's chosen order.
+        var freePhotos = evenlySampled(
+            fullPhotos,
+            limit: ExportAccessPolicy.freePhotoLimit
+        )
+        var freeTitleCards = fullTitleCards
+
+        let photoMinimums = freePhotos.map { $0.isVideo ? 0.8 : 0.6 }
+        let desiredPhotoDurations = zip(freePhotos, photoMinimums).map { pair in
+            max(pair.1, duration(for: pair.0))
+        }
+        let titleMinimums = freeTitleCards.map { _ in 0.9 }
+        let desiredTitleDurations = zip(freeTitleCards, titleMinimums).map { pair in
+            max(pair.1, pair.0.duration)
+        }
+
+        let minimumTotal = photoMinimums.reduce(0, +) + titleMinimums.reduce(0, +)
+        let desiredTotal = desiredPhotoDurations.reduce(0, +) + desiredTitleDurations.reduce(0, +)
+        let extraNeeded = max(0, desiredTotal - minimumTotal)
+        let extraAvailable = max(0, ExportAccessPolicy.freeDurationLimit - minimumTotal)
+        let expansion = extraNeeded > 0 ? min(1, extraAvailable / extraNeeded) : 0
+
+        for index in freePhotos.indices {
+            let minimum = photoMinimums[index]
+            freePhotos[index].durationSeconds = minimum
+                + ((desiredPhotoDurations[index] - minimum) * expansion)
+        }
+        freeTitleCards = freeTitleCards.enumerated().map { index, card in
+            let minimum = titleMinimums[index]
+            return MontageTitleCard(
+                kind: card.kind,
+                title: card.title,
+                subtitle: card.subtitle,
+                style: card.style,
+                duration: minimum + ((desiredTitleDurations[index] - minimum) * expansion),
+                afterPhotoID: card.afterPhotoID
+            )
+        }
+
+        let includedPhotoIDs = Set(freePhotos.map(\.id))
+        let freeTextOverlays = textOverlays.filter { includedPhotoIDs.contains($0.photoID) }
+        let totalDuration = freePhotos.reduce(0) { $0 + ($1.durationSeconds ?? secondsPerPhoto) }
+            + freeTitleCards.reduce(0) { $0 + $1.duration }
+
+        return PreparedExportContent(
+            photos: freePhotos,
+            titleCards: freeTitleCards,
+            textOverlays: freeTextOverlays,
+            durationSeconds: min(totalDuration, ExportAccessPolicy.freeDurationLimit)
+        )
+    }
+
+    private func evenlySampled(_ photos: [ReelPhoto], limit: Int) -> [ReelPhoto] {
+        guard limit > 0, photos.count > limit else { return photos }
+        guard limit > 1 else { return Array(photos.prefix(1)) }
+
+        var result: [ReelPhoto] = []
+        result.reserveCapacity(limit)
+        var previousIndex = -1
+        for slot in 0..<limit {
+            let progress = Double(slot) / Double(limit - 1)
+            var index = Int((progress * Double(photos.count - 1)).rounded())
+            index = max(index, previousIndex + 1)
+            index = min(index, photos.count - (limit - slot))
+            result.append(photos[index])
+            previousIndex = index
+        }
+        return result
     }
 
     func cancelRender() {
@@ -5254,6 +5378,11 @@ final class TripReelModel: ObservableObject {
         nearbyEvents = []
         selectedTrip = nil
         photos = []
+        activeExportPhotos = []
+        activeExportTitleCards = []
+        activeExportTextOverlays = []
+        activeExportDurationSeconds = 0
+        exportedVideoURL = nil
         libraryPreviewPhotos = []
         libraryPhotoCount = 0
         selectedPhotoCount = 0

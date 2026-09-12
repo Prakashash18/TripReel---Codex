@@ -41,10 +41,10 @@ enum ExportAccessPolicy {
         let safePhotoCount = max(photoCount, 0)
         let safeDuration = max(durationSeconds.isFinite ? durationSeconds : 0, 0)
         let requiresHighDefinition = quality == .hd
-        let exceedsPhotos = safePhotoCount > freePhotoLimit
-        let exceedsDuration = safeDuration > freeDurationLimit
 
-        guard requiresHighDefinition || exceedsPhotos || exceedsDuration else { return nil }
+        // Standard always has a usable free path. The model turns a longer
+        // film into a complete short cut within the free limits at render time.
+        guard requiresHighDefinition else { return nil }
         return ExportPremiumRequirement(
             photoCount: safePhotoCount,
             durationSeconds: safeDuration,
