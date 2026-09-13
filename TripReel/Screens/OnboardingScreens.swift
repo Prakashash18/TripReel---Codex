@@ -276,6 +276,8 @@ struct PhotoAccessScreen: View {
     @State private var requestingAccess = false
     @State private var showPicker = false
     @State private var showAccessDenied = false
+    @State private var showsPrivacyPolicy = false
+    @State private var showsTermsOfUse = false
     @State private var pickerItems: [PhotosPickerItem] = []
 
     var body: some View {
@@ -301,6 +303,12 @@ struct PhotoAccessScreen: View {
             Button("Not now", role: .cancel) {}
         } message: {
             Text("Allow Memories to read your photos and videos in Settings, or choose moments manually instead.")
+        }
+        .sheet(isPresented: $showsPrivacyPolicy) {
+            TripReelPrivacyPolicyView()
+        }
+        .sheet(isPresented: $showsTermsOfUse) {
+            MemoriesTermsOfUseView()
         }
         .accessibilityIdentifier("photo-access-screen")
     }
@@ -368,6 +376,19 @@ struct PhotoAccessScreen: View {
                     preferredItemEncoding: .current,
                     photoLibrary: .shared()
                 )
+
+                VStack(spacing: 5) {
+                    Text("By continuing, you agree to the Terms and confirm you own or have permission to use this media.")
+                    HStack(spacing: 14) {
+                        Button("Terms") { showsTermsOfUse = true }
+                        Button("Privacy") { showsPrivacyPolicy = true }
+                    }
+                    .fontWeight(.semibold)
+                }
+                .font(TR.ui(10))
+                .foregroundStyle(.white.opacity(0.46))
+                .multilineTextAlignment(.center)
+                .buttonStyle(.plain)
             }
             .trEntrance(1, distance: 10)
         }

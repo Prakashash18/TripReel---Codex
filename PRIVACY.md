@@ -1,8 +1,12 @@
-# Memories Privacy Policy
+# Memories: Create Stories Privacy Policy
 
-Effective September 12, 2026
+Effective September 13, 2026
 
-Memories turns the photos that matter into a story. This policy explains what the app processes and what happens when you optionally enable cloud photo intelligence.
+Memories: Create Stories ("Memories") turns the photos that matter into a story. This policy explains what the app processes and what happens when you optionally enable cloud photo intelligence.
+
+## Content rights
+
+Users may select photos, videos, captions, or other media only when they own that content or have the permissions needed to use it, including any applicable permissions from people shown or heard. Users retain ownership of their content and give Memories limited permission to process selected media solely to create, edit, and export the story they request. See the Terms of Use for details.
 
 ## Photos, videos and memory detection
 

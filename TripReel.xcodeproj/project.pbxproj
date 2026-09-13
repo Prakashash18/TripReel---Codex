@@ -600,6 +600,8 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.prakashash18.tripreel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				REVENUECAT_PUBLIC_SDK_KEY = "";
+				REVENUECAT_STORY_PASS_PACKAGE_ID = story_pass;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;

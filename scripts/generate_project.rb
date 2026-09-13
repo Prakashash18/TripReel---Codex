@@ -120,6 +120,7 @@ target.build_configurations.each do |configuration|
   settings['SWIFT_VERSION'] = '5.0'
   settings['TARGETED_DEVICE_FAMILY'] = '1'
   settings['REVENUECAT_PUBLIC_SDK_KEY'] = ''
+  settings['REVENUECAT_STORY_PASS_PACKAGE_ID'] = 'story_pass'
   settings['TRIPREEL_PHOTO_ANALYSIS_ENDPOINT'] = 'https://tripreel-visual-analysis.tripreel-prakashash18.workers.dev/v1/analyze'
   settings['TRIPREEL_APP_ATTEST_ENVIRONMENT'] = 'production'
 end

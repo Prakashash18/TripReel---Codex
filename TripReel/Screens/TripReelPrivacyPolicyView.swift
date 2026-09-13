@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TripReelPrivacyPolicyView: View {
     @Environment(\.dismiss) private var dismiss
+    @State private var showsTermsOfUse = false
 
     var body: some View {
         NavigationStack {
@@ -41,6 +42,7 @@ struct TripReelPrivacyPolicyView: View {
                         )
 
                         VStack(alignment: .leading, spacing: 10) {
+                            Button("Memories Terms of Use") { showsTermsOfUse = true }
                             Link(
                                 "OpenAI API data controls",
                                 destination: URL(string: "https://developers.openai.com/api/docs/guides/your-data")!
@@ -54,7 +56,7 @@ struct TripReelPrivacyPolicyView: View {
                         .font(TR.ui(13, weight: .semibold))
                         .foregroundStyle(TR.accent)
 
-                        Text("Effective September 12, 2026")
+                        Text("Effective September 13, 2026")
                             .font(TR.mono(10))
                             .tracking(0.8)
                             .foregroundStyle(.white.opacity(0.38))
@@ -76,12 +78,15 @@ struct TripReelPrivacyPolicyView: View {
             }
         }
         .tint(TR.accent)
+        .sheet(isPresented: $showsTermsOfUse) {
+            MemoriesTermsOfUseView()
+        }
         .accessibilityIdentifier("tripreel-privacy-policy")
     }
 
     private var policyHeader: some View {
         VStack(alignment: .leading, spacing: 10) {
-            MetadataText(text: TR.appName)
+            MetadataText(text: TR.appStoreName)
             Text("Your memories stay yours.")
                 .font(TR.display(34))
             Text("This policy explains the private on-device First Cut and what happens only if you explicitly request an AI edit.")
@@ -92,6 +97,96 @@ struct TripReelPrivacyPolicyView: View {
     }
 
     private func section(_ title: String, _ body: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(TR.ui(15, weight: .semibold))
+            Text(body)
+                .font(TR.ui(13))
+                .foregroundStyle(.white.opacity(0.64))
+                .lineSpacing(5)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+struct MemoriesTermsOfUseView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                WarmBackground(variant: .trips)
+
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 24) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            MetadataText(text: TR.appStoreName)
+                            Text("Your content. Your responsibility.")
+                                .font(TR.display(34))
+                            Text("These terms explain the permission Memories needs to turn media you choose into a story.")
+                                .font(TR.ui(14))
+                                .foregroundStyle(.white.opacity(0.66))
+                                .lineSpacing(4)
+                        }
+
+                        termsSection(
+                            "Your rights to imported content",
+                            "You may import a photo, video, audio recording, caption, or other material only if you own it or have all permissions needed to use it. This includes copyright and, where applicable, permission from people shown or heard. Do not use Memories to infringe another person's intellectual-property, privacy, publicity, or other rights."
+                        )
+                        termsSection(
+                            "Permission to create your story",
+                            "You keep ownership of your content. You give Memories a limited, non-exclusive permission to access, copy, analyze, edit, render, and export only the content you choose, solely to provide the features you request. This permission ends when processing and any disclosed service-provider security or legal retention are complete."
+                        )
+                        termsSection(
+                            "Optional AI Director",
+                            "Nothing is sent to OpenAI unless you explicitly approve an AI edit. When you do, the limited permission above also allows Memories and its service providers to process the disclosed reduced previews and editorial information for that request. The original photo and video files remain on your device as described in the Privacy Policy."
+                        )
+                        termsSection(
+                            "Exports and sharing",
+                            "You are responsible for reviewing your finished story and confirming that you have the rights and permissions required before saving, publishing, or sharing it. AI-generated titles and edits can be inaccurate and should be checked before use."
+                        )
+                        termsSection(
+                            "Music and app assets",
+                            "Music, fonts, graphics, and other assets supplied by Memories remain owned by their respective licensors. You may use them only as incorporated into stories created and exported through Memories. When sharing an export that includes bundled music, preserve or provide the attribution shown in Music Credits."
+                        )
+                        termsSection(
+                            "Purchases",
+                            "Purchases are processed by Apple. Subscription billing, renewal, cancellation, and refunds are governed by Apple's terms and the purchase information shown before confirmation."
+                        )
+
+                        Link(
+                            "Apple Standard EULA",
+                            destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
+                        )
+                        .font(TR.ui(13, weight: .semibold))
+                        .foregroundStyle(TR.accent)
+
+                        Text("Effective September 13, 2026")
+                            .font(TR.mono(10))
+                            .tracking(0.8)
+                            .foregroundStyle(.white.opacity(0.38))
+                            .padding(.top, 4)
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.top, 16)
+                    .padding(.bottom, 36)
+                }
+            }
+            .foregroundStyle(TR.cream)
+            .navigationTitle("Terms of Use")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .font(TR.ui(14, weight: .semibold))
+                }
+            }
+        }
+        .tint(TR.accent)
+        .accessibilityIdentifier("memories-terms-of-use")
+    }
+
+    private func termsSection(_ title: String, _ body: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(TR.ui(15, weight: .semibold))

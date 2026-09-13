@@ -583,6 +583,7 @@ struct PaywallScreen: View {
     @EnvironmentObject private var purchases: RevenueCatPurchaseService
     @State private var selectedPackageID: String?
     @State private var showsPrivacyPolicy = false
+    @State private var showsTermsOfUse = false
     @State private var didResumeExport = false
 
     private var selectedPackage: Package? {
@@ -739,10 +740,7 @@ struct PaywallScreen: View {
 
                         HStack(spacing: 18) {
                             Button("Privacy") { showsPrivacyPolicy = true }
-                            Link(
-                                "Terms",
-                                destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
-                            )
+                            Button("Terms") { showsTermsOfUse = true }
                         }
                         .font(TR.ui(11, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.54))
@@ -767,6 +765,9 @@ struct PaywallScreen: View {
         .sheet(isPresented: $showsPrivacyPolicy) {
             TripReelPrivacyPolicyView()
         }
+        .sheet(isPresented: $showsTermsOfUse) {
+            MemoriesTermsOfUseView()
+        }
         .accessibilityIdentifier("paywall-screen")
     }
 
@@ -780,7 +781,7 @@ struct PaywallScreen: View {
         } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(isStoryPass ? "Export this story" : "Memories Pro · \(package.memoriesDisplayName)")
+                    Text(isStoryPass ? "Export this story" : "\(TR.proName) · \(package.memoriesDisplayName)")
                         .font(TR.ui(16, weight: .semibold))
                     Text(isStoryPass
                         ? "One full export · \(package.localizedPriceString)"
@@ -847,7 +848,7 @@ struct PaywallScreen: View {
         guard let selectedPackage else { return "Choose an option" }
         return purchases.isStoryPass(selectedPackage)
             ? "Export this story"
-            : "Start Memories Pro"
+            : "Start \(TR.proName)"
     }
 
     private var purchaseTermsText: String {

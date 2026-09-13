@@ -20,9 +20,9 @@ struct ExportPremiumRequirement: Equatable, Sendable {
         case (false, true, _):
             "This film is longer than a free export."
         case (false, false, true):
-            "HD export is included with Memories Pro."
+            "HD export is included with \(TR.proName)."
         case (false, false, false):
-            "This export is included with Memories Pro."
+            "This export is included with \(TR.proName)."
         }
     }
 }
@@ -161,7 +161,7 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
                 return true
             }
             if !isPremium {
-                message = "The purchase completed, but Memories Pro is not active yet. Try Restore Purchases."
+                message = "The purchase completed, but \(TR.proName) is not active yet. Try Restore Purchases."
             }
             return isPremium
         } catch {
@@ -181,7 +181,7 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
             let customerInfo = try await Purchases.shared.restorePurchases()
             apply(customerInfo)
             if !isPremium {
-                message = "No active Memories Pro purchase was found for this Apple ID."
+                message = "No active \(TR.proName) purchase was found for this Apple ID."
             }
             return isPremium
         } catch {
@@ -277,8 +277,8 @@ extension Package {
         case .threeMonth: "Three months"
         case .twoMonth: "Two months"
         case .weekly: "Weekly"
-        case .custom, .unknown: storeProduct.localizedTitle.isEmpty ? "Memories Pro" : storeProduct.localizedTitle
-        @unknown default: "Memories Pro"
+        case .custom, .unknown: storeProduct.localizedTitle.isEmpty ? TR.proName : storeProduct.localizedTitle
+        @unknown default: TR.proName
         }
     }
 
