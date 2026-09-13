@@ -219,10 +219,10 @@ final class TripReelFlowUITests: XCTestCase {
         button(startingWith: "Improve with AI").tap()
         XCTAssertTrue(screen("cloud-analysis-consent").waitForExistence(timeout: 3))
 
-        button(startingWith: "Allow & choose moments").tap()
+        button(startingWith: "Allow & continue").tap()
 
         XCTAssertTrue(screen("ai-direction-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Choose the moments"].exists)
+        XCTAssertTrue(app.staticTexts["Pick moments"].exists)
         XCTAssertTrue(screen("ai-setup-step-moments").exists)
         XCTAssertFalse(screen("ai-setup-step-story").exists)
         XCTAssertFalse(screen("ai-setup-step-direction").exists)
@@ -248,14 +248,21 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(button(startingWith: "Continue").waitForExistence(timeout: 2))
         button(startingWith: "Continue").tap()
         XCTAssertTrue(screen("ai-setup-step-story").waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Add the meaning"].exists)
+        XCTAssertTrue(app.staticTexts["What happened?"].exists)
         XCTAssertFalse(screen("ai-setup-step-direction").exists)
 
-        XCTAssertTrue(button(startingWith: "Continue").waitForExistence(timeout: 2))
+        let requiredContinue = button(startingWith: "Continue")
+        XCTAssertTrue(requiredContinue.waitForExistence(timeout: 2))
+        XCTAssertFalse(requiredContinue.isEnabled)
+        let clue = app.textFields.firstMatch
+        XCTAssertTrue(clue.waitForExistence(timeout: 2))
+        clue.tap()
+        clue.typeText("Our students won the competition")
+        XCTAssertTrue(requiredContinue.isEnabled)
         button(startingWith: "Continue").tap()
         XCTAssertTrue(screen("ai-setup-step-direction").waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Choose a direction"].exists)
-        XCTAssertTrue(screen("ai-direction-dynamic").exists)
+        XCTAssertTrue(app.staticTexts["Pick a style"].exists)
+        XCTAssertTrue(screen("ai-direction-choice-dynamic").exists)
         attachScreenshot(named: "AI direction step")
 
         screen("app-back-button").tap()

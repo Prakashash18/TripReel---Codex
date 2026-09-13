@@ -15,6 +15,9 @@ struct CloudAnalysisConsentView: View {
 
     @State private var showsDataDetails = false
     @State private var showsPrivacyPolicy = false
+    @State private var previewTravels = false
+    @State private var sparklePulses = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isSettings: Bool {
         if case .settings = context { return true }
@@ -29,7 +32,8 @@ struct CloudAnalysisConsentView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     header
                     introduction
-                    essentials
+                    previewFlow
+                    safetySummary
                     dataDetails
                     actions
                 }
@@ -40,6 +44,15 @@ struct CloudAnalysisConsentView: View {
         }
         .foregroundStyle(TR.cream)
         .accessibilityIdentifier("cloud-analysis-consent")
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.7).repeatForever(autoreverses: false)) {
+                previewTravels = true
+            }
+            withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
+                sparklePulses = true
+            }
+        }
         .sheet(isPresented: $showsPrivacyPolicy) {
             TripReelPrivacyPolicyView()
                 .presentationDetents([.large])
@@ -80,12 +93,12 @@ struct CloudAnalysisConsentView: View {
             }
             .accessibilityHidden(true)
 
-            Text("Before AI sees your moments")
+            Text("Let AI shape the story")
                 .font(TR.display(36))
                 .tracking(-0.4)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("With your permission, Memories sends small photo previews or sampled video frames you choose to OpenAI’s GPT-5.6 Luna.")
+            Text("You choose the moments. Memories sends small previews to OpenAI’s GPT-5.6 Luna.")
                 .font(TR.ui(15))
                 .foregroundStyle(.white.opacity(0.76))
                 .lineSpacing(4)
@@ -103,51 +116,65 @@ struct CloudAnalysisConsentView: View {
         }
     }
 
-    private var essentials: some View {
-        VStack(spacing: 0) {
-            essentialRow(
-                symbol: "checkmark.circle",
-                title: "Choose the moments next",
-                detail: "Nothing is selected or sent on this screen."
-            )
-            Divider().overlay(.white.opacity(0.10)).padding(.leading, 56)
-            essentialRow(
-                symbol: "photo.on.rectangle",
-                title: "Previews, not originals",
-                detail: "Full videos, sound, filenames, dates and locations stay private."
-            )
-            Divider().overlay(.white.opacity(0.10)).padding(.leading, 56)
-            essentialRow(
-                symbol: "timeline.selection",
-                title: "AI compares your First Cut",
-                detail: "It receives your order, titles and broad on-device scene and timing cues."
-            )
-            Divider().overlay(.white.opacity(0.10)).padding(.leading, 56)
-            essentialRow(
-                symbol: "checkmark.shield",
-                title: "Your First Cut stays safe",
-                detail: "You can keep it instead of the AI version."
-            )
+    private var previewFlow: some View {
+        HStack(spacing: 12) {
+            flowEndpoint(symbol: "iphone", label: "Your iPhone")
+
+            ZStack {
+                Capsule()
+                    .fill(.white.opacity(0.13))
+                    .frame(height: 2)
+                Image(systemName: "photo.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(TR.accent)
+                    .frame(width: 34, height: 42)
+                    .background(TR.sheet)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(TR.accent.opacity(0.45)))
+                    .offset(x: reduceMotion ? 0 : (previewTravels ? 32 : -32))
+                    .opacity(reduceMotion ? 1 : (previewTravels ? 0.35 : 1))
+            }
+            .frame(maxWidth: .infinity)
+
+            flowEndpoint(symbol: "sparkles", label: "AI Director")
+                .scaleEffect(sparklePulses && !reduceMotion ? 1.06 : 1)
         }
-        .padding(.horizontal, 15)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 20)
         .glassCard(cornerRadius: 20)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Reduced previews move securely from this iPhone to OpenAI")
     }
 
-    private func essentialRow(symbol: String, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            RoundedIcon(symbol: symbol, tint: TR.accent, size: 40)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(TR.ui(13, weight: .semibold))
-                Text(detail)
-                    .font(TR.ui(11))
-                    .foregroundStyle(.white.opacity(0.58))
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
+    private func flowEndpoint(symbol: String, label: String) -> some View {
+        VStack(spacing: 7) {
+            Image(systemName: symbol)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(TR.accent)
+                .frame(width: 48, height: 48)
+                .background(.black.opacity(0.24))
+                .clipShape(Circle())
+            Text(label)
+                .font(TR.ui(10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.72))
         }
-        .padding(.vertical, 13)
+    }
+
+    private var safetySummary: some View {
+        HStack(spacing: 8) {
+            compactSafetyLabel("Originals stay here", symbol: "iphone")
+            compactSafetyLabel("First Cut stays safe", symbol: "checkmark.shield")
+        }
+    }
+
+    private func compactSafetyLabel(_ title: String, symbol: String) -> some View {
+        Label(title, systemImage: symbol)
+            .font(TR.ui(10, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.70))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.06))
+            .clipShape(Capsule())
     }
 
     private var dataDetails: some View {
@@ -184,7 +211,7 @@ struct CloudAnalysisConsentView: View {
         VStack(spacing: 10) {
             Button(
                 cloudServiceAvailable
-                    ? (isSettings ? "Allow cloud enhancement" : "Allow & choose moments")
+                    ? (isSettings ? "Allow AI Director" : "Allow & continue")
                     : "AI Director unavailable",
                 action: onUseCloudEnhancement
             )

@@ -51,6 +51,9 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(model.screen, .aiDirection)
 
         model.advanceAICutSetup()
+        XCTAssertEqual(model.aiCutSetupStep, .story)
+        model.aiCutStoryContext = "A family day at the gardens"
+        model.advanceAICutSetup()
         XCTAssertEqual(model.aiCutSetupStep, .direction)
 
         model.navigateBack()

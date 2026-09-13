@@ -305,9 +305,6 @@ struct AICutDirectionScreen: View {
                         )
                 }
                 Spacer()
-                Text("\(model.aiCutSetupStep.position) / 3")
-                    .font(TR.mono(10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.42))
             }
             .animation(reduceMotion ? nil : TRMotion.selection, value: model.aiCutSetupStep)
         }
@@ -335,17 +332,31 @@ struct AICutDirectionScreen: View {
     }
 
     private var directionStep: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            MetadataText(text: "Reel direction", color: .white.opacity(0.52))
+        VStack(alignment: .leading, spacing: 14) {
+            if let selectedDirection = model.selectedAICutDirection {
+                AICutDirectionCard(
+                    direction: selectedDirection,
+                    selected: true,
+                    recommended: model.recommendedAICutDirection == selectedDirection
+                ) {
+                    model.selectAICutDirection(selectedDirection)
+                }
+            }
 
-            LazyVStack(spacing: 11) {
-                ForEach(orderedDirections) { direction in
-                    AICutDirectionCard(
-                        direction: direction,
-                        selected: model.selectedAICutDirection == direction,
-                        recommended: model.recommendedAICutDirection == direction
-                    ) {
-                        model.selectAICutDirection(direction)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(orderedDirections) { direction in
+                        Button(direction.shortTitle) {
+                            model.selectAICutDirection(direction)
+                        }
+                        .font(TR.ui(11, weight: .semibold))
+                        .foregroundStyle(model.selectedAICutDirection == direction ? TR.ink : .white.opacity(0.70))
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 10)
+                        .background(model.selectedAICutDirection == direction ? TR.accent : .white.opacity(0.07))
+                        .clipShape(Capsule())
+                        .buttonStyle(TactileButtonStyle(pressedScale: 0.96))
+                        .accessibilityIdentifier("ai-direction-choice-\(direction.rawValue)")
                     }
                 }
             }
@@ -357,7 +368,7 @@ struct AICutDirectionScreen: View {
     private var storyContextEditor: some View {
         VStack(alignment: .leading, spacing: 11) {
             HStack {
-                Text("Your clue · optional")
+                Text("Your clue · required")
                     .font(TR.ui(13, weight: .semibold))
                 Spacer()
                 Text("\(model.aiCutStoryContext.count)/\(CloudPhotoAnalysisClient.maximumStoryContextCharacters)")
@@ -390,6 +401,13 @@ struct AICutDirectionScreen: View {
                 }
             }
             .accessibilityIdentifier("ai-story-context")
+
+            if !storyContextIsValid {
+                Label("Add a short clue to continue", systemImage: "arrow.up")
+                    .font(TR.ui(10, weight: .medium))
+                    .foregroundStyle(TR.accent)
+                    .accessibilityIdentifier("ai-story-context-required")
+            }
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 7) {
@@ -464,20 +482,20 @@ struct AICutDirectionScreen: View {
 
     private var stepTitle: String {
         switch model.aiCutSetupStep {
-        case .moments: "Choose the moments"
-        case .story: "Add the meaning"
-        case .direction: "Choose a direction"
+        case .moments: "Pick moments"
+        case .story: "What happened?"
+        case .direction: "Pick a style"
         }
     }
 
     private var stepDetail: String {
         switch model.aiCutSetupStep {
         case .moments:
-            "Start with the moments ranked on your iPhone for quality, relevance and variety."
+            "We picked the strongest. Change them if needed."
         case .story:
-            "A short clue helps AI write a better hook and more meaningful titles. You can leave it blank."
+            "Tell AI what this memory means."
         case .direction:
-            model.recommendedAICutReason
+            "Choose how the story should feel."
         }
     }
 
@@ -490,7 +508,7 @@ struct AICutDirectionScreen: View {
         case .moments:
             model.aiCutSelectedPhotoCount > 0
         case .story:
-            true
+            storyContextIsValid
         case .direction:
             model.aiCutCanCreate
         }
@@ -508,12 +526,16 @@ struct AICutDirectionScreen: View {
     private var footerAccessibilityHint: String {
         switch model.aiCutSetupStep {
         case .moments:
-            "Continues to an optional story clue"
+            "Continues to the required story clue"
         case .story:
             "Continues to reel direction choices"
         case .direction:
             "Sends the selected reduced previews and choices to OpenAI, then creates a comparison cut"
         }
+    }
+
+    private var storyContextIsValid: Bool {
+        !model.aiCutStoryContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 

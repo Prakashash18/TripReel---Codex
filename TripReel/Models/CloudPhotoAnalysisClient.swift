@@ -163,6 +163,16 @@ enum AICutDirection: String, CaseIterable, Codable, Identifiable, Hashable, Send
         }
     }
 
+    var shortTitle: String {
+        switch self {
+        case .betterStory: "Story"
+        case .dynamic: "Fast"
+        case .calm: "Calm"
+        case .people: "People"
+        case .surpriseMe: "Surprise"
+        }
+    }
+
     var detail: String {
         switch self {
         case .betterStory: "A clear opening, turning point and satisfying ending."

@@ -88,6 +88,8 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         model.useCloudEnhancement()
         XCTAssertEqual(model.screen, .aiDirection)
         XCTAssertFalse(model.isCloudAnalysisConsentPresented)
+        XCTAssertFalse(model.aiCutCanCreate)
+        model.aiCutStoryContext = "Our students’ competition day"
         XCTAssertTrue(model.aiCutCanCreate)
         let callsOnConsent = await cloud.observedCallCount()
         let thumbnailsOnConsent = await thumbnails.observedRequestedIDs()

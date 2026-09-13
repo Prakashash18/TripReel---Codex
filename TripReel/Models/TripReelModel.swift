@@ -3336,6 +3336,7 @@ final class TripReelModel: ObservableObject {
         aiCutConsentGranted
             && selectedAICutDirection != nil
             && !selectedAICutPhotoIDs.isEmpty
+            && !aiCutStoryContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Moments omitted from the cut currently on screen. An AI cut can restore
@@ -3403,6 +3404,9 @@ final class TripReelModel: ObservableObject {
             navigationDirection = .forward
             aiCutSetupStep = .story
         case .story:
+            guard !aiCutStoryContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
+            }
             navigationDirection = .forward
             aiCutSetupStep = .direction
         case .direction:
