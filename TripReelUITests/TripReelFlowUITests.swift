@@ -340,6 +340,12 @@ final class TripReelFlowUITests: XCTestCase {
         screen("export-standard").tap()
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
+        XCTAssertTrue(
+            app.staticTexts
+                .matching(NSPredicate(format: "label CONTAINS[c] %@", "doesn’t save exported videos"))
+                .firstMatch
+                .exists
+        )
         XCTAssertTrue(button(startingWith: "Share Reel").exists)
         XCTAssertTrue(button(startingWith: "Save Video").exists)
     }

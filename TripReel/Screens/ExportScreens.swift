@@ -863,17 +863,28 @@ struct PaywallScreen: View {
                 selectedPackageID = package.identifier
             }
         } label: {
-            HStack {
+            HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(isStoryPass ? "Export this story" : "\(TR.proName) · \(package.memoriesDisplayName)")
+                    Text(isStoryPass ? "Story Pass" : TR.proName)
                         .font(TR.ui(16, weight: .semibold))
                     Text(isStoryPass
-                        ? "One full export · \(package.localizedPriceString)"
-                        : "Unlimited full exports · \(package.memoriesPriceDetail)")
+                        ? "Export this full story"
+                        : "Unlimited full exports")
                         .font(TR.ui(12))
                         .foregroundStyle(.white.opacity(0.62))
                 }
-                Spacer()
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(package.localizedPriceString)
+                        .font(TR.ui(15, weight: .semibold))
+                        .foregroundStyle(TR.accent)
+                    Text(isStoryPass ? "one-time" : package.memoriesBillingPeriodLabel)
+                        .font(TR.ui(10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.52))
+                }
+
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 20, weight: .medium))
                     .foregroundStyle(isSelected ? TR.accent : .white.opacity(0.28))
@@ -886,6 +897,11 @@ struct PaywallScreen: View {
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(TactileButtonStyle())
+        .accessibilityLabel(
+            isStoryPass
+                ? "Story Pass, export this full story, \(package.localizedPriceString), one-time"
+                : "\(TR.proName), unlimited full exports, \(package.localizedPriceString), \(package.memoriesBillingPeriodLabel)"
+        )
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
     }
 
@@ -1161,7 +1177,7 @@ struct FilmReadyScreen: View {
                 .shadow(color: .black.opacity(0.58), radius: 30, y: 22)
                 .trEntrance(1, distance: 12)
 
-            Text("Ready to share")
+            Text("Save your video")
                 .font(TR.display(compact ? 27 : 30))
                 .multilineTextAlignment(.center)
                 .padding(.top, compact ? 12 : 20)
@@ -1170,6 +1186,39 @@ struct FilmReadyScreen: View {
             Spacer(minLength: compact ? 4 : 14)
 
             VStack(spacing: compact ? 8 : 11) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(TR.accent)
+                    Text("Memories doesn’t save exported videos automatically. Save a copy to Photos before leaving.")
+                        .font(TR.ui(11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, compact ? 10 : 12)
+                .background(.white.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("export-save-warning")
+
+                Button {
+                    saveFilm()
+                } label: {
+                    HStack(spacing: 8) {
+                        if model.isSavingExport {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(TR.ink)
+                        }
+                        Label(model.isSavingExport ? "Saving…" : "Save Video", systemImage: "square.and.arrow.down")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(CreamButtonStyle())
+                .disabled(model.isSavingExport)
+                .accessibilityIdentifier("save-film")
+
                 if let url = model.exportedVideoURL {
                     Button {
                         sharePayload = MP4SharePayload(
@@ -1180,11 +1229,11 @@ struct FilmReadyScreen: View {
                         Label("Share Reel", systemImage: "square.and.arrow.up")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(CreamButtonStyle())
+                    .buttonStyle(GlassButtonStyle())
                     .accessibilityIdentifier("share-film")
                 } else {
                     Button("Share Reel") { }
-                        .buttonStyle(CreamButtonStyle())
+                        .buttonStyle(GlassButtonStyle())
                         .disabled(true)
                         .accessibilityIdentifier("share-film")
                 }
@@ -1193,23 +1242,6 @@ struct FilmReadyScreen: View {
                     .font(TR.ui(11))
                     .foregroundStyle(.white.opacity(0.52))
                     .multilineTextAlignment(.center)
-
-                Button {
-                    saveFilm()
-                } label: {
-                    HStack(spacing: 8) {
-                        if model.isSavingExport {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(TR.cream)
-                        }
-                        Label(model.isSavingExport ? "Saving…" : "Save Video", systemImage: "square.and.arrow.down")
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .buttonStyle(GlassButtonStyle())
-                .disabled(model.isSavingExport)
-                .accessibilityIdentifier("save-film")
 
                 Button("Make another") {
                     model.restart()

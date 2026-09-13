@@ -295,4 +295,18 @@ extension Package {
         @unknown default: localizedPriceString
         }
     }
+
+    var memoriesBillingPeriodLabel: String {
+        switch packageType {
+        case .annual: "per year"
+        case .monthly: "per month"
+        case .sixMonth: "every six months"
+        case .threeMonth: "every three months"
+        case .twoMonth: "every two months"
+        case .weekly: "per week"
+        case .lifetime: "one-time"
+        case .custom, .unknown: ""
+        @unknown default: ""
+        }
+    }
 }
