@@ -344,6 +344,19 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(button(startingWith: "Save Video").exists)
     }
 
+    func testLaterFreeExportUsesRewardedBottomSheet() {
+        app = XCUIApplication()
+        app.launchArguments = ["-qaScreen", "export", "-qaNoHint", "-qaRewardedExportPrompt"]
+        app.launchEnvironment["TRIPREEL_DEVELOPMENT_AUTH_TOKEN"] = String(repeating: "u", count: 32)
+        app.launch()
+
+        XCTAssertTrue(screen("export-screen").waitForExistence(timeout: 3))
+        screen("export-standard").tap()
+        XCTAssertTrue(screen("rewarded-export-prompt").waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["watch-ad-and-export"].exists)
+        XCTAssertTrue(app.buttons["Not now"].exists)
+    }
+
     func testCleanupShowsDestructiveWarningBeforePhotosRequest() {
         launchApp(at: "cleanup")
         XCTAssertTrue(screen("cleanup-screen").waitForExistence(timeout: 3))

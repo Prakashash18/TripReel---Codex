@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TripReelPrivacyPolicyView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var rewardedExports: RewardedExportService
     @State private var showsTermsOfUse = false
 
     var body: some View {
@@ -37,6 +38,10 @@ struct TripReelPrivacyPolicyView: View {
                             "Apple processes payments. RevenueCat receives an anonymous app user identifier and purchase or subscription status so Memories can unlock full HD exports. RevenueCat never receives your photos, previews, films, titles, or location data. Pro subscriptions can be restored; a one-story pass is a consumable whose memory unlock is retained on the purchasing device."
                         )
                         section(
+                            "Optional rewarded ads",
+                            "Your first Memory Preview export is free without an ad. Later, you may choose to watch one rewarded ad to unlock the current edited preview. Google Mobile Ads and Google's consent platform may process device, consent, approximate location, advertising, and ad-interaction information to show, measure, and protect that ad, subject to your privacy choices. Memories disables Google's publisher first-party identifier and does not request Apple's tracking permission. Your photos, videos, titles, finished films, embedded locations, and OpenAI request data are never sent to Google for advertising. Once earned, that edit can be rendered, saved, or shared again without another ad."
+                        )
+                        section(
                             "Your choices",
                             "You can finish, export, and manually edit using only the on-device First Cut. Every AI edit starts with an explicit OpenAI sharing decision, followed by moment and creative-direction choices. Nothing is prepared until you tap Create AI cut. The comparison screen shows the verified changes AI made, and you decide whether to use them or keep the First Cut. Declining or closing sends nothing and returns to First Cut. Revoking Photos access in iOS Settings stops further library access."
                         )
@@ -48,6 +53,12 @@ struct TripReelPrivacyPolicyView: View {
                                 destination: URL(string: "https://developers.openai.com/api/docs/guides/your-data")!
                             )
                             Link("RevenueCat privacy policy", destination: URL(string: "https://www.revenuecat.com/privacy")!)
+                            Link("Google privacy policy", destination: URL(string: "https://policies.google.com/privacy")!)
+                            if rewardedExports.privacyOptionsRequired {
+                                Button("Advertising privacy choices") {
+                                    Task { await rewardedExports.presentPrivacyOptions() }
+                                }
+                            }
                             Link(
                                 "Memories support",
                                 destination: URL(string: "https://github.com/Prakashash18/TripReel---Codex/issues")!
@@ -152,6 +163,10 @@ struct MemoriesTermsOfUseView: View {
                         termsSection(
                             "Purchases",
                             "Purchases are processed by Apple. Subscription billing, renewal, cancellation, and refunds are governed by Apple's terms and the purchase information shown before confirmation."
+                        )
+                        termsSection(
+                            "Rewarded free exports",
+                            "Your first Memory Preview export is complimentary. A later free export may offer an optional rewarded ad. Finishing it unlocks that edited preview on this device, including another render or share of the same version. If no reward is reported, you can try again, edit, or choose a paid export. Memories does not send your photos, videos, titles, or finished film to the advertiser."
                         )
 
                         Link(

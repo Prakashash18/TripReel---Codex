@@ -28,6 +28,10 @@ Music, fonts, graphics, and other assets supplied by Memories remain owned by th
 
 Purchases are processed by Apple. Subscription billing, renewal, cancellation, and refunds are governed by Apple's terms and the purchase information shown before confirmation.
 
+## Rewarded free exports
+
+The first Memory Preview export is complimentary. A later free export may offer an optional rewarded advertisement. Finishing the ad unlocks the current edited preview on that device, including another render or share of the same version. If no reward is reported, the export is not unlocked and the user may try again, edit, or choose a paid export. Ads are supplied under the advertising provider's terms and privacy choices; Memories never sends the user's photos, videos, titles, or finished film to the advertiser.
+
 ## Contact
 
 Questions about these terms can be submitted through [Memories support](https://github.com/Prakashash18/TripReel---Codex/issues).

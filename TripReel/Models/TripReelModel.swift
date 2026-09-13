@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Photos
 import PhotosUI
 import SwiftUI
@@ -2730,6 +2731,43 @@ final class TripReelModel: ObservableObject {
 
     var exportStoryID: String {
         selectedTrip?.id ?? "memory-" + keptPhotos.map(\.id).joined(separator: "-")
+    }
+
+    /// A stable fingerprint for the rendered free edit. Any meaningful change
+    /// to selection, order, crop, timing, titles, overlays, look, or music
+    /// creates a new version and therefore a new rewarded-export decision.
+    var freeExportVersionID: String {
+        let content = preparedExportContent(for: .standard)
+        var components = [
+            exportStoryID,
+            String(format: "%.4f", pace),
+            montageLook.rawValue,
+            montageMotionIntensity.rawValue,
+            selectedTrackID ?? "none",
+            cutToBeat ? "beat" : "free"
+        ]
+        components += content.photos.map { photo in
+            [
+                photo.id,
+                photo.frameStyle.rawValue,
+                photo.motionStyle.rawValue,
+                String(format: "%.4f", photo.cropScale),
+                String(format: "%.4f", photo.cropOffsetX),
+                String(format: "%.4f", photo.cropOffsetY),
+                String(format: "%.4f", duration(for: photo)),
+                String(format: "%.4f", photo.videoStartSeconds)
+            ].joined(separator: ":")
+        }
+        components += content.titleCards.map { card in
+            [card.kind.rawValue, card.title, card.subtitle, card.style.rawValue,
+             String(format: "%.4f", card.duration), card.afterPhotoID ?? ""].joined(separator: ":")
+        }
+        components += content.textOverlays.map { overlay in
+            [overlay.photoID, overlay.text, overlay.style.rawValue,
+             overlay.placement.rawValue, overlay.animation.rawValue].joined(separator: ":")
+        }
+        let digest = SHA256.hash(data: Data(components.joined(separator: "|").utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     var activeExportDurationText: String {

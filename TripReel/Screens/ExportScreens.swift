@@ -138,6 +138,8 @@ private struct RenderedFilmPreview: View {
 struct ExportScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @EnvironmentObject private var purchases: RevenueCatPurchaseService
+    @EnvironmentObject private var rewardedExports: RewardedExportService
+    @State private var showsRewardedExportPrompt = false
 
     var body: some View {
         ZStack {
@@ -167,10 +169,7 @@ struct ExportScreen: View {
                         watermark: true,
                         accessibilityID: "export-standard"
                     ) {
-                        model.requestExport(
-                            .standard,
-                            isPremium: purchases.hasFullExportAccess(for: model.exportStoryID)
-                        )
+                        beginFreeExport()
                     }
 
                     ExportOptionCard(
@@ -220,6 +219,36 @@ struct ExportScreen: View {
         } message: {
             Text(model.exportErrorMessage ?? "Please try again.")
         }
+        .sheet(isPresented: $showsRewardedExportPrompt) {
+            RewardedExportPrompt(
+                durationText: model.freeExportDurationText,
+                momentCount: model.freeExportMomentCount,
+                action: unlockFreeExport
+            )
+            .environmentObject(rewardedExports)
+            .presentationDetents([.height(350)])
+            .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(rewardedExports.isLoading)
+        }
+    }
+
+    private func beginFreeExport() {
+        rewardedExports.clearMessage()
+        let hasPro = purchases.hasFullExportAccess(for: model.exportStoryID)
+        if hasPro || rewardedExports.authorizeWithoutAdIfEligible(versionID: model.freeExportVersionID) {
+            model.requestExport(.standard, isPremium: hasPro)
+        } else {
+            showsRewardedExportPrompt = true
+        }
+    }
+
+    private func unlockFreeExport() {
+        let versionID = model.freeExportVersionID
+        Task {
+            guard await rewardedExports.watchAdAndUnlock(versionID: versionID) else { return }
+            showsRewardedExportPrompt = false
+            model.requestExport(.standard, isPremium: false)
+        }
     }
 
     private var fullStoryTeaserText: String {
@@ -231,6 +260,70 @@ struct ExportScreen: View {
             return "Full pacing restored · +\(model.fullStoryExtraDurationText)"
         }
         return "Every moment in 1080p, without the watermark"
+    }
+}
+
+private struct RewardedExportPrompt: View {
+    @EnvironmentObject private var rewardedExports: RewardedExportService
+    @Environment(\.dismiss) private var dismiss
+    let durationText: String
+    let momentCount: Int
+    let action: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            MetadataText(text: "FREE EXPORT", color: TR.accent)
+                .accessibilityIdentifier("rewarded-export-prompt")
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Watch one short ad")
+                    .font(TR.display(30))
+                    .foregroundStyle(TR.cream)
+                Text("It unlocks this version of your Memory Preview.")
+                    .font(TR.ui(14))
+                    .foregroundStyle(.white.opacity(0.64))
+            }
+
+            Label("720p · watermark · \(durationText) · \(momentCount) moments", systemImage: "play.rectangle.fill")
+                .font(TR.ui(12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.72))
+
+            if let message = rewardedExports.message {
+                Text(message)
+                    .font(TR.ui(12, weight: .medium))
+                    .foregroundStyle(TR.cut.opacity(0.92))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button(action: action) {
+                HStack(spacing: 9) {
+                    if rewardedExports.isLoading {
+                        ProgressView().controlSize(.small).tint(TR.ink)
+                    }
+                    Text(rewardedExports.isLoading ? "Getting ad ready…" : "Watch ad & export")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(CreamButtonStyle())
+            .disabled(rewardedExports.isLoading)
+            .accessibilityIdentifier("watch-ad-and-export")
+
+            Button("Not now") { dismiss() }
+                .font(TR.ui(14, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.68))
+                .frame(maxWidth: .infinity)
+                .buttonStyle(.plain)
+                .disabled(rewardedExports.isLoading)
+
+            Text("Share or save this version again—no extra ad.")
+                .font(TR.ui(11))
+                .foregroundStyle(.white.opacity(0.42))
+                .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 8)
+        .padding(.bottom, 20)
+        .background(Color(red: 0.10, green: 0.075, blue: 0.06))
     }
 }
 
@@ -581,10 +674,12 @@ private struct ProjectFormatSheet: View {
 struct PaywallScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @EnvironmentObject private var purchases: RevenueCatPurchaseService
+    @EnvironmentObject private var rewardedExports: RewardedExportService
     @State private var selectedPackageID: String?
     @State private var showsPrivacyPolicy = false
     @State private var showsTermsOfUse = false
     @State private var didResumeExport = false
+    @State private var showsRewardedExportPrompt = false
 
     private var selectedPackage: Package? {
         purchases.packages.first { $0.identifier == selectedPackageID }
@@ -704,7 +799,7 @@ struct PaywallScreen: View {
                     }
 
                     Button {
-                        model.exportFreeVersionInsteadOfUpgrading()
+                        beginFreeExport()
                     } label: {
                         VStack(spacing: 3) {
                             Text("Export free preview")
@@ -767,6 +862,17 @@ struct PaywallScreen: View {
         }
         .sheet(isPresented: $showsTermsOfUse) {
             MemoriesTermsOfUseView()
+        }
+        .sheet(isPresented: $showsRewardedExportPrompt) {
+            RewardedExportPrompt(
+                durationText: model.freeExportDurationText,
+                momentCount: model.freeExportMomentCount,
+                action: unlockFreeExport
+            )
+            .environmentObject(rewardedExports)
+            .presentationDetents([.height(350)])
+            .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(rewardedExports.isLoading)
         }
         .accessibilityIdentifier("paywall-screen")
     }
@@ -872,6 +978,24 @@ struct PaywallScreen: View {
             if await purchases.restorePurchases() {
                 resumeIfPremium()
             }
+        }
+    }
+
+    private func beginFreeExport() {
+        rewardedExports.clearMessage()
+        if rewardedExports.authorizeWithoutAdIfEligible(versionID: model.freeExportVersionID) {
+            model.exportFreeVersionInsteadOfUpgrading()
+        } else {
+            showsRewardedExportPrompt = true
+        }
+    }
+
+    private func unlockFreeExport() {
+        let versionID = model.freeExportVersionID
+        Task {
+            guard await rewardedExports.watchAdAndUnlock(versionID: versionID) else { return }
+            showsRewardedExportPrompt = false
+            model.exportFreeVersionInsteadOfUpgrading()
         }
     }
 

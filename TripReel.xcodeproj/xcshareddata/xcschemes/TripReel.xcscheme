@@ -14,7 +14,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "1035759A12886F0EB2002E11"
+               BlueprintIdentifier = "3A9E01FAC685D86E155A82E1"
                BuildableName = "TripReel.app"
                BlueprintName = "TripReel"
                ReferencedContainer = "container:TripReel.xcodeproj">
@@ -30,7 +30,7 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "1035759A12886F0EB2002E11"
+            BlueprintIdentifier = "3A9E01FAC685D86E155A82E1"
             BuildableName = "TripReel.app"
             BlueprintName = "TripReel"
             ReferencedContainer = "container:TripReel.xcodeproj">
@@ -41,7 +41,7 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "68168F32D35959FA252890F7"
+               BlueprintIdentifier = "9439EF4AAE25E0F2B4FFB2A4"
                BuildableName = "TripReelTests.xctest"
                BlueprintName = "TripReelTests"
                ReferencedContainer = "container:TripReel.xcodeproj">
@@ -51,7 +51,7 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "E1E1C30860281C215DEBE50E"
+               BlueprintIdentifier = "FE10979FAD9BE16095C5CCBB"
                BuildableName = "TripReelUITests.xctest"
                BlueprintName = "TripReelUITests"
                ReferencedContainer = "container:TripReel.xcodeproj">
@@ -73,7 +73,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "1035759A12886F0EB2002E11"
+            BlueprintIdentifier = "3A9E01FAC685D86E155A82E1"
             BuildableName = "TripReel.app"
             BlueprintName = "TripReel"
             ReferencedContainer = "container:TripReel.xcodeproj">
@@ -90,7 +90,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "1035759A12886F0EB2002E11"
+            BlueprintIdentifier = "3A9E01FAC685D86E155A82E1"
             BuildableName = "TripReel.app"
             BlueprintName = "TripReel"
             ReferencedContainer = "container:TripReel.xcodeproj">

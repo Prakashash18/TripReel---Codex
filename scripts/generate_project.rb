@@ -31,6 +31,23 @@ revenuecat_build_file = project.new(Xcodeproj::Project::Object::PBXBuildFile)
 revenuecat_build_file.product_ref = revenuecat_product
 target.frameworks_build_phase.files << revenuecat_build_file
 
+google_mobile_ads_package = project.new(Xcodeproj::Project::Object::XCRemoteSwiftPackageReference)
+google_mobile_ads_package.repositoryURL = 'https://github.com/googleads/swift-package-manager-google-mobile-ads.git'
+google_mobile_ads_package.requirement = {
+  'kind' => 'exactVersion',
+  'version' => '13.3.0'
+}
+project.root_object.package_references << google_mobile_ads_package
+
+google_mobile_ads_product = project.new(Xcodeproj::Project::Object::XCSwiftPackageProductDependency)
+google_mobile_ads_product.package = google_mobile_ads_package
+google_mobile_ads_product.product_name = 'GoogleMobileAds'
+target.package_product_dependencies << google_mobile_ads_product
+
+google_mobile_ads_build_file = project.new(Xcodeproj::Project::Object::PBXBuildFile)
+google_mobile_ads_build_file.product_ref = google_mobile_ads_product
+target.frameworks_build_phase.files << google_mobile_ads_build_file
+
 unit_test_target = project.new_target(:unit_test_bundle, 'TripReelTests', :ios, '17.0')
 ui_test_target = project.new_target(:ui_test_bundle, 'TripReelUITests', :ios, '17.0')
 unit_test_target.add_dependency(target)
@@ -121,6 +138,15 @@ target.build_configurations.each do |configuration|
   settings['TARGETED_DEVICE_FAMILY'] = '1'
   settings['REVENUECAT_PUBLIC_SDK_KEY'] = ''
   settings['REVENUECAT_STORY_PASS_PACKAGE_ID'] = 'story_pass'
+  if configuration.name == 'Debug'
+    # Google's official test IDs. Release builds intentionally require the
+    # production IDs to be supplied in Xcode/CI before ads can initialize.
+    settings['ADMOB_APP_ID'] = 'ca-app-pub-3940256099942544~1458002511'
+    settings['ADMOB_REWARDED_AD_UNIT_ID'] = 'ca-app-pub-3940256099942544/1712485313'
+  else
+    settings['ADMOB_APP_ID'] = ''
+    settings['ADMOB_REWARDED_AD_UNIT_ID'] = ''
+  end
   settings['TRIPREEL_PHOTO_ANALYSIS_ENDPOINT'] = 'https://tripreel-visual-analysis.tripreel-prakashash18.workers.dev/v1/analyze'
   settings['TRIPREEL_APP_ATTEST_ENVIRONMENT'] = 'production'
 end
