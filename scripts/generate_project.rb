@@ -138,15 +138,11 @@ target.build_configurations.each do |configuration|
   settings['TARGETED_DEVICE_FAMILY'] = '1'
   settings['REVENUECAT_PUBLIC_SDK_KEY'] = ''
   settings['REVENUECAT_STORY_PASS_PACKAGE_ID'] = 'story_pass'
-  if configuration.name == 'Debug'
-    # Google's official test IDs. Release builds intentionally require the
-    # production IDs to be supplied in Xcode/CI before ads can initialize.
-    settings['ADMOB_APP_ID'] = 'ca-app-pub-3940256099942544~1458002511'
-    settings['ADMOB_REWARDED_AD_UNIT_ID'] = 'ca-app-pub-3940256099942544/1712485313'
-  else
-    settings['ADMOB_APP_ID'] = ''
-    settings['ADMOB_REWARDED_AD_UNIT_ID'] = ''
-  end
+  # Google's official test IDs keep every local, CI, and TestFlight build safe
+  # before an AdMob account is connected. Replace both values with production
+  # IDs only when configuring the release that will be submitted to Apple.
+  settings['ADMOB_APP_ID'] = 'ca-app-pub-3940256099942544~1458002511'
+  settings['ADMOB_REWARDED_AD_UNIT_ID'] = 'ca-app-pub-3940256099942544/1712485313'
   settings['TRIPREEL_PHOTO_ANALYSIS_ENDPOINT'] = 'https://tripreel-visual-analysis.tripreel-prakashash18.workers.dev/v1/analyze'
   settings['TRIPREEL_APP_ATTEST_ENVIRONMENT'] = 'production'
 end
