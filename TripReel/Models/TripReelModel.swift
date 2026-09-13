@@ -1048,26 +1048,12 @@ enum LocalStoryIntelligence {
 
     static func collectionTitle(
         for trip: Trip,
-        isNearby: Bool,
-        calendar: Calendar = .current
+        isNearby _: Bool,
+        calendar _: Calendar = .current
     ) -> String {
-        let place = friendlyPlaceName(from: trip.place)
-        let days = inclusiveDayCount(for: trip, calendar: calendar)
-
-        if isNearby {
-            let moment = nearbyMoment(for: trip, calendar: calendar)
-            return place.map { "\(moment) around \($0)" }
-                ?? "\(moment) nearby"
-        }
-
-        guard let place else {
-            if days == 1 { return "A day away" }
-            if (6...8).contains(days) { return "A week away" }
-            return "\(dayWord(days)) days away"
-        }
-        if days == 1 { return "A day in \(place)" }
-        if (6...8).contains(days) { return "A week in \(place)" }
-        return "\(dayWord(days)) days in \(place)"
+        // Library groups should describe only what the device knows. Narrative
+        // titles belong inside the editor, after the user has seen the group.
+        friendlyPlaceName(from: trip.place) ?? trip.dates
     }
 
     static func locationContext(for trip: Trip) -> String? {

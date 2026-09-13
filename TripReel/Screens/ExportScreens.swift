@@ -162,9 +162,9 @@ struct ExportScreen: View {
                 VStack(spacing: 14) {
                     ExportOptionCard(
                         source: model.previewSource(at: 0),
-                        title: "Memory Preview",
-                        subtitle: "9:16 · 720p · \(model.freeExportDurationText)",
-                        badge: model.freeExportEndingBadge,
+                        title: "Free preview",
+                        subtitle: "\(model.freeExportDurationText) · short video",
+                        badge: "FREE · 720P · WATERMARK",
                         badgeColor: TR.keep,
                         watermark: true,
                         accessibilityID: "export-standard"
@@ -175,14 +175,12 @@ struct ExportScreen: View {
                     ExportOptionCard(
                         source: model.fullStoryHighlightPhotos.first?.source
                             ?? model.previewSource(at: 2),
-                        title: "Full Story",
-                        subtitle: "9:16 · 1080p · \(model.filmDurationText) complete",
-                        badge: "FULL LENGTH · NO WATERMARK",
+                        title: "Full story",
+                        subtitle: "\(model.filmDurationText) · complete video",
+                        badge: "PAID · 1080P · NO WATERMARK",
                         badgeColor: TR.accent,
                         highlighted: true,
                         showsChevron: true,
-                        highlightPhotos: model.fullStoryHighlightPhotos,
-                        highlightText: fullStoryTeaserText,
                         accessibilityID: "export-hd"
                     ) {
                         model.requestExport(
@@ -191,7 +189,7 @@ struct ExportScreen: View {
                         )
                     }
 
-                    Text("Both export as vertical videos ready for Instagram, TikTok or Photos.")
+                    Text("Tap an option to see what’s included.")
                         .font(TR.ui(12))
                         .foregroundStyle(.white.opacity(0.54))
                         .multilineTextAlignment(.center)
@@ -251,16 +249,6 @@ struct ExportScreen: View {
         }
     }
 
-    private var fullStoryTeaserText: String {
-        let count = model.fullStoryExclusiveMomentCount
-        if count > 0 {
-            return "\(count) more moment\(count == 1 ? "" : "s") · +\(model.fullStoryExtraDurationText)"
-        }
-        if model.fullStoryExtraDurationSeconds > 0.01 {
-            return "Full pacing restored · +\(model.fullStoryExtraDurationText)"
-        }
-        return "Every moment in 1080p, without the watermark"
-    }
 }
 
 private struct RewardedExportPrompt: View {
@@ -336,8 +324,6 @@ private struct ExportOptionCard: View {
     var watermark = false
     var highlighted = false
     var showsChevron = false
-    var highlightPhotos: [ReelPhoto] = []
-    var highlightText: String? = nil
     var accessibilityID: String? = nil
     let action: () -> Void
 
@@ -381,14 +367,6 @@ private struct ExportOptionCard: View {
                     }
                 }
 
-                if let highlightText, !highlightPhotos.isEmpty {
-                    Divider()
-                        .overlay(.white.opacity(0.10))
-                    FullStoryHighlightStrip(
-                        photos: highlightPhotos,
-                        text: highlightText
-                    )
-                }
             }
             .foregroundStyle(TR.cream)
             .padding(14)

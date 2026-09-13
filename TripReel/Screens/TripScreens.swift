@@ -204,10 +204,6 @@ private struct TripRow: View {
         LocalStoryIntelligence.collectionTitle(for: trip, isNearby: isNearby)
     }
 
-    private var locationContext: String? {
-        LocalStoryIntelligence.locationContext(for: trip)
-    }
-
     var body: some View {
         Button(action: action) {
             HStack(spacing: 14) {
@@ -222,14 +218,7 @@ private struct TripRow: View {
                         .lineLimit(2)
                         .minimumScaleFactor(0.82)
 
-                    if let locationContext {
-                        Text(locationContext)
-                            .font(TR.ui(12))
-                            .foregroundStyle(.white.opacity(0.61))
-                            .lineLimit(1)
-                    }
-
-                    Text("\(trip.dates) · \(trip.mediaCountText.uppercased())")
+                    Text(detailText)
                         .lineLimit(1)
                         .minimumScaleFactor(0.78)
                         .font(TR.mono(10))
@@ -248,11 +237,17 @@ private struct TripRow: View {
         }
         .buttonStyle(TactileButtonStyle())
         .accessibilityLabel(
-            [storyTitle, locationContext, trip.dates, trip.mediaCountText]
-                .compactMap { $0 }
+            [storyTitle, trip.dates, trip.mediaCountText]
                 .joined(separator: ", ")
         )
         .accessibilityIdentifier("trip-row-\(trip.id)")
+    }
+
+    private var detailText: String {
+        if LocalStoryIntelligence.friendlyPlaceName(from: trip.place) == nil {
+            return trip.mediaCountText.uppercased()
+        }
+        return "\(trip.dates) · \(trip.mediaCountText.uppercased())"
     }
 }
 

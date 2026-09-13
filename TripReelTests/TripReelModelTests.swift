@@ -356,7 +356,7 @@ final class TripReelModelTests: XCTestCase {
                 isNearby: false,
                 calendar: calendar
             ),
-            "Three days in Chiang Mai"
+            "Chiang Mai"
         )
         XCTAssertEqual(
             LocalStoryIntelligence.collectionTitle(
@@ -364,11 +364,29 @@ final class TripReelModelTests: XCTestCase {
                 isNearby: true,
                 calendar: calendar
             ),
-            "An afternoon around Gardens by the Bay"
+            "Gardens by the Bay"
         )
         XCTAssertEqual(
             LocalStoryIntelligence.locationContext(for: trip),
             "Mueang Chiang Mai District, Thailand"
+        )
+
+        let undeterminedPlace = Trip(
+            id: "undetermined",
+            place: "Photo memory",
+            dates: "14–16 May 2026",
+            startDate: start,
+            endDate: start.addingTimeInterval(2 * 24 * 60 * 60),
+            assets: tripAssets,
+            coverID: tripAssets[0].id
+        )
+        XCTAssertEqual(
+            LocalStoryIntelligence.collectionTitle(
+                for: undeterminedPlace,
+                isNearby: false,
+                calendar: calendar
+            ),
+            "14–16 May 2026"
         )
     }
 
