@@ -1129,6 +1129,44 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(model.activeExportDurationSeconds, duration, accuracy: 0.001)
     }
 
+    func testRewardedExportUsesAboutHalfTheStory() async throws {
+        let exporter = RecordingVideoExporter()
+        let model = TripReelModel(arguments: [], useDemoData: false, videoExporter: exporter)
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let assets = (0..<20).map { index in
+            TripAsset(
+                id: "rewarded-\(index)",
+                source: .bundled("my-khe-beach"),
+                creationDate: date.addingTimeInterval(Double(index) * 60),
+                filename: "IMG_\(index).JPG",
+                pixelWidth: 1_024,
+                pixelHeight: 1_536
+            )
+        }
+        model.startBuild(trip: Trip(
+            id: "rewarded-export-trip",
+            place: "Singapore",
+            dates: "Today",
+            startDate: date,
+            endDate: date.addingTimeInterval(19 * 60),
+            assets: assets,
+            coverID: assets[10].id
+        ))
+
+        XCTAssertEqual(model.rewardedExportMomentCount, 10)
+        XCTAssertGreaterThan(model.rewardedExportMomentCount, model.freeExportMomentCount)
+        XCTAssertLessThan(model.rewardedExportMomentCount, model.keptCount)
+
+        model.exportRewardedVersion()
+        for _ in 0..<100 where model.screen != .done { await Task.yield() }
+
+        let recordedRequest = await exporter.lastRequest
+        let request = try XCTUnwrap(recordedRequest)
+        XCTAssertEqual(request.quality, .rewarded)
+        XCTAssertEqual(request.photos.count, 10)
+        XCTAssertTrue(request.quality.includesWatermark)
+    }
+
     func testDecliningProImmediatelyExportsTheFreeVersion() async throws {
         let exporter = RecordingVideoExporter()
         let model = TripReelModel(

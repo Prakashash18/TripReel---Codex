@@ -345,6 +345,8 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertFalse(screen("export-project").exists)
 
         screen("export-standard").tap()
+        XCTAssertTrue(screen("rewarded-export-prompt").waitForExistence(timeout: 3))
+        app.buttons["export-short-preview"].tap()
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
         XCTAssertTrue(
@@ -357,7 +359,7 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(button(startingWith: "Save Video").exists)
     }
 
-    func testLaterFreeExportUsesRewardedBottomSheet() {
+    func testExportChoicesOfferFreeRewardedAndPaidPaths() {
         app = XCUIApplication()
         app.launchArguments = ["-qaScreen", "export", "-qaNoHint", "-qaRewardedExportPrompt"]
         app.launchEnvironment["TRIPREEL_DEVELOPMENT_AUTH_TOKEN"] = String(repeating: "u", count: 32)
@@ -366,7 +368,9 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("export-screen").waitForExistence(timeout: 3))
         screen("export-standard").tap()
         XCTAssertTrue(screen("rewarded-export-prompt").waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["export-short-preview"].exists)
         XCTAssertTrue(app.buttons["watch-ad-and-export"].exists)
+        XCTAssertTrue(app.buttons["view-paid-export-options"].exists)
         XCTAssertTrue(app.buttons["Not now"].exists)
     }
 

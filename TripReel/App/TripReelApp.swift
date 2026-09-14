@@ -15,6 +15,7 @@ struct TripReelApp: App {
                 .environmentObject(rewardedExports)
                 .preferredColorScheme(.dark)
                 .task { await rewardedExports.prepare() }
+                .task { await purchases.refresh() }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }

@@ -20,28 +20,24 @@ final class RewardedExportServiceTests: XCTestCase {
         super.tearDown()
     }
 
-    func testFirstFreeExportIsComplimentaryAndSameEditStaysUnlocked() {
+    func testExtendedPreviewStartsLocked() {
         let service = RewardedExportService(bundle: .main, defaults: defaults)
 
-        XCTAssertTrue(service.authorizeWithoutAdIfEligible(versionID: "edit-a"))
-        XCTAssertTrue(service.authorizeWithoutAdIfEligible(versionID: "edit-a"))
+        XCTAssertFalse(service.hasUnlockedExtendedPreview(versionID: "edit-a"))
     }
 
-    func testAChangedEditRequiresRewardAfterComplimentaryExport() {
+    func testStoredRewardUnlocksOnlyMatchingEdit() {
+        defaults.set(["edit-a"], forKey: "memories.rewarded-export.unlocked-version-ids")
         let service = RewardedExportService(bundle: .main, defaults: defaults)
 
-        XCTAssertTrue(service.authorizeWithoutAdIfEligible(versionID: "edit-a"))
-        XCTAssertFalse(service.authorizeWithoutAdIfEligible(versionID: "edit-b"))
+        XCTAssertTrue(service.hasUnlockedExtendedPreview(versionID: "edit-a"))
+        XCTAssertFalse(service.hasUnlockedExtendedPreview(versionID: "edit-b"))
     }
 
-    func testComplimentaryAndVersionUnlockPersistAcrossLaunches() {
-        XCTAssertTrue(
-            RewardedExportService(bundle: .main, defaults: defaults)
-                .authorizeWithoutAdIfEligible(versionID: "edit-a")
-        )
+    func testStoredRewardPersistsAcrossLaunches() {
+        defaults.set(["edit-a"], forKey: "memories.rewarded-export.unlocked-version-ids")
 
         let relaunched = RewardedExportService(bundle: .main, defaults: defaults)
-        XCTAssertTrue(relaunched.authorizeWithoutAdIfEligible(versionID: "edit-a"))
-        XCTAssertFalse(relaunched.authorizeWithoutAdIfEligible(versionID: "edit-b"))
+        XCTAssertTrue(relaunched.hasUnlockedExtendedPreview(versionID: "edit-a"))
     }
 }

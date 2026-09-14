@@ -69,6 +69,7 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
     @Published private(set) var isConfigured = false
     @Published private(set) var isPremium = false
     @Published private(set) var packages: [Package] = []
+    @Published private(set) var customerInfo: CustomerInfo?
     @Published private(set) var isLoading = false
     @Published private(set) var isPurchasing = false
     @Published private(set) var message: String?
@@ -102,7 +103,10 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
             bundle: bundle
         )
         apiKey = configuredKey
-        entitlementIdentifier = Self.defaultEntitlementIdentifier
+        entitlementIdentifier = Self.configurationValue(
+            key: "REVENUECAT_ENTITLEMENT_ID",
+            bundle: bundle
+        ) ?? Self.defaultEntitlementIdentifier
         storyPassPackageIdentifier = Self.configurationValue(
             key: "REVENUECAT_STORY_PASS_PACKAGE_ID",
             bundle: bundle
@@ -141,7 +145,7 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
                 ? "No export options are available for this build yet."
                 : nil
         } catch {
-            message = "Export options couldn't be loaded. Check your connection and try again."
+            message = Self.userFacingMessage(for: error, action: .loading)
         }
     }
 
@@ -165,7 +169,7 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
             }
             return isPremium
         } catch {
-            message = "The purchase couldn't be completed. Please try again."
+            message = Self.userFacingMessage(for: error, action: .purchasing)
             return false
         }
     }
@@ -185,9 +189,33 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
             }
             return isPremium
         } catch {
-            message = "Purchases couldn't be restored. Please try again."
+            message = Self.userFacingMessage(for: error, action: .restoring)
             return false
         }
+    }
+
+    /// Keeps app state in sync when RevenueCatUI completes a purchase or restore.
+    /// A production consumable Story Pass is deliberately recorded per story and
+    /// is not treated as a renewable entitlement.
+    func handleRevenueCatUICompletion(
+        customerInfo: CustomerInfo,
+        purchasedProductIdentifier: String? = nil,
+        storyID: String? = nil
+    ) {
+        apply(customerInfo)
+
+        guard let purchasedProductIdentifier,
+              let storyID,
+              let package = packages.first(where: {
+                  $0.storeProduct.productIdentifier == purchasedProductIdentifier
+              }),
+              isStoryPass(package) else { return }
+
+        unlockStory(storyID)
+    }
+
+    func handleRevenueCatUIError(_ error: Error, action: PurchaseAction) {
+        message = Self.userFacingMessage(for: error, action: action)
     }
 
     func clearMessage() {
@@ -221,6 +249,7 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
     }
 
     private func apply(_ customerInfo: CustomerInfo) {
+        self.customerInfo = customerInfo
         isPremium = customerInfo.entitlements.active[entitlementIdentifier]?.isActive == true
     }
 
@@ -239,6 +268,44 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
         let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty, !value.contains("$(") else { return nil }
         return value
+    }
+
+    enum PurchaseAction {
+        case loading
+        case purchasing
+        case restoring
+    }
+
+    private static func userFacingMessage(for error: Error, action: PurchaseAction) -> String {
+        let code = ErrorCode(rawValue: (error as NSError).code)
+
+        switch code {
+        case .purchaseCancelledError:
+            return "Purchase cancelled. Nothing was charged."
+        case .networkError, .offlineConnectionError, .productRequestTimedOut:
+            return "The App Store couldn't be reached. Check your connection and try again."
+        case .purchaseNotAllowedError, .insufficientPermissionsError:
+            return "Purchases aren't allowed on this device. Check Screen Time or Apple ID settings."
+        case .paymentPendingError:
+            return "This purchase is waiting for approval. Full access will unlock when Apple confirms it."
+        case .productNotAvailableForPurchaseError:
+            return "This option isn't available in the App Store right now. Please try again later."
+        case .productAlreadyPurchasedError:
+            return "This plan was already purchased. Use Restore Purchases to refresh access."
+        case .storeProblemError:
+            return "The App Store couldn't complete the request. Please wait a moment and try again."
+        case .invalidCredentialsError, .configurationError, .invalidAppleSubscriptionKeyError:
+            return "Purchases are temporarily unavailable while we update the store configuration."
+        default:
+            switch action {
+            case .loading:
+                return "Export options couldn't be loaded. Check your connection and try again."
+            case .purchasing:
+                return "The purchase couldn't be completed. Nothing was charged. Please try again."
+            case .restoring:
+                return "Purchases couldn't be restored. Check your connection and try again."
+            }
+        }
     }
 
     private static func sortedPackages(from offering: Offering?) -> [Package] {

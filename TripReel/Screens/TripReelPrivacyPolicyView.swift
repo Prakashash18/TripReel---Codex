@@ -39,7 +39,7 @@ struct TripReelPrivacyPolicyView: View {
                         )
                         section(
                             "Optional rewarded ads",
-                            "Your first Memory Preview export is free without an ad. Later, you may choose to watch one rewarded ad to unlock the current edited preview. Google Mobile Ads and Google's consent platform may process device, consent, approximate location, advertising, and ad-interaction information to show, measure, and protect that ad, subject to your privacy choices. Memories disables Google's publisher first-party identifier and does not request Apple's tracking permission. Your photos, videos, titles, finished films, embedded locations, and OpenAI request data are never sent to Google for advertising. Once earned, that edit can be rendered, saved, or shared again without another ad."
+                            "A short Memory Preview is always available without an ad. You may choose to watch one rewarded ad to unlock an extended, watermarked preview using about half of the story. Google Mobile Ads and Google's consent platform may process device, consent, approximate location, advertising, and ad-interaction information to show, measure, and protect that ad, subject to your privacy choices. Memories disables Google's publisher first-party identifier and does not request Apple's tracking permission. Your photos, videos, titles, finished films, embedded locations, and OpenAI request data are never sent to Google for advertising. Once earned, that extended edit can be rendered, saved, or shared again without another ad."
                         )
                         section(
                             "Your choices",
@@ -166,7 +166,7 @@ struct MemoriesTermsOfUseView: View {
                         )
                         termsSection(
                             "Rewarded free exports",
-                            "Your first Memory Preview export is complimentary. A later free export may offer an optional rewarded ad. Finishing it unlocks that edited preview on this device, including another render or share of the same version. If no reward is reported, you can try again, edit, or choose a paid export. Memories does not send your photos, videos, titles, or finished film to the advertiser."
+                            "A short, watermarked Memory Preview is available without an ad. An optional rewarded ad unlocks an extended preview using about half of the story on this device, including another render or share of that same version. Story Pass or Memories Pro is required for the complete 1080p story without a watermark. If no ad reward is reported, you can try again or use the short preview. Memories does not send your photos, videos, titles, or finished film to the advertiser."
                         )
 
                         Link(

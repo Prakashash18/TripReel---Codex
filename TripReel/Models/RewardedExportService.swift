@@ -2,9 +2,9 @@ import Foundation
 @preconcurrency import GoogleMobileAds
 import UserMessagingPlatform
 
-/// Owns the voluntary rewarded-ad exchange for free exports. Access is stored
-/// against the exact edit, so a failed render or a later re-share never asks
-/// the user to watch the same ad twice.
+/// Owns the voluntary rewarded-ad exchange for extended previews. The short
+/// preview never requires an ad. Rewarded access is stored against the exact
+/// edit, so a failed render or re-share never asks for the same ad twice.
 @MainActor
 final class RewardedExportService: NSObject, ObservableObject, FullScreenContentDelegate {
     @Published private(set) var isLoading = false
@@ -14,7 +14,6 @@ final class RewardedExportService: NSObject, ObservableObject, FullScreenContent
     private let defaults: UserDefaults
     private let appID: String?
     private let rewardedAdUnitID: String?
-    private let complimentaryExportKey = "memories.rewarded-export.complimentary-used"
     private let unlockedVersionsKey = "memories.rewarded-export.unlocked-version-ids"
     private let isUITesting: Bool
     private let forcesRewardPromptInUITests: Bool
@@ -44,19 +43,8 @@ final class RewardedExportService: NSObject, ObservableObject, FullScreenContent
         appID != nil && rewardedAdUnitID != nil
     }
 
-    /// Returns true when this edit can export immediately. The first-ever free
-    /// export is complimentary and is persisted before rendering begins.
-    func authorizeWithoutAdIfEligible(versionID: String) -> Bool {
-        if isUITesting && !forcesRewardPromptInUITests { return true }
-        if forcesRewardPromptInUITests {
-            defaults.set(true, forKey: complimentaryExportKey)
-            return false
-        }
-        if unlockedVersionIDs.contains(versionID) { return true }
-        guard !defaults.bool(forKey: complimentaryExportKey) else { return false }
-        defaults.set(true, forKey: complimentaryExportKey)
-        unlock(versionID: versionID)
-        return true
+    func hasUnlockedExtendedPreview(versionID: String) -> Bool {
+        unlockedVersionIDs.contains(versionID)
     }
 
     func prepare() async {
@@ -75,7 +63,11 @@ final class RewardedExportService: NSObject, ObservableObject, FullScreenContent
     }
 
     func watchAdAndUnlock(versionID: String) async -> Bool {
-        if authorizeWithoutAdIfEligible(versionID: versionID) { return true }
+        if hasUnlockedExtendedPreview(versionID: versionID) { return true }
+        if isUITesting && !forcesRewardPromptInUITests {
+            unlock(versionID: versionID)
+            return true
+        }
         guard isConfigured else {
             message = "Free ad-supported exports are not configured in this build yet."
             return false

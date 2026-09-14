@@ -1570,9 +1570,10 @@ private struct LibraryDetectionResult: Sendable {
 
 enum ExportQuality: Equatable, Sendable {
     case standard
+    case rewarded
     case hd
 
-    var includesWatermark: Bool { self == .standard }
+    var includesWatermark: Bool { self != .hd }
 }
 
 enum ExportHandoff: Equatable, Sendable {
@@ -1582,11 +1583,16 @@ enum ExportHandoff: Equatable, Sendable {
 
 enum ExportIntent: Equatable, Sendable {
     case standard
+    case rewarded
     case highDefinition
     case capCut
 
     var quality: ExportQuality {
-        self == .highDefinition ? .hd : .standard
+        switch self {
+        case .standard, .capCut: .standard
+        case .rewarded: .rewarded
+        case .highDefinition: .hd
+        }
     }
 
     var handoff: ExportHandoff {
@@ -1615,9 +1621,49 @@ enum FreeExportStoryPlanner {
         insights: [String: MontagePhotoInsight],
         preferredEndPhotoID: String?
     ) -> [ReelPhoto] {
-        guard photos.count > 2 else { return photos }
-
         let targetCount = min(5, max(3, Int(ceil(Double(photos.count) * 0.18))))
+        return selectedPhotos(
+            from: photos,
+            targetCount: targetCount,
+            titleCards: titleCards,
+            textOverlays: textOverlays,
+            insights: insights,
+            preferredEndPhotoID: preferredEndPhotoID,
+            brisk: true
+        )
+    }
+
+    static func extendedPreviewPhotos(
+        from photos: [ReelPhoto],
+        titleCards: [MontageTitleCard],
+        textOverlays: [MontageTextOverlay],
+        insights: [String: MontagePhotoInsight],
+        preferredEndPhotoID: String?
+    ) -> [ReelPhoto] {
+        let shortPreviewCount = min(5, max(3, Int(ceil(Double(photos.count) * 0.18))))
+        let targetCount = max(shortPreviewCount, Int(ceil(Double(photos.count) * 0.5)))
+        return selectedPhotos(
+            from: photos,
+            targetCount: targetCount,
+            titleCards: titleCards,
+            textOverlays: textOverlays,
+            insights: insights,
+            preferredEndPhotoID: preferredEndPhotoID,
+            brisk: false
+        )
+    }
+
+    private static func selectedPhotos(
+        from photos: [ReelPhoto],
+        targetCount: Int,
+        titleCards: [MontageTitleCard],
+        textOverlays: [MontageTextOverlay],
+        insights: [String: MontagePhotoInsight],
+        preferredEndPhotoID: String?,
+        brisk: Bool
+    ) -> [ReelPhoto] {
+        guard photos.count > 2 else { return photos }
+        let targetCount = min(photos.count, max(1, targetCount))
         let overlayPhotoIDs = Set(textOverlays.map(\.photoID))
         let chapterAnchors = Set(titleCards.compactMap(\.afterPhotoID))
         var selectedIndices = Set<Int>()
@@ -1652,6 +1698,7 @@ enum FreeExportStoryPlanner {
 
         return selectedIndices.sorted().map { index in
             var photo = photos[index]
+            guard brisk else { return photo }
             // A Memory Preview should feel intentionally brisk even when the
             // full edit contains long holds or video excerpts.
             let sourceDuration = photo.durationSeconds ?? 1.45
@@ -2669,6 +2716,18 @@ final class TripReelModel: ObservableObject {
         Self.durationText(seconds: freeExportDurationSeconds)
     }
 
+    var rewardedExportDurationSeconds: Double {
+        preparedExportContent(for: .rewarded).durationSeconds
+    }
+
+    var rewardedExportDurationText: String {
+        Self.durationText(seconds: rewardedExportDurationSeconds)
+    }
+
+    var rewardedExportMomentCount: Int {
+        preparedExportContent(for: .rewarded).photos.count
+    }
+
     var freeExportIsFullLength: Bool {
         freeExportDurationSeconds >= filmDurationSeconds - 0.01
     }
@@ -2722,8 +2781,8 @@ final class TripReelModel: ObservableObject {
     /// A stable fingerprint for the rendered free edit. Any meaningful change
     /// to selection, order, crop, timing, titles, overlays, look, or music
     /// creates a new version and therefore a new rewarded-export decision.
-    var freeExportVersionID: String {
-        let content = preparedExportContent(for: .standard)
+    var rewardedExportVersionID: String {
+        let content = preparedExportContent(for: .rewarded)
         var components = [
             exportStoryID,
             String(format: "%.4f", pace),
@@ -5545,7 +5604,7 @@ final class TripReelModel: ObservableObject {
         }
 
         pendingExportIntent = nil
-        startRender(hd: intent.quality == .hd, handoff: intent.handoff)
+        startRender(quality: intent.quality, handoff: intent.handoff)
     }
 
     var pendingExportPremiumRequirement: ExportPremiumRequirement {
@@ -5567,7 +5626,7 @@ final class TripReelModel: ObservableObject {
     func resumePendingExportAfterPurchase() {
         let intent = pendingExportIntent ?? .highDefinition
         pendingExportIntent = nil
-        startRender(hd: intent.quality == .hd, handoff: intent.handoff)
+        startRender(quality: intent.quality, handoff: intent.handoff)
     }
 
     func keepEditingInsteadOfUpgrading() {
@@ -5579,22 +5638,27 @@ final class TripReelModel: ObservableObject {
     /// self-contained free cut instead of sending the user back to editing.
     func exportFreeVersionInsteadOfUpgrading() {
         pendingExportIntent = nil
-        startRender(hd: false, handoff: .normal)
+        startRender(quality: .standard, handoff: .normal)
+    }
+
+    func exportRewardedVersion() {
+        pendingExportIntent = nil
+        startRender(quality: .rewarded, handoff: .normal)
     }
 
     func startRender(hd: Bool = false) {
-        startRender(hd: hd, handoff: .normal)
+        startRender(quality: hd ? .hd : .standard, handoff: .normal)
     }
 
     func startCapCutRender() {
-        startRender(hd: false, handoff: .capCut)
+        startRender(quality: .standard, handoff: .capCut)
     }
 
-    private func startRender(hd: Bool, handoff: ExportHandoff) {
+    private func startRender(quality: ExportQuality, handoff: ExportHandoff) {
         workTask?.cancel()
         let generation = UUID()
         exportGeneration = generation
-        exportQuality = hd ? .hd : .standard
+        exportQuality = quality
         exportHandoff = handoff
         let content = preparedExportContent(for: exportQuality)
         activeExportPhotos = content.photos
@@ -5686,7 +5750,7 @@ final class TripReelModel: ObservableObject {
     private func preparedExportContent(for quality: ExportQuality) -> PreparedExportContent {
         let fullPhotos = keptPhotos
         let fullTitleCards = montageTitleCards
-        guard quality == .standard else {
+        guard quality != .hd else {
             return PreparedExportContent(
                 photos: fullPhotos,
                 titleCards: fullTitleCards,
@@ -5695,7 +5759,15 @@ final class TripReelModel: ObservableObject {
             )
         }
 
-        let freePhotos = FreeExportStoryPlanner.previewPhotos(
+        let freePhotos = quality == .rewarded
+            ? FreeExportStoryPlanner.extendedPreviewPhotos(
+                from: fullPhotos,
+                titleCards: fullTitleCards,
+                textOverlays: textOverlays,
+                insights: activePhotoInsights,
+                preferredEndPhotoID: freePreviewEndPhotoID
+            )
+            : FreeExportStoryPlanner.previewPhotos(
             from: fullPhotos,
             titleCards: fullTitleCards,
             textOverlays: textOverlays,
@@ -5745,10 +5817,10 @@ final class TripReelModel: ObservableObject {
 
     func retryExportPhotoDownload() {
         guard exportCanRetryPhotoDownload else { return }
-        let shouldUseHD = exportQuality == .hd
+        let quality = exportQuality
         let handoff = exportHandoff
         dismissExportMessage()
-        startRender(hd: shouldUseHD, handoff: handoff)
+        startRender(quality: quality, handoff: handoff)
     }
 
     @discardableResult
