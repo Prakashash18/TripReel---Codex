@@ -20,9 +20,9 @@ struct ExportPremiumRequirement: Equatable, Sendable {
         case (false, true, _):
             "This film is longer than a free export."
         case (false, false, true):
-            "HD export is included with \(TR.proName)."
+            "HD export is included with a Story Pass."
         case (false, false, false):
-            "This export is included with \(TR.proName)."
+            "This export is included with a Story Pass."
         }
     }
 }
@@ -62,23 +62,20 @@ enum ExportAccessPolicy {
 }
 
 @MainActor
-final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDelegate {
-    static let defaultEntitlementIdentifier = "memories_pro"
+final class RevenueCatPurchaseService: NSObject, ObservableObject {
     static let defaultStoryPassPackageIdentifier = "story_pass"
 
     @Published private(set) var isConfigured = false
-    @Published private(set) var isPremium = false
     @Published private(set) var packages: [Package] = []
-    @Published private(set) var customerInfo: CustomerInfo?
     @Published private(set) var isLoading = false
     @Published private(set) var isPurchasing = false
     @Published private(set) var message: String?
 
-    let entitlementIdentifier: String
     let storyPassPackageIdentifier: String
 
     private let apiKey: String?
     private let defaults: UserDefaults
+    private let grantsQAFullExportAccess: Bool
     private let unlockedStoriesKey = "memories.unlocked-export-story-ids"
 
     override convenience init() {
@@ -88,25 +85,24 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
     init(bundle: Bundle, defaults: UserDefaults = .standard) {
         self.defaults = defaults
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-qaPremium") {
+        let grantsQAFullExportAccess = ProcessInfo.processInfo.arguments.contains("-qaPremium")
+        #else
+        let grantsQAFullExportAccess = false
+        #endif
+        self.grantsQAFullExportAccess = grantsQAFullExportAccess
+
+        if grantsQAFullExportAccess {
             apiKey = nil
-            entitlementIdentifier = Self.defaultEntitlementIdentifier
             storyPassPackageIdentifier = Self.defaultStoryPassPackageIdentifier
             super.init()
-            isPremium = true
             return
         }
-        #endif
 
         let configuredKey = Self.configurationValue(
             key: "REVENUECAT_PUBLIC_SDK_KEY",
             bundle: bundle
         )
         apiKey = configuredKey
-        entitlementIdentifier = Self.configurationValue(
-            key: "REVENUECAT_ENTITLEMENT_ID",
-            bundle: bundle
-        ) ?? Self.defaultEntitlementIdentifier
         storyPassPackageIdentifier = Self.configurationValue(
             key: "REVENUECAT_STORY_PASS_PACKAGE_ID",
             bundle: bundle
@@ -122,12 +118,7 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
         if !Purchases.isConfigured {
             Purchases.configure(withAPIKey: configuredKey)
         }
-        Purchases.shared.delegate = self
         isConfigured = true
-
-        if let cached = Purchases.shared.cachedCustomerInfo {
-            apply(cached)
-        }
     }
 
     func refresh() async {
@@ -136,13 +127,11 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
         defer { isLoading = false }
 
         do {
-            async let customerInfo = Purchases.shared.customerInfo()
-            async let offerings = Purchases.shared.offerings()
-            let (resolvedCustomerInfo, resolvedOfferings) = try await (customerInfo, offerings)
-            apply(resolvedCustomerInfo)
-            packages = Self.sortedPackages(from: resolvedOfferings.current)
+            let offerings = try await Purchases.shared.offerings()
+            packages = Self.sortedPackages(from: offerings.current)
+                .filter(isStoryPass)
             message = packages.isEmpty
-                ? "No export options are available for this build yet."
+                ? "Story Pass isn't available for this build yet."
                 : nil
         } catch {
             message = Self.userFacingMessage(for: error, action: .loading)
@@ -158,64 +147,17 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
 
         do {
             let result = try await Purchases.shared.purchase(package: package)
-            apply(result.customerInfo)
             if result.userCancelled { return false }
             if isStoryPass(package), let storyID {
                 unlockStory(storyID)
                 return true
             }
-            if !isPremium {
-                message = "The purchase completed, but \(TR.proName) is not active yet. Try Restore Purchases."
-            }
-            return isPremium
+            message = "The Story Pass purchase completed, but this story could not be unlocked. Please contact support."
+            return false
         } catch {
             message = Self.userFacingMessage(for: error, action: .purchasing)
             return false
         }
-    }
-
-    @discardableResult
-    func restorePurchases() async -> Bool {
-        guard isConfigured, !isPurchasing else { return false }
-        isPurchasing = true
-        message = nil
-        defer { isPurchasing = false }
-
-        do {
-            let customerInfo = try await Purchases.shared.restorePurchases()
-            apply(customerInfo)
-            if !isPremium {
-                message = "No active \(TR.proName) purchase was found for this Apple ID."
-            }
-            return isPremium
-        } catch {
-            message = Self.userFacingMessage(for: error, action: .restoring)
-            return false
-        }
-    }
-
-    /// Keeps app state in sync when RevenueCatUI completes a purchase or restore.
-    /// A production consumable Story Pass is deliberately recorded per story and
-    /// is not treated as a renewable entitlement.
-    func handleRevenueCatUICompletion(
-        customerInfo: CustomerInfo,
-        purchasedProductIdentifier: String? = nil,
-        storyID: String? = nil
-    ) {
-        apply(customerInfo)
-
-        guard let purchasedProductIdentifier,
-              let storyID,
-              let package = packages.first(where: {
-                  $0.storeProduct.productIdentifier == purchasedProductIdentifier
-              }),
-              isStoryPass(package) else { return }
-
-        unlockStory(storyID)
-    }
-
-    func handleRevenueCatUIError(_ error: Error, action: PurchaseAction) {
-        message = Self.userFacingMessage(for: error, action: action)
     }
 
     func clearMessage() {
@@ -226,12 +168,8 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
         packages.first(where: isStoryPass)
     }
 
-    var proPackages: [Package] {
-        packages.filter { !isStoryPass($0) }
-    }
-
     func hasFullExportAccess(for storyID: String) -> Bool {
-        isPremium || unlockedStoryIDs.contains(storyID)
+        grantsQAFullExportAccess || unlockedStoryIDs.contains(storyID)
     }
 
     func isStoryPass(_ package: Package) -> Bool {
@@ -240,17 +178,6 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
         return package.packageType == .custom
             && productID.contains("story")
             && (productID.contains("pass") || productID.contains("export"))
-    }
-
-    nonisolated func purchases(_ purchases: Purchases, receivedUpdated customerInfo: CustomerInfo) {
-        Task { @MainActor [weak self] in
-            self?.apply(customerInfo)
-        }
-    }
-
-    private func apply(_ customerInfo: CustomerInfo) {
-        self.customerInfo = customerInfo
-        isPremium = customerInfo.entitlements.active[entitlementIdentifier]?.isActive == true
     }
 
     private var unlockedStoryIDs: Set<String> {
@@ -273,7 +200,6 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
     enum PurchaseAction {
         case loading
         case purchasing
-        case restoring
     }
 
     private static func userFacingMessage(for error: Error, action: PurchaseAction) -> String {
@@ -291,7 +217,7 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
         case .productNotAvailableForPurchaseError:
             return "This option isn't available in the App Store right now. Please try again later."
         case .productAlreadyPurchasedError:
-            return "This plan was already purchased. Use Restore Purchases to refresh access."
+            return "This Story Pass was already recorded. Return to the story and try exporting again."
         case .storeProblemError:
             return "The App Store couldn't complete the request. Please wait a moment and try again."
         case .invalidCredentialsError, .configurationError, .invalidAppleSubscriptionKeyError:
@@ -302,78 +228,12 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject, PurchasesDele
                 return "Export options couldn't be loaded. Check your connection and try again."
             case .purchasing:
                 return "The purchase couldn't be completed. Nothing was charged. Please try again."
-            case .restoring:
-                return "Purchases couldn't be restored. Check your connection and try again."
             }
         }
     }
 
     private static func sortedPackages(from offering: Offering?) -> [Package] {
         guard let offering else { return [] }
-        return offering.availablePackages.sorted { lhs, rhs in
-            let left = packageRank(lhs.packageType)
-            let right = packageRank(rhs.packageType)
-            if left != right { return left < right }
-            return lhs.identifier < rhs.identifier
-        }
-    }
-
-    private static func packageRank(_ type: PackageType) -> Int {
-        switch type {
-        case .annual: 0
-        case .monthly: 1
-        case .lifetime: 2
-        case .sixMonth: 3
-        case .threeMonth: 4
-        case .twoMonth: 5
-        case .weekly: 6
-        case .custom: 7
-        case .unknown: 8
-        @unknown default: 9
-        }
-    }
-}
-
-extension Package {
-    var memoriesDisplayName: String {
-        switch packageType {
-        case .annual: "Yearly"
-        case .monthly: "Monthly"
-        case .lifetime: "Lifetime"
-        case .sixMonth: "Six months"
-        case .threeMonth: "Three months"
-        case .twoMonth: "Two months"
-        case .weekly: "Weekly"
-        case .custom, .unknown: storeProduct.localizedTitle.isEmpty ? TR.proName : storeProduct.localizedTitle
-        @unknown default: TR.proName
-        }
-    }
-
-    var memoriesPriceDetail: String {
-        switch packageType {
-        case .annual: "\(localizedPriceString) per year"
-        case .monthly: "\(localizedPriceString) per month"
-        case .sixMonth: "\(localizedPriceString) every six months"
-        case .threeMonth: "\(localizedPriceString) every three months"
-        case .twoMonth: "\(localizedPriceString) every two months"
-        case .weekly: "\(localizedPriceString) per week"
-        case .lifetime: "\(localizedPriceString) once"
-        case .custom, .unknown: localizedPriceString
-        @unknown default: localizedPriceString
-        }
-    }
-
-    var memoriesBillingPeriodLabel: String {
-        switch packageType {
-        case .annual: "per year"
-        case .monthly: "per month"
-        case .sixMonth: "every six months"
-        case .threeMonth: "every three months"
-        case .twoMonth: "every two months"
-        case .weekly: "per week"
-        case .lifetime: "one-time"
-        case .custom, .unknown: ""
-        @unknown default: ""
-        }
+        return offering.availablePackages.sorted { $0.identifier < $1.identifier }
     }
 }

@@ -1106,7 +1106,7 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(model.fullStoryExclusiveMomentCount, 31)
         XCTAssertFalse(model.fullStoryHighlightPhotos.isEmpty)
 
-        model.requestExport(.standard, isPremium: false)
+        model.requestExport(.standard, isUnlocked: false)
         for _ in 0..<100 where model.screen != .done {
             await Task.yield()
         }
@@ -1167,7 +1167,7 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertTrue(request.quality.includesWatermark)
     }
 
-    func testDecliningProImmediatelyExportsTheFreeVersion() async throws {
+    func testDecliningStoryPassImmediatelyExportsTheFreeVersion() async throws {
         let exporter = RecordingVideoExporter()
         let model = TripReelModel(
             arguments: [],
@@ -1193,7 +1193,7 @@ final class TripReelModelTests: XCTestCase {
             coverID: asset.id
         ))
 
-        model.requestExport(.highDefinition, isPremium: false)
+        model.requestExport(.highDefinition, isUnlocked: false)
         XCTAssertEqual(model.screen, .paywall)
 
         model.exportFreeVersionInsteadOfUpgrading()

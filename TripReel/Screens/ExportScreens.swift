@@ -1,5 +1,4 @@
 import RevenueCat
-import RevenueCatUI
 import AVKit
 import SwiftUI
 import UIKit
@@ -186,7 +185,7 @@ struct ExportScreen: View {
                     ) {
                         model.requestExport(
                             .highDefinition,
-                            isPremium: purchases.hasFullExportAccess(for: model.exportStoryID)
+                            isUnlocked: purchases.hasFullExportAccess(for: model.exportStoryID)
                         )
                     }
 
@@ -246,7 +245,7 @@ struct ExportScreen: View {
 
     private func exportFreePreview() {
         showsExportChoices = false
-        model.requestExport(.standard, isPremium: false)
+        model.requestExport(.standard, isUnlocked: false)
     }
 
     private func unlockExtendedPreview() {
@@ -262,7 +261,7 @@ struct ExportScreen: View {
         showsExportChoices = false
         model.requestExport(
             .highDefinition,
-            isPremium: purchases.hasFullExportAccess(for: model.exportStoryID)
+            isUnlocked: purchases.hasFullExportAccess(for: model.exportStoryID)
         )
     }
 
@@ -323,7 +322,7 @@ private struct ExportChoiceSheet: View {
                         RoundedIcon(symbol: "sparkles.rectangle.stack", tint: TR.accent, size: 40)
                         VStack(alignment: .leading, spacing: 4) {
                             MetadataText(text: "FULL STORY", color: TR.accent)
-                            Text("Story Pass or \(TR.proName)")
+                            Text("Unlock this story")
                                 .font(TR.ui(16, weight: .semibold))
                             Text(paidPriceSummary)
                                 .font(TR.ui(12))
@@ -405,15 +404,10 @@ private struct ExportChoiceSheet: View {
     }
 
     private var paidPriceSummary: String {
-        let story = purchases.storyPassPackage?.localizedPriceString
-        let pro = (purchases.proPackages.first(where: { $0.packageType == .annual })
-            ?? purchases.proPackages.first)?.localizedPriceString
-        switch (story, pro) {
-        case let (story?, pro?): return "One story \(story) · Pro \(pro)"
-        case let (story?, nil): return "One story from \(story)"
-        case let (nil, pro?): return "Unlimited stories from \(pro)"
-        default: return "Complete video · 1080p · no watermark"
+        guard let price = purchases.storyPassPackage?.localizedPriceString else {
+            return "Complete video · 1080p · no watermark"
         }
+        return "One-time Story Pass · \(price)"
     }
 }
 
@@ -566,7 +560,7 @@ private struct ProjectFormatSheet: View {
                         dismiss()
                         model.requestExport(
                             .capCut,
-                            isPremium: purchases.hasFullExportAccess(for: model.exportStoryID)
+                            isUnlocked: purchases.hasFullExportAccess(for: model.exportStoryID)
                         )
                     } label: {
                         Label("Render MP4 for CapCut", systemImage: "play.rectangle.fill")
@@ -757,8 +751,6 @@ struct PaywallScreen: View {
     @State private var selectedPackageID: String?
     @State private var showsPrivacyPolicy = false
     @State private var showsTermsOfUse = false
-    @State private var showsRevenueCatPaywall = false
-    @State private var showsCustomerCenter = false
     @State private var didResumeExport = false
 
     private var selectedPackage: Package? {
@@ -834,15 +826,6 @@ struct PaywallScreen: View {
                             .padding(.vertical, 20)
                         } else {
                             purchaseOptions
-
-                            Button("View all plans") {
-                                showsRevenueCatPaywall = true
-                            }
-                            .font(TR.ui(13, weight: .semibold))
-                            .foregroundStyle(TR.accent)
-                            .frame(maxWidth: .infinity)
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("show-revenuecat-paywall")
                         }
                     } else {
                         configurationNotice
@@ -902,28 +885,6 @@ struct PaywallScreen: View {
                     .disabled(purchases.isPurchasing)
                     .accessibilityIdentifier("export-free-from-paywall")
 
-                    if purchases.isConfigured {
-                        Button("Restore Pro") {
-                            restorePurchases()
-                        }
-                        .font(TR.ui(13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.62))
-                        .frame(maxWidth: .infinity)
-                        .disabled(purchases.isPurchasing)
-                        .buttonStyle(.plain)
-
-                        if purchases.isPremium {
-                            Button("Manage subscription") {
-                                showsCustomerCenter = true
-                            }
-                            .font(TR.ui(13, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.62))
-                            .frame(maxWidth: .infinity)
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("show-customer-center")
-                        }
-                    }
-
                     VStack(spacing: 7) {
                         if selectedPackage != nil {
                             Text(purchaseTermsText)
@@ -949,13 +910,9 @@ struct PaywallScreen: View {
         .task {
             await purchases.refresh()
             selectDefaultPackageIfNeeded()
-            resumeIfPremium()
         }
         .onChange(of: purchases.packages.map(\.identifier)) { _, _ in
             selectDefaultPackageIfNeeded()
-        }
-        .onChange(of: purchases.isPremium) { _, isPremium in
-            if isPremium { resumeIfPremium() }
         }
         .sheet(isPresented: $showsPrivacyPolicy) {
             TripReelPrivacyPolicyView()
@@ -963,48 +920,11 @@ struct PaywallScreen: View {
         .sheet(isPresented: $showsTermsOfUse) {
             MemoriesTermsOfUseView()
         }
-        .sheet(isPresented: $showsRevenueCatPaywall) {
-            PaywallView(displayCloseButton: true)
-                .onPurchaseCompleted { transaction, customerInfo in
-                    purchases.handleRevenueCatUICompletion(
-                        customerInfo: customerInfo,
-                        purchasedProductIdentifier: transaction?.productIdentifier,
-                        storyID: model.exportStoryID
-                    )
-                    if purchases.hasFullExportAccess(for: model.exportStoryID) {
-                        showsRevenueCatPaywall = false
-                        resumeIfUnlocked()
-                    }
-                }
-                .onRestoreCompleted { customerInfo in
-                    purchases.handleRevenueCatUICompletion(customerInfo: customerInfo)
-                    if purchases.hasFullExportAccess(for: model.exportStoryID) {
-                        showsRevenueCatPaywall = false
-                        resumeIfUnlocked()
-                    }
-                }
-                .onPurchaseFailure { error in
-                    purchases.handleRevenueCatUIError(error, action: .purchasing)
-                }
-                .onRestoreFailure { error in
-                    purchases.handleRevenueCatUIError(error, action: .restoring)
-                }
-        }
-        .sheet(isPresented: $showsCustomerCenter) {
-            CustomerCenterView()
-                .onCustomerCenterRestoreCompleted { customerInfo in
-                    purchases.handleRevenueCatUICompletion(customerInfo: customerInfo)
-                }
-                .onCustomerCenterRestoreFailed { error in
-                    purchases.handleRevenueCatUIError(error, action: .restoring)
-                }
-        }
         .accessibilityIdentifier("paywall-screen")
     }
 
     private func packageRow(_ package: Package) -> some View {
         let isSelected = selectedPackage?.identifier == package.identifier
-        let isStoryPass = purchases.isStoryPass(package)
         return Button {
             withAnimation(TRMotion.selection) {
                 selectedPackageID = package.identifier
@@ -1012,11 +932,9 @@ struct PaywallScreen: View {
         } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(isStoryPass ? "Story Pass" : TR.proName)
+                    Text("Story Pass")
                         .font(TR.ui(16, weight: .semibold))
-                    Text(isStoryPass
-                        ? "Export this full story"
-                        : "Unlimited full exports")
+                    Text("Export this full story")
                         .font(TR.ui(12))
                         .foregroundStyle(.white.opacity(0.62))
                 }
@@ -1027,7 +945,7 @@ struct PaywallScreen: View {
                     Text(package.localizedPriceString)
                         .font(TR.ui(15, weight: .semibold))
                         .foregroundStyle(TR.accent)
-                    Text(isStoryPass ? "one-time" : package.memoriesBillingPeriodLabel)
+                    Text("one-time")
                         .font(TR.ui(10, weight: .medium))
                         .foregroundStyle(.white.opacity(0.52))
                 }
@@ -1045,9 +963,7 @@ struct PaywallScreen: View {
         }
         .buttonStyle(TactileButtonStyle())
         .accessibilityLabel(
-            isStoryPass
-                ? "Story Pass, export this full story, \(package.localizedPriceString), one-time"
-                : "\(TR.proName), unlimited full exports, \(package.localizedPriceString), \(package.memoriesBillingPeriodLabel)"
+            "Story Pass, export this full story, \(package.localizedPriceString), one-time"
         )
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
     }
@@ -1057,11 +973,6 @@ struct PaywallScreen: View {
         VStack(alignment: .leading, spacing: 10) {
             if let storyPass = purchases.storyPassPackage {
                 packageRow(storyPass)
-            }
-
-            if let annual = purchases.proPackages.first(where: { $0.packageType == .annual })
-                ?? purchases.proPackages.first {
-                packageRow(annual)
             }
 
         }
@@ -1087,22 +998,15 @@ struct PaywallScreen: View {
             return
         }
         selectedPackageID = purchases.storyPassPackage?.identifier
-            ?? purchases.proPackages.first(where: { $0.packageType == .annual })?.identifier
             ?? purchases.packages.first?.identifier
     }
 
     private var purchaseButtonTitle: String {
-        guard let selectedPackage else { return "Choose an option" }
-        return purchases.isStoryPass(selectedPackage)
-            ? "Export this story"
-            : "Start \(TR.proName)"
+        selectedPackage == nil ? "Choose an option" : "Buy Story Pass & export"
     }
 
     private var purchaseTermsText: String {
-        guard let selectedPackage, !purchases.isStoryPass(selectedPackage) else {
-            return "The story pass is a one-time purchase for this memory."
-        }
-        return "Subscriptions renew automatically unless cancelled at least 24 hours before the current period ends. Manage or cancel in your Apple ID settings."
+        "One-time purchase for this memory. No subscription."
     }
 
     private func buySelectedPackage() {
@@ -1114,20 +1018,8 @@ struct PaywallScreen: View {
         }
     }
 
-    private func restorePurchases() {
-        Task {
-            if await purchases.restorePurchases() {
-                resumeIfPremium()
-            }
-        }
-    }
-
     private func beginFreeExport() {
         model.exportFreeVersionInsteadOfUpgrading()
-    }
-
-    private func resumeIfPremium() {
-        resumeIfUnlocked()
     }
 
     private func resumeIfUnlocked() {

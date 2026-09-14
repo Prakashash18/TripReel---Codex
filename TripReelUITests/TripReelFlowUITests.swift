@@ -337,7 +337,7 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
     }
 
-    func testExportOffersOneFreeAndOneProVideoChoice() {
+    func testExportOffersFreeAndStoryPassVideoChoices() {
         launchApp(at: "export")
         XCTAssertTrue(screen("export-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("export-standard").exists)

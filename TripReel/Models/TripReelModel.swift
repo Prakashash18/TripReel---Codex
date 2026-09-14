@@ -5588,7 +5588,7 @@ final class TripReelModel: ObservableObject {
         photos[index].videoStartSeconds = photos[index].automaticVideoStartSeconds
     }
 
-    func requestExport(_ intent: ExportIntent, isPremium: Bool) {
+    func requestExport(_ intent: ExportIntent, isUnlocked: Bool) {
         let requirement = ExportAccessPolicy.premiumRequirement(
             photoCount: keptCount,
             durationSeconds: filmDurationSeconds,
@@ -5597,7 +5597,7 @@ final class TripReelModel: ObservableObject {
             quality: intent.quality
         )
 
-        guard isPremium || requirement == nil else {
+        guard isUnlocked || requirement == nil else {
             pendingExportIntent = intent
             go(.paywall, direction: .forward)
             return
@@ -5634,7 +5634,7 @@ final class TripReelModel: ObservableObject {
         go(.export, direction: .backward)
     }
 
-    /// Keeps the upgrade optional: declining Pro immediately renders a real,
+    /// Keeps the purchase optional: declining Story Pass immediately renders a real,
     /// self-contained free cut instead of sending the user back to editing.
     func exportFreeVersionInsteadOfUpgrading() {
         pendingExportIntent = nil

@@ -1,214 +1,72 @@
 # RevenueCat setup for Memories
 
-The iOS app uses RevenueCat through Swift Package Manager and keeps purchase state in
-`RevenueCatPurchaseService`. The native RevenueCat paywall and Customer Center are
-presented from `PaywallScreen`.
+Version 1 of Memories sells one product: a consumable **Story Pass** that unlocks
+the selected memory's full-length 1080p export without a watermark. There are no
+monthly, yearly, lifetime, or other subscription products in the launch offering.
 
 ## 1. Swift package
 
-The Xcode project already includes:
+The Xcode project includes RevenueCat through Swift Package Manager:
 
 - Package URL: `https://github.com/RevenueCat/purchases-ios-spm.git`
 - Minimum version: `5.43.0`
-- Products linked to the Memories target: `RevenueCat` and `RevenueCatUI`
+- Product linked to the Memories target: `RevenueCat`
 
 If Xcode needs to refresh it, use **File > Packages > Resolve Package Versions**.
 
-## 2. Test Store configuration
+## 2. App Store Connect
 
-The Debug build is configured with the supplied `test_...` public SDK key. The key is
-stored in the Debug build setting `REVENUECAT_PUBLIC_SDK_KEY`, not in Swift source.
-Debug currently checks the RevenueCat entitlement `story_pass`.
+1. Create a consumable In-App Purchase for Story Pass.
+2. Complete its display name, description, localized price, tax category, review
+   screenshot, and review notes.
+3. Do not create a subscription group for version 1.
+4. If monthly, yearly, or lifetime products already exist, leave them unused and do
+   not include them with the app version submitted for review.
 
-In the RevenueCat dashboard for the Test Store app:
+## 3. RevenueCat
 
-1. Create an entitlement with identifier `story_pass`.
-2. Create these Test Store products:
-   - `lifetime` — lifetime/non-renewing access
-   - `yearly` — annual subscription
-   - `monthly` — monthly subscription
-3. Attach all three products to the `story_pass` entitlement.
-4. Create an offering, normally `default`.
-5. Add these packages to the offering:
-   - Lifetime package -> product `lifetime`
-   - Annual package -> product `yearly`
-   - Monthly package -> product `monthly`
-6. Make that offering the **Current Offering**.
-7. In **Paywalls**, design and publish a paywall for the current offering.
-8. In **Customer Center**, configure and publish the customer-management screen.
-
-Prices and subscription periods shown by Memories come from RevenueCat/StoreKit, so
-they automatically use the customer's App Store locale.
-
-## 3. Production App Store configuration
-
-Do not ship the Test Store key. The Release build deliberately has a blank
-`REVENUECAT_PUBLIC_SDK_KEY` until the real iOS public key (`appl_...`) is added.
-
-The product model currently separates two concepts:
-
-- **Memories Pro**: renewable or lifetime access. Production entitlement:
-  `memories_pro`.
-- **Story Pass**: a consumable purchase that unlocks one specific story. It must not
-  be attached to a permanent RevenueCat entitlement.
-
-In App Store Connect:
-
-1. Create `monthly` and `yearly` as auto-renewable subscriptions in the same
-   subscription group.
-2. Create `lifetime` as a non-consumable only if permanent Pro access is part of the
-   intended business model.
-3. Create the one-story Story Pass as a consumable with its own product identifier.
-4. Complete prices, localization, tax category, review screenshot, review notes, and
-   subscription disclosures.
-
-In RevenueCat:
-
-1. Add the App Store app and import the App Store Connect products.
-2. Attach `monthly`, `yearly`, and (if offered) `lifetime` to `memories_pro`.
-3. Do not attach the consumable Story Pass to an entitlement.
-4. Put Pro products in the standard monthly, annual, and lifetime packages.
-5. Put Story Pass in a custom offering package whose package identifier is
-   `story_pass`.
-6. Set the offering as current and publish the production paywall.
-7. Copy the RevenueCat iOS **public SDK key** (`appl_...`) into the Release build
+1. Add the App Store app and import the Story Pass product.
+2. Do not attach Story Pass to an entitlement. Consumables must not grant permanent
+   access.
+3. Create an offering, normally `default`.
+4. Add one custom package with identifier `story_pass` and attach the Story Pass
+   product.
+5. Remove every monthly, yearly, and lifetime package from the offering.
+6. Make this the Current Offering.
+7. Copy RevenueCat's iOS **public SDK key** (`appl_...`) into the Release build
    setting `REVENUECAT_PUBLIC_SDK_KEY`.
 
 Never place a RevenueCat secret key in the app. iOS must contain only the public SDK
-key.
+key. The price displayed by Memories is read from StoreKit through RevenueCat and is
+automatically localized for the customer's App Store storefront.
 
-## 4. App lifecycle and customer information
+## 4. Purchase behavior
 
-`TripReelApp` owns one purchase service for the whole app:
+`RevenueCatPurchaseService` loads only the custom Story Pass package. Subscription
+or lifetime packages accidentally left in an older offering are ignored by the app.
 
-```swift
-@StateObject private var purchases = RevenueCatPurchaseService()
+After a successful purchase, Memories records the selected story ID locally and
+resumes its pending full export. Re-editing and exporting that same story remains
+unlocked on that device.
 
-WindowGroup {
-    RootView()
-        .environmentObject(purchases)
-        .task { await purchases.refresh() }
-}
-```
+Story Pass is consumable, so it is not restored like a subscription or
+non-consumable purchase. Version 1 has no Memories account or server-side story
+ledger; deleting the app or moving to another device can therefore remove the local
+per-story unlock. This limitation must remain clear in the purchase copy and support
+documentation.
 
-The service configures RevenueCat once, loads the current offering and customer
-information concurrently, and listens for subsequent customer-info updates through
-`PurchasesDelegate`.
-
-The modern async customer-info call is:
-
-```swift
-let customerInfo = try await Purchases.shared.customerInfo()
-let hasAccess = customerInfo.entitlements.active["story_pass"]?.isActive == true
-```
-
-In the app, use the observable state instead of making this call from every screen:
-
-```swift
-@EnvironmentObject private var purchases: RevenueCatPurchaseService
-
-if purchases.isPremium {
-    Text("Full export unlocked")
-}
-```
-
-RevenueCat caches `CustomerInfo`; refreshing on launch, app foreground, purchase,
-restore, and delegate updates is sufficient.
-
-## 5. Purchasing and restoring
-
-The custom Memories purchase UI uses the packages from the Current Offering:
-
-```swift
-Task {
-    let unlocked = await purchases.purchase(
-        package,
-        unlockingStoryID: model.exportStoryID
-    )
-    if unlocked {
-        model.resumePendingExportAfterPurchase()
-    }
-}
-```
-
-Restore access with:
-
-```swift
-Task {
-    let restored = await purchases.restorePurchases()
-    if restored {
-        model.resumePendingExportAfterPurchase()
-    }
-}
-```
-
-The service handles cancellation, offline/store errors, pending family approval,
-disabled purchases, unavailable products, configuration problems, and successful
-customer-info updates. A cancelled purchase is never treated as an error or unlock.
-
-## 6. RevenueCat Paywall
-
-`PaywallScreen` offers **View all plans**, which presents the dashboard-driven native
-paywall:
-
-```swift
-.sheet(isPresented: $showsRevenueCatPaywall) {
-    PaywallView(displayCloseButton: true)
-        .onPurchaseCompleted { transaction, customerInfo in
-            purchases.handleRevenueCatUICompletion(
-                customerInfo: customerInfo,
-                purchasedProductIdentifier: transaction?.productIdentifier,
-                storyID: model.exportStoryID
-            )
-        }
-        .onRestoreCompleted { customerInfo in
-            purchases.handleRevenueCatUICompletion(customerInfo: customerInfo)
-        }
-        .onPurchaseFailure { error in
-            purchases.handleRevenueCatUIError(error, action: .purchasing)
-        }
-        .onRestoreFailure { error in
-            purchases.handleRevenueCatUIError(error, action: .restoring)
-        }
-}
-```
-
-Because the paywall is dashboard-driven, product order, marketing copy, package
-selection, and experiments can be changed without an app update.
-
-## 7. Customer Center
-
-Customer Center is useful after a renewable subscription is active. It lets customers
-manage or cancel, restore purchases, and resolve common billing issues without a
-custom support flow.
-
-Memories shows **Manage subscription** to Pro customers and presents:
-
-```swift
-CustomerCenterView()
-    .onCustomerCenterRestoreCompleted { customerInfo in
-        purchases.handleRevenueCatUICompletion(customerInfo: customerInfo)
-    }
-    .onCustomerCenterRestoreFailed { error in
-        purchases.handleRevenueCatUIError(error, action: .restoring)
-    }
-```
-
-It does not need to be shown for a one-time consumable Story Pass.
-
-## 8. Testing checklist
+## 5. Testing checklist
 
 1. Run a Debug build and confirm RevenueCat logs show the Test Store app.
-2. Confirm the current offering returns Lifetime, Yearly, and Monthly.
-3. Buy each package with a fresh Test Store customer and verify `story_pass` becomes
-   active.
-4. Cancel a purchase and confirm the app remains locked with no charge message.
-5. Restore a purchase and confirm access updates immediately.
-6. Open **View all plans** and complete a purchase in the RevenueCat paywall.
-7. Open **Manage subscription** and verify Customer Center loads.
-8. Test offline, Ask to Buy/payment pending, and an empty offering.
-9. Before TestFlight/App Store upload, add the production `appl_...` key and test the
-   App Store products with an Apple sandbox tester.
+2. Confirm the Current Offering returns exactly one custom `story_pass` package.
+3. Confirm Monthly, Yearly, and Lifetime never appear in the purchase screen.
+4. Buy Story Pass and verify the pending full export starts automatically.
+5. Re-export the same story and verify it does not charge again.
+6. Cancel a purchase and confirm the story remains locked and nothing is charged.
+7. Test an unavailable product, offline connection, pending approval, and an empty
+   offering.
+8. Before App Store submission, add the production `appl_...` key and test the real
+   Story Pass product with an Apple sandbox tester.
 
 The RevenueCat Test Store validates the app flow, but App Store sandbox testing is
 still required before release.

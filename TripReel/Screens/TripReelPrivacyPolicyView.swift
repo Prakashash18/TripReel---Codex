@@ -35,7 +35,7 @@ struct TripReelPrivacyPolicyView: View {
                         )
                         section(
                             "Purchases",
-                            "Apple processes payments. RevenueCat receives an anonymous app user identifier and purchase or subscription status so Memories can unlock full HD exports. RevenueCat never receives your photos, previews, films, titles, or location data. Pro subscriptions can be restored; a one-story pass is a consumable whose memory unlock is retained on the purchasing device."
+                            "Apple processes payments. RevenueCat receives an anonymous app user identifier and Story Pass purchase status so Memories can unlock one full HD export. RevenueCat never receives your photos, previews, films, titles, or location data. Story Pass is a consumable whose memory unlock is retained on the purchasing device."
                         )
                         section(
                             "Optional rewarded ads",
@@ -162,11 +162,11 @@ struct MemoriesTermsOfUseView: View {
                         )
                         termsSection(
                             "Purchases",
-                            "Purchases are processed by Apple. Subscription billing, renewal, cancellation, and refunds are governed by Apple's terms and the purchase information shown before confirmation."
+                            "Story Pass purchases are processed by Apple. Each pass is a consumable purchase that unlocks the selected memory's full-length HD export on that device. Charges and refunds are governed by Apple's terms and the purchase information shown before confirmation."
                         )
                         termsSection(
                             "Rewarded free exports",
-                            "A short, watermarked Memory Preview is available without an ad. An optional rewarded ad unlocks an extended preview using about half of the story on this device, including another render or share of that same version. Story Pass or Memories Pro is required for the complete 1080p story without a watermark. If no ad reward is reported, you can try again or use the short preview. Memories does not send your photos, videos, titles, or finished film to the advertiser."
+                            "A short, watermarked Memory Preview is available without an ad. An optional rewarded ad unlocks an extended preview using about half of the story on this device, including another render or share of that same version. A Story Pass unlocks the complete 1080p story without a watermark. If no ad reward is reported, you can try again or use the short preview. Memories does not send your photos, videos, titles, or finished film to the advertiser."
                         )
 
                         Link(

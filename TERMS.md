@@ -26,7 +26,7 @@ Music, fonts, graphics, and other assets supplied by Memories remain owned by th
 
 ## Purchases
 
-Purchases are processed by Apple. Subscription billing, renewal, cancellation, and refunds are governed by Apple's terms and the purchase information shown before confirmation.
+Story Pass purchases are processed by Apple. Each pass is a consumable purchase that unlocks the selected memory's full-length HD export on that device. Charges and refunds are governed by Apple's terms and the purchase information shown before confirmation.
 
 ## Rewarded free exports
 
