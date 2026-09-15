@@ -1,11 +1,22 @@
 import AVKit
+import RevenueCat
 import SwiftUI
 
+/// The end of the film is the only moment the user has just felt the thing
+/// they would be paying for, so the Story Pass is offered here — over the held
+/// last frame — instead of three screens later behind two free offers.
 struct FirstWatchScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @EnvironmentObject private var purchases: RevenueCatPurchaseService
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var soundtrack = LocalSoundtrackPlayer()
     @State private var playbackRun = 0
     @State private var playbackComplete = false
+    @State private var replayToken = 0
+    @State private var skipToken = 0
+    @State private var holdDrift = false
+    @State private var showsPrivacyPolicy = false
+    @State private var showsTermsOfUse = false
 
     private var firstCut: TripEditSnapshot? {
         model.firstCutSnapshot
@@ -32,6 +43,24 @@ struct FirstWatchScreen: View {
         firstCut?.durationSeconds ?? model.filmDurationSeconds
     }
 
+    private var isAlreadyUnlocked: Bool {
+        purchases.hasFullExportAccess(for: model.exportStoryID)
+    }
+
+    private var storyPassPrice: String? {
+        purchases.storyPassPackage?.localizedPriceString
+    }
+
+    private var holdDriftAnimation: Animation? {
+        guard !reduceMotion else { return nil }
+        return playbackComplete ? TRMotion.ambient : .easeOut(duration: 0.24)
+    }
+
+    private var keepTitle: String {
+        guard !isAlreadyUnlocked, let storyPassPrice else { return "Keep this one" }
+        return "Keep this one · \(storyPassPrice)"
+    }
+
     var body: some View {
         ZStack {
             MontageView(
@@ -42,7 +71,8 @@ struct FirstWatchScreen: View {
                 motionIntensity: firstCut?.motionIntensity ?? model.montageMotionIntensity,
                 secondsPerSlide: firstCut.map { 1.85 - ($0.pace * 1.25) } ?? model.secondsPerPhoto,
                 playbackBehavior: .playOnce,
-                showsReplayControl: true,
+                playbackToken: replayToken,
+                skipToEndToken: skipToken,
                 onPlaybackStarted: {
                     playbackComplete = false
                     playbackRun &+= 1
@@ -58,6 +88,11 @@ struct FirstWatchScreen: View {
                 }
             )
                 .ignoresSafeArea()
+                // The film never cuts to black. Once it ends the last frame is
+                // held and keeps drifting underneath the offer.
+                .scaleEffect(holdDrift ? 1.07 : 1)
+                .offset(x: holdDrift ? 5 : 0, y: holdDrift ? 4 : 0)
+                .animation(holdDriftAnimation, value: holdDrift)
 
             LinearGradient(
                 colors: [.black.opacity(0.54), .clear, .clear, .black.opacity(0.82)],
@@ -81,63 +116,389 @@ struct FirstWatchScreen: View {
 
                 Spacer()
 
-                VStack(alignment: .leading, spacing: 15) {
-                    VStack(spacing: 12) {
-                        PlaybackProgressBar(
-                            duration: firstCutDurationSeconds,
-                            playbackRun: playbackRun,
-                            isComplete: playbackComplete
-                        )
-                        HStack {
-                            MetadataText(
-                                text: firstCutMediaSummary,
-                                color: .white.opacity(0.65)
-                            )
-                            Spacer()
-                            Text(model.firstCutDurationText)
-                                .font(TR.mono(12))
-                                .tracking(0.8)
-                                .foregroundStyle(.white.opacity(0.65))
-                        }
-                    }
-
-                    Button("Continue") {
-                        model.continueFromFirstWatch()
-                    }
-                    .buttonStyle(CreamButtonStyle())
-                    .accessibilityHint("Choose whether to improve this cut with AI or edit it yourself")
-                    .accessibilityIdentifier("first-cut-continue-button")
+                if playbackComplete {
+                    endOfFilmOffer
+                } else {
+                    playbackControls
                 }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 10)
-                .trEntrance(1, distance: 12)
             }
         }
         .overlay(alignment: .topTrailing) {
-            Button {
-                soundtrack.toggle(track: firstCutTrack, volume: soundtrackVolume)
-            } label: {
-                Image(systemName: soundtrack.isPlaying ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(TR.cream)
-                    .frame(width: 42, height: 42)
-                    .background(.black.opacity(0.58))
-                    .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
-                    .clipShape(Circle())
-                    .contentTransition(.symbolEffect(.replace))
+            soundtrackButton
+        }
+        .overlay {
+            if model.isStoryPassPresented {
+                Color.black.opacity(0.42)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.dismissStoryPass() }
+                    .transition(.opacity)
+                    .accessibilityHidden(true)
             }
-            .buttonStyle(TactileButtonStyle(pressedScale: 0.92))
-            .padding(.trailing, 16)
-            .safeAreaPadding(.top, 7)
-            .disabled(firstCutTrack == nil)
-            .opacity(firstCutTrack == nil ? 0.42 : 1)
-            .accessibilityLabel(soundtrack.isPlaying ? "Pause soundtrack" : "Play soundtrack")
-            .accessibilityHint(firstCutTrack.map { "Soundtrack: \($0.name)" } ?? "No soundtrack selected")
-            .accessibilityIdentifier("first-watch-audio")
+        }
+        .overlay(alignment: .bottom) {
+            if model.isStoryPassPresented {
+                StoryPassSheet(
+                    durationText: model.firstCutDurationText,
+                    withheldPhotos: model.fullStoryHighlightPhotos,
+                    withheldText: model.storyPassWithheldText,
+                    price: storyPassPrice,
+                    buy: buyStoryPass,
+                    sendFreeTrailer: model.exportFirstCutFreeTrailer,
+                    showPrivacy: { showsPrivacyPolicy = true },
+                    showTerms: { showsTermsOfUse = true }
+                )
+                .ignoresSafeArea(edges: .bottom)
+                .transition(.move(edge: .bottom))
+            }
+        }
+        .animation(
+            reduceMotion ? .easeInOut(duration: 0.16) : TRMotion.navigation,
+            value: model.isStoryPassPresented
+        )
+        .task {
+            await purchases.refresh()
+        }
+        .task(id: PlaybackHoldKey(complete: playbackComplete, reduceMotion: reduceMotion)) {
+            guard playbackComplete, !reduceMotion else {
+                holdDrift = false
+                return
+            }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            holdDrift = true
+        }
+        .sheet(isPresented: $showsPrivacyPolicy) {
+            TripReelPrivacyPolicyView()
+        }
+        .sheet(isPresented: $showsTermsOfUse) {
+            MemoriesTermsOfUseView()
         }
         .onDisappear {
             soundtrack.stop()
+            model.dismissStoryPass()
         }
+    }
+
+    private var playbackControls: some View {
+        VStack(spacing: 15) {
+            VStack(spacing: 12) {
+                PlaybackProgressBar(
+                    duration: firstCutDurationSeconds,
+                    playbackRun: playbackRun,
+                    isComplete: playbackComplete
+                )
+                HStack {
+                    MetadataText(
+                        text: firstCutMediaSummary,
+                        color: .white.opacity(0.65)
+                    )
+                    Spacer()
+                    Text(model.firstCutDurationText)
+                        .font(TR.mono(12))
+                        .tracking(0.8)
+                        .foregroundStyle(.white.opacity(0.65))
+                }
+            }
+
+            Button("Skip to the end") {
+                skipToken &+= 1
+            }
+            .font(TR.ui(13, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.62))
+            .buttonStyle(.plain)
+            .accessibilityHint("Jumps to the last frame of the film")
+            .accessibilityIdentifier("first-watch-skip-button")
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 10)
+        .trEntrance(1, distance: 12)
+    }
+
+    private var endOfFilmOffer: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(model.firstCutFilmTitle)
+                    .font(TR.display(36))
+                    .tracking(-0.5)
+                    .fixedSize(horizontal: false, vertical: true)
+                MetadataText(
+                    text: "\(firstCutMediaSummary) · \(model.firstCutDurationText)",
+                    color: .white.opacity(0.6)
+                )
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(keepTitle) {
+                keepThisOne()
+            }
+            .buttonStyle(CreamButtonStyle())
+            .accessibilityHint(
+                isAlreadyUnlocked
+                    ? "Exports the full story at full length"
+                    : "Opens the Story Pass for this memory"
+            )
+            .accessibilityIdentifier("first-watch-keep-button")
+
+            HStack(spacing: 20) {
+                quietAction("Watch again", identifier: "first-watch-replay-button") {
+                    playbackComplete = false
+                    replayToken &+= 1
+                }
+                quietAction("Another take", identifier: "first-watch-another-take-button") {
+                    model.openAICutDirections()
+                }
+                quietAction("Change it", identifier: "first-watch-change-button") {
+                    model.continueFromFirstWatch()
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 10)
+        // The offer holds its place while the sheet rises over it, so the copy
+        // crossfades rather than sliding away.
+        .opacity(model.isStoryPassPresented ? 0 : 1)
+        .animation(
+            reduceMotion ? .easeInOut(duration: 0.16) : TRMotion.overlay,
+            value: model.isStoryPassPresented
+        )
+        .allowsHitTesting(!model.isStoryPassPresented)
+        .accessibilityHidden(model.isStoryPassPresented)
+        .trEntrance(0, distance: 12)
+        .accessibilityIdentifier("first-watch-end-card")
+    }
+
+    private func quietAction(
+        _ title: String,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(title, action: action)
+            .font(TR.ui(13, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.62))
+            .buttonStyle(.plain)
+            .accessibilityIdentifier(identifier)
+    }
+
+    private var soundtrackButton: some View {
+        Button {
+            soundtrack.toggle(track: firstCutTrack, volume: soundtrackVolume)
+        } label: {
+            Image(systemName: soundtrack.isPlaying ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(TR.cream)
+                .frame(width: 42, height: 42)
+                .background(.black.opacity(0.58))
+                .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
+                .clipShape(Circle())
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .buttonStyle(TactileButtonStyle(pressedScale: 0.92))
+        .padding(.trailing, 16)
+        .safeAreaPadding(.top, 7)
+        .disabled(firstCutTrack == nil)
+        .opacity(firstCutTrack == nil ? 0.42 : 1)
+        .accessibilityLabel(soundtrack.isPlaying ? "Pause soundtrack" : "Play soundtrack")
+        .accessibilityHint(firstCutTrack.map { "Soundtrack: \($0.name)" } ?? "No soundtrack selected")
+        .accessibilityIdentifier("first-watch-audio")
+    }
+
+    private func keepThisOne() {
+        guard !isAlreadyUnlocked else {
+            model.exportFirstCutFullStory()
+            return
+        }
+        purchases.clearMessage()
+        model.openStoryPass()
+    }
+
+    private func buyStoryPass() {
+        guard let package = purchases.storyPassPackage else { return }
+        Task {
+            guard await purchases.purchase(package, unlockingStoryID: model.exportStoryID) else {
+                return
+            }
+            guard purchases.hasFullExportAccess(for: model.exportStoryID) else { return }
+            model.exportFirstCutFullStory()
+        }
+    }
+}
+
+private struct PlaybackHoldKey: Hashable {
+    let complete: Bool
+    let reduceMotion: Bool
+}
+
+/// Raised over the still-playing film. Everything here is about the memory the
+/// user just watched — never about export settings.
+private struct StoryPassSheet: View {
+    @EnvironmentObject private var purchases: RevenueCatPurchaseService
+    let durationText: String
+    let withheldPhotos: [ReelPhoto]
+    let withheldText: String
+    let price: String?
+    let buy: () -> Void
+    let sendFreeTrailer: () -> Void
+    let showPrivacy: () -> Void
+    let showTerms: () -> Void
+
+    private var buyTitle: String {
+        guard let price else { return "Buy Story Pass" }
+        return "Buy Story Pass · \(price)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Capsule()
+                .fill(.white.opacity(0.3))
+                .frame(width: 36, height: 5)
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 1)
+                .accessibilityHidden(true)
+
+            MetadataText(text: "Story Pass · This memory", color: TR.accent)
+
+            Text("Keep all \(durationText) of it")
+                .font(TR.display(32))
+                .tracking(-0.5)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !withheldPhotos.isEmpty {
+                StoryPassWithheldStrip(photos: withheldPhotos, text: withheldText)
+            }
+
+            HStack(spacing: 8) {
+                passCapsule("1080p")
+                passCapsule("No watermark")
+                passCapsule("One-time")
+            }
+
+            if let message = purchases.message {
+                Text(message)
+                    .font(TR.ui(12, weight: .medium))
+                    .foregroundStyle(TR.cut.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if purchases.storyPassPackage == nil {
+                Label("Story Pass isn't available right now", systemImage: "exclamationmark.circle")
+                    .font(TR.ui(12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .frame(maxWidth: .infinity, alignment: .center)
+            } else {
+                Button {
+                    buy()
+                } label: {
+                    HStack(spacing: 9) {
+                        if purchases.isPurchasing {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(TR.ink)
+                        }
+                        Text(purchases.isPurchasing ? "Connecting to App Store…" : buyTitle)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(CreamButtonStyle())
+                .disabled(purchases.isPurchasing)
+                .accessibilityIdentifier("story-pass-buy-button")
+            }
+
+            Button("Send the free trailer instead") {
+                sendFreeTrailer()
+            }
+            .font(TR.ui(14, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.6))
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
+            .disabled(purchases.isPurchasing)
+            .accessibilityIdentifier("story-pass-free-trailer-button")
+
+            VStack(spacing: 7) {
+                Text("One-time purchase for this memory. No subscription.")
+                    .font(TR.ui(10))
+                    .foregroundStyle(.white.opacity(0.38))
+                    .multilineTextAlignment(.center)
+
+                HStack(spacing: 18) {
+                    Button("Privacy", action: showPrivacy)
+                    Button("Terms", action: showTerms)
+                }
+                .font(TR.ui(11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.54))
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 12)
+        .padding(.bottom, 44)
+        .frame(maxWidth: .infinity)
+        .background(TR.sheet)
+        .clipShape(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 26,
+                topTrailingRadius: 26,
+                style: .continuous
+            )
+        )
+        .shadow(color: .black.opacity(0.7), radius: 30, y: -12)
+        .accessibilityIdentifier("story-pass-sheet")
+    }
+
+    private func passCapsule(_ title: String) -> some View {
+        Text(title)
+            .font(TR.ui(10, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.72))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.06))
+            .clipShape(Capsule())
+    }
+}
+
+/// Three of the moments the free trailer drops, shown rather than described.
+private struct StoryPassWithheldStrip: View {
+    let photos: [ReelPhoto]
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 4) {
+                ForEach(Array(photos.prefix(3))) { photo in
+                    ZStack(alignment: .bottomTrailing) {
+                        PhotoAssetView(source: photo.source)
+                            .frame(width: 34, height: 44)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        if photo.isVideo {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 6, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(4)
+                                .background(.black.opacity(0.74), in: Circle())
+                                .padding(3)
+                        }
+                    }
+                }
+            }
+
+            Text(text)
+                .font(TR.ui(12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.82))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(.white.opacity(0.07))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(TR.accent.opacity(0.3), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text)
+        .accessibilityIdentifier("story-pass-withheld-strip")
     }
 }
 

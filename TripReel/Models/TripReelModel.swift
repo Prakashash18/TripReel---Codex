@@ -2378,6 +2378,10 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var libraryErrorMessage: String?
     @Published private(set) var cloudAnalysisPreference: CloudAnalysisPreference
     @Published var isCloudAnalysisConsentPresented = false
+    /// The Story Pass sheet is raised over a still-playing First Watch rather
+    /// than presented as its own screen, so the model owns it the same way it
+    /// owns the other overlays that navigation has to know about.
+    @Published var isStoryPassPresented = false
     @Published private(set) var cloudConsentIsSettings = false
     @Published private(set) var aiCutSetupStep: AICutSetupStep = .moments
     @Published private(set) var selectedAICutDirection: AICutDirection?
@@ -3228,6 +3232,7 @@ final class TripReelModel: ObservableObject {
     /// flow. Every destination is explicit so transient processing screens are
     /// never accidentally revisited.
     var canNavigateBack: Bool {
+        if isStoryPassPresented { return true }
         switch screen {
         case .access, .limited, .firstWatch, .firstCutOptions, .aiDirection, .aiComparison,
              .aiVideoIntro, .aiVideoReady, .secondWatch, .pace, .export, .paywall, .done:
@@ -3239,6 +3244,10 @@ final class TripReelModel: ObservableObject {
     }
 
     func navigateBack() {
+        if isStoryPassPresented {
+            dismissStoryPass()
+            return
+        }
         switch screen {
         case .access:
             go(.welcome, direction: .backward)
@@ -3273,8 +3282,64 @@ final class TripReelModel: ObservableObject {
         }
     }
 
+    /// Reachable only from First Watch's quiet `Change it`. The decision the
+    /// user is asked for at the end of the film is whether to keep it, so the
+    /// routing screen no longer sits between playback and that question.
     func continueFromFirstWatch() {
         go(.firstCutOptions, direction: .forward)
+    }
+
+    func openStoryPass() {
+        isStoryPassPresented = true
+    }
+
+    func dismissStoryPass() {
+        isStoryPassPresented = false
+    }
+
+    /// The title the film actually opens on, so the end card names the memory
+    /// the same way the film just did.
+    var firstCutFilmTitle: String {
+        let cards = firstCutSnapshot?.montageTitleCards ?? montageTitleCards
+        let openingTitle = (cards.first(where: { $0.kind == .opening })?.title ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !openingTitle.isEmpty { return openingTitle }
+        let draftTitle = titleDraft(for: .opening)
+            .title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return draftTitle.isEmpty ? tripPlace : draftTitle
+    }
+
+    /// What the free trailer leaves behind, phrased as moments rather than as
+    /// an export setting.
+    var storyPassWithheldText: String {
+        let count = fullStoryExclusiveMomentCount
+        guard count > 0 else {
+            return "Everything the free trailer trims for length"
+        }
+        return "\(count) moment\(count == 1 ? "" : "s") the free trailer leaves out"
+    }
+
+    /// Buying at First Watch renders the full story straight away. There is no
+    /// export screen in between: the user already decided while watching.
+    func exportFirstCutFullStory() {
+        isStoryPassPresented = false
+        keepFirstCutForRender()
+        requestExport(.highDefinition, isUnlocked: true)
+    }
+
+    /// Declining keeps a real, self-contained outcome: the watermarked trailer.
+    func exportFirstCutFreeTrailer() {
+        isStoryPassPresented = false
+        keepFirstCutForRender()
+        requestExport(.standard, isUnlocked: false)
+    }
+
+    private func keepFirstCutForRender() {
+        if let firstCutSnapshot {
+            applyEditSnapshot(firstCutSnapshot, source: .firstCut)
+        }
+        exportReturnScreen = .firstWatch
     }
 
     func openExport() {

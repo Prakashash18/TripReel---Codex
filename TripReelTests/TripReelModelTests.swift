@@ -246,6 +246,101 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(model.screen, .firstWatch)
     }
 
+    func testStoryPassIsRaisedOverFirstWatchAndBackDismissesItFirst() {
+        let model = makeModel()
+
+        model.go(.firstWatch)
+        XCTAssertFalse(model.isStoryPassPresented)
+
+        model.openStoryPass()
+        XCTAssertTrue(model.isStoryPassPresented)
+        // The film is never replaced by a purchase screen.
+        XCTAssertEqual(model.screen, .firstWatch)
+        XCTAssertTrue(model.canNavigateBack)
+
+        model.navigateBack()
+        XCTAssertFalse(model.isStoryPassPresented)
+        XCTAssertEqual(model.screen, .firstWatch)
+
+        model.navigateBack()
+        XCTAssertEqual(model.screen, .trips)
+    }
+
+    func testKeepingTheFilmAtFirstWatchRendersTheFullStoryWithNoExportScreen() async throws {
+        let exporter = RecordingVideoExporter()
+        let model = makeFirstWatchModel(exporter: exporter)
+        let freeMomentCount = model.freeExportMomentCount
+        model.openStoryPass()
+
+        model.exportFirstCutFullStory()
+
+        XCTAssertFalse(model.isStoryPassPresented)
+        XCTAssertNotEqual(model.screen, .paywall)
+        XCTAssertNotEqual(model.screen, .export)
+        for _ in 0..<200 where model.screen != .done {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(model.screen, .done)
+        XCTAssertEqual(model.exportQuality, .hd)
+        XCTAssertFalse(model.exportQuality.includesWatermark)
+        let request = try XCTUnwrap(await exporter.lastRequest)
+        XCTAssertEqual(request.quality, .hd)
+        XCTAssertGreaterThan(request.photos.count, freeMomentCount)
+    }
+
+    func testDecliningTheStoryPassStillRendersTheFreeTrailer() async throws {
+        let exporter = RecordingVideoExporter()
+        let model = makeFirstWatchModel(exporter: exporter)
+        model.openStoryPass()
+
+        model.exportFirstCutFreeTrailer()
+
+        XCTAssertFalse(model.isStoryPassPresented)
+        XCTAssertNotEqual(model.screen, .paywall)
+        for _ in 0..<200 where model.screen != .done {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(model.screen, .done)
+        XCTAssertEqual(model.exportQuality, .standard)
+        XCTAssertTrue(model.exportQuality.includesWatermark)
+        let request = try XCTUnwrap(await exporter.lastRequest)
+        XCTAssertEqual(request.quality, .standard)
+    }
+
+    /// A built memory parked on First Watch, long enough that the free trailer
+    /// genuinely has to leave moments out.
+    private func makeFirstWatchModel(exporter: RecordingVideoExporter) -> TripReelModel {
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            videoExporter: exporter
+        )
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let assets = (0..<36).map { index in
+            TripAsset(
+                id: "first-watch-\(index)",
+                source: .bundled("my-khe-beach"),
+                creationDate: date.addingTimeInterval(Double(index) * 60),
+                filename: "IMG_\(index).JPG",
+                pixelWidth: 1_024,
+                pixelHeight: 1_536
+            )
+        }
+        model.startBuild(trip: Trip(
+            id: "first-watch-trip",
+            place: "Da Nang",
+            dates: "Today",
+            startDate: date,
+            endDate: date.addingTimeInterval(35 * 60),
+            assets: assets,
+            coverID: assets[18].id
+        ))
+        model.go(.firstWatch)
+        return model
+    }
+
     func testBackNavigationSkipsTransientProcessingScreens() {
         let model = makeModel()
 
