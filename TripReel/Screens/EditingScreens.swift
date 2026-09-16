@@ -635,7 +635,7 @@ struct AICutDirectionScreen: View {
     @State private var showsPhotoSelection = false
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             WarmBackground(variant: .export)
 
             ScrollView(showsIndicators: false) {
@@ -646,14 +646,12 @@ struct AICutDirectionScreen: View {
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 6)
-                // Clears the footer, which sits over the scroll rather than
-                // inset into it: a safe-area inset here did not survive the
-                // moments sheet coming and going.
-                .padding(.bottom, 128)
+                .padding(.bottom, 22)
             }
             .scrollDismissesKeyboard(.interactively)
-
-            stepFooter
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                stepFooter
+            }
         }
         .sheet(isPresented: $showsPhotoSelection) {
             AICutPhotoSelectionSheet()

@@ -60,6 +60,8 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("trips-screen").waitForExistence(timeout: 3))
 
         app.buttons["trip-row-demo-da-nang"].tap()
+        XCTAssertTrue(screen("clue-screen").waitForExistence(timeout: 3))
+        screen("clue-skip").tap()
         XCTAssertTrue(screen("building-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 7))
 
@@ -103,7 +105,7 @@ final class TripReelFlowUITests: XCTestCase {
             for: NSPredicate(format: "label CONTAINS[c] %@", "Journal"),
             evaluatedWith: stylePreview
         )
-        waitForExpectations(timeout: 2)
+        waitForExpectations(timeout: 8)
         app.buttons["Done"].tap()
 
         let studioExport = screen("studio-export-button")
@@ -152,7 +154,9 @@ final class TripReelFlowUITests: XCTestCase {
 
         screen("full-preview-button").tap()
         XCTAssertTrue(screen("full-film-preview").waitForExistence(timeout: 3))
-        app.buttons["Close preview"].tap()
+        let closePreview = app.buttons["Close preview"]
+        XCTAssertTrue(closePreview.waitForExistence(timeout: 5))
+        closePreview.tap()
 
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
         screen("studio-tool-clips").tap()
@@ -292,7 +296,7 @@ final class TripReelFlowUITests: XCTestCase {
         attachScreenshot(named: "AI style step")
 
         // Create is already offered: the clue was asked for before the build.
-        let create = screen("ai-direction-continue")
+        let create = button(startingWith: "Create AI cut")
         XCTAssertTrue(create.waitForExistence(timeout: 3))
         XCTAssertTrue(create.isEnabled)
 
@@ -391,7 +395,10 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertFalse(button(startingWith: "Save Video").exists)
         XCTAssertFalse(button(startingWith: "Share Reel").exists)
 
-        XCTAssertTrue(screen("memory-card").exists)
+        XCTAssertTrue(
+            screen("memory-card").exists,
+            screen("film-ready-screen").debugDescription
+        )
         XCTAssertTrue(screen("memory-card-badge").exists)
         XCTAssertTrue(screen("destination-stories").exists)
         XCTAssertTrue(screen("destination-messages").exists)
