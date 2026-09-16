@@ -10,6 +10,7 @@ enum AppScreen: String {
     case limited
     case trips
     case empty
+    case clue
     case building
     case firstWatch
     case firstCutOptions
@@ -34,26 +35,25 @@ enum AppScreen: String {
         case .access: 1
         case .limited: 2
         case .trips, .empty: 3
-        case .building: 4
-        case .firstWatch: 5
-        case .firstCutOptions: 6
-        case .aiDirection: 7
-        case .aiProcessing: 8
-        case .aiComparison: 9
-        case .aiVideoIntro, .aiVideoGenerating, .aiVideoReady: 10
-        case .secondWatch: 11
-        case .cut, .pace: 12
-        case .export: 13
-        case .paywall, .rendering: 14
-        case .done: 15
-        case .cleanup: 16
+        case .clue: 4
+        case .building: 5
+        case .firstWatch: 6
+        case .firstCutOptions: 7
+        case .aiDirection: 8
+        case .aiProcessing: 9
+        case .aiComparison: 10
+        case .aiVideoIntro, .aiVideoGenerating, .aiVideoReady: 11
+        case .secondWatch: 12
+        case .cut, .pace: 13
+        case .export: 14
+        case .paywall, .rendering: 15
+        case .done: 16
+        case .cleanup: 17
         }
     }
 }
 
 enum AICutSetupStep: Int, CaseIterable, Hashable, Sendable {
-    case moments
-    case story
     case direction
 
     var position: Int { rawValue + 1 }
@@ -2423,6 +2423,10 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var selectedAICutDirection: AICutDirection?
     @Published private(set) var selectedAICutPhotoIDs: Set<String> = []
     @Published var aiCutStoryContext = ""
+    /// One optional line in the user's words, asked once at the moment they tap
+    /// a memory. It shapes the on-device title plan whether or not AI ever runs.
+    @Published var storyClue = ""
+    @Published private(set) var clueTrip: Trip?
     @Published private(set) var firstCutSnapshot: TripEditSnapshot?
     @Published private(set) var aiCutSnapshot: TripEditSnapshot?
     @Published private(set) var selectedCutSource: TripCutSource = .firstCut
@@ -2485,6 +2489,7 @@ final class TripReelModel: ObservableObject {
     private let nativePhotoIntelligence: any NativePhotoIntelligenceServing
     private let videoClipIntelligence: any VideoClipIntelligenceServing
     private let preferenceStore: UserDefaults
+    private static let preferredCutKey = "memories.prefers-ai-cuts"
     private let manualPhotoImporter = ManualPhotoImportService()
     private var workTask: Task<Void, Never>?
     private var photoAnalysisTask: Task<Void, Never>?
@@ -3352,7 +3357,7 @@ final class TripReelModel: ObservableObject {
     var canNavigateBack: Bool {
         if isStoryPassPresented { return true }
         switch screen {
-        case .access, .limited, .firstWatch, .firstCutOptions, .aiDirection, .aiComparison,
+        case .access, .limited, .clue, .firstWatch, .firstCutOptions, .aiDirection, .aiComparison,
              .aiVideoIntro, .aiVideoReady, .secondWatch, .pace, .export, .paywall, .done:
             return true
         case .welcome, .trips, .empty, .building, .aiProcessing, .aiVideoGenerating,
@@ -3371,6 +3376,8 @@ final class TripReelModel: ObservableObject {
             go(.welcome, direction: .backward)
         case .limited:
             go(.access, direction: .backward)
+        case .clue:
+            go(.trips, direction: .backward)
         case .firstWatch:
             go(.trips, direction: .backward)
         case .firstCutOptions:
@@ -3578,7 +3585,6 @@ final class TripReelModel: ObservableObject {
         aiCutConsentGranted
             && selectedAICutDirection != nil
             && !selectedAICutPhotoIDs.isEmpty
-            && !aiCutStoryContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Moments omitted from the cut currently on screen. An AI cut can restore
@@ -3599,6 +3605,26 @@ final class TripReelModel: ObservableObject {
     /// this path never prepares an upload or presents cloud consent.
     func requestBuild(trip: Trip) {
         guard !trip.assets.isEmpty else { return }
+        clueTrip = trip
+        storyClue = ""
+        go(.clue, direction: .forward)
+    }
+
+    func confirmClue() {
+        beginBuildAfterClue()
+    }
+
+    /// A real skip, not a disguised requirement: the film is made either way.
+    func skipClue() {
+        storyClue = ""
+        beginBuildAfterClue()
+    }
+
+    private func beginBuildAfterClue() {
+        guard let trip = clueTrip else {
+            go(.trips, direction: .backward)
+            return
+        }
         if usesDemoData {
             startBuild(trip: trip)
             return
@@ -3631,7 +3657,7 @@ final class TripReelModel: ObservableObject {
 
     func openAICutDirections() {
         aiCutFailure = nil
-        aiCutSetupStep = .moments
+        aiCutSetupStep = .direction
         selectedAICutDirection = recommendedAICutDirection
         resetAICutPhotoSelection()
         aiCutConsentGranted = false
@@ -3640,36 +3666,12 @@ final class TripReelModel: ObservableObject {
     }
 
     func advanceAICutSetup() {
-        switch aiCutSetupStep {
-        case .moments:
-            guard !selectedAICutPhotoIDs.isEmpty else { return }
-            navigationDirection = .forward
-            aiCutSetupStep = .story
-        case .story:
-            guard !aiCutStoryContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return
-            }
-            navigationDirection = .forward
-            aiCutSetupStep = .direction
-        case .direction:
-            break
-        }
+        // Style is the only decision left in the AI branch.
     }
 
     @discardableResult
     func retreatAICutSetup() -> Bool {
-        switch aiCutSetupStep {
-        case .moments:
-            return false
-        case .story:
-            navigationDirection = .backward
-            aiCutSetupStep = .moments
-            return true
-        case .direction:
-            navigationDirection = .backward
-            aiCutSetupStep = .story
-            return true
-        }
+        false
     }
 
     func selectAICutDirection(_ direction: AICutDirection) {
@@ -4115,6 +4117,18 @@ final class TripReelModel: ObservableObject {
         Do not add or remove people or important objects. No speech, text, logos, or watermarks. \
         Avoid warped hands, distorted faces, abrupt motion, and invented scenes.
         """
+    }
+
+    /// The tap is the whole answer. Which cut the user reached for is the only
+    /// signal worth keeping, and it steers the on-device recommendation next
+    /// time rather than being explained back to them.
+    func chooseCut(_ source: TripCutSource) {
+        preferenceStore.set(source == .aiCut, forKey: Self.preferredCutKey)
+        exportCut(source)
+    }
+
+    var prefersAICuts: Bool {
+        preferenceStore.bool(forKey: Self.preferredCutKey)
     }
 
     func exportCut(_ source: TripCutSource) {
@@ -5516,7 +5530,14 @@ final class TripReelModel: ObservableObject {
             isNearby: isNearbyTrip
         )
         titleDrafts = localTitlePlan.drafts
+        let clue = storyClue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !clue.isEmpty, var opening = titleDrafts[.opening] {
+            opening.title = clue
+            titleDrafts[.opening] = opening
+        }
         titleCards = localTitlePlan.enabledCards
+        // The AI branch inherits the same line rather than asking again.
+        aiCutStoryContext = clue
         textOverlays = []
         exportHandoff = .normal
         pendingExportIntent = nil

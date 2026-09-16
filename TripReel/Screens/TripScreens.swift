@@ -291,6 +291,123 @@ struct TripsScreen: View {
     }
 }
 
+/// Asked once, at the moment the user taps a memory, over its cover. One
+/// optional line — and the skip is real.
+struct ClueScreen: View {
+    @EnvironmentObject private var model: TripReelModel
+    @FocusState private var clueFocused: Bool
+
+    private var cover: PhotoSource {
+        model.clueTrip?.coverSource ?? .bundled("my-khe-beach")
+    }
+
+    var body: some View {
+        ZStack {
+            PhotoAssetView(source: cover)
+                .ignoresSafeArea()
+
+            LinearGradient(
+                colors: [.black.opacity(0.55), .black.opacity(0.94)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
+            VStack(alignment: .leading, spacing: 16) {
+                Spacer(minLength: 0)
+
+                VStack(alignment: .leading, spacing: 7) {
+                    MetadataText(
+                        text: "\(model.clueTrip?.shortPlace ?? "This memory") · \(model.clueTrip?.dates ?? "")",
+                        color: TR.accent
+                    )
+                    Text("What was this day?")
+                        .font(TR.display(40))
+                        .tracking(-0.5)
+                        .foregroundStyle(TR.cream)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("One line, in your words. It shapes the titles — and it never leaves your phone unless you ask for AI.")
+                        .font(TR.ui(14))
+                        .foregroundStyle(.white.opacity(0.66))
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityIdentifier("clue-screen")
+
+                TextField("", text: $model.storyClue, axis: .vertical)
+                    .font(TR.ui(14))
+                    .foregroundStyle(TR.cream)
+                    .tint(TR.accent)
+                    .lineLimit(1...3)
+                    .focused($clueFocused)
+                    .padding(.horizontal, 15)
+                    .padding(.vertical, 13)
+                    .background(.black.opacity(0.34))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(clueFocused ? TR.accent.opacity(0.6) : .white.opacity(0.16), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .accessibilityLabel("What was this day?")
+                    .accessibilityIdentifier("clue-field")
+
+                FlowingChips(suggestions: model.aiCutStoryContextSuggestions) { suggestion in
+                    model.storyClue = suggestion
+                    clueFocused = false
+                }
+
+                Button("Make my film") {
+                    model.confirmClue()
+                }
+                .buttonStyle(CreamButtonStyle())
+                .accessibilityIdentifier("clue-make-film")
+
+                Button("Skip — just make it") {
+                    model.skipClue()
+                }
+                .font(TR.ui(14, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.6))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("clue-skip")
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 30)
+            .trEntrance(0, distance: 12)
+        }
+        .scrollDismissesKeyboard(.interactively)
+    }
+}
+
+private struct FlowingChips: View {
+    let suggestions: [String]
+    let pick: (String) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 7) {
+                ForEach(suggestions, id: \.self) { suggestion in
+                    Button(suggestion) {
+                        pick(suggestion)
+                    }
+                    .font(TR.ui(11, weight: .semibold))
+                    .foregroundStyle(TR.cream.opacity(0.86))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(.white.opacity(0.08), in: Capsule())
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("clue-chip")
+                }
+            }
+            .padding(.horizontal, 1)
+        }
+        .scrollClipDisabled()
+    }
+}
+
 private struct RowCentreKey: PreferenceKey {
     static let defaultValue: [String: CGFloat] = [:]
     static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {

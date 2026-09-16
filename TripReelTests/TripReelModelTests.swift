@@ -37,35 +37,64 @@ final class TripReelModelTests: XCTestCase {
         )
     }
 
-    func testAIDirectorSetupAdvancesAndBacktracksOneDecisionAtATime() {
+    func testAIDirectorAsksOnlyForStyle() {
         let model = makeModel()
         model.go(.firstCutOptions)
         model.openAICutDirections()
         model.go(.aiDirection)
 
-        XCTAssertEqual(model.aiCutSetupStep, .moments)
-        XCTAssertGreaterThan(model.aiCutSelectedPhotoCount, 0)
-
-        model.advanceAICutSetup()
-        XCTAssertEqual(model.aiCutSetupStep, .story)
-        XCTAssertEqual(model.screen, .aiDirection)
-
-        model.advanceAICutSetup()
-        XCTAssertEqual(model.aiCutSetupStep, .story)
-        model.aiCutStoryContext = "A family day at the gardens"
-        model.advanceAICutSetup()
+        // Consent lands on style. Moments are already chosen on device, and the
+        // clue was asked once, before the film was ever built.
         XCTAssertEqual(model.aiCutSetupStep, .direction)
-
-        model.navigateBack()
-        XCTAssertEqual(model.aiCutSetupStep, .story)
-        XCTAssertEqual(model.screen, .aiDirection)
-
-        model.navigateBack()
-        XCTAssertEqual(model.aiCutSetupStep, .moments)
-        XCTAssertEqual(model.screen, .aiDirection)
+        XCTAssertGreaterThan(model.aiCutSelectedPhotoCount, 0)
+        XCTAssertEqual(AICutSetupStep.allCases.count, 1)
 
         model.navigateBack()
         XCTAssertEqual(model.screen, .firstCutOptions)
+    }
+
+    func testTappingAMemoryAsksForTheClueBeforeBuilding() throws {
+        let model = makeModel()
+        let trip = try XCTUnwrap(model.trips.first)
+
+        model.requestBuild(trip: trip)
+        XCTAssertEqual(model.screen, .clue)
+        XCTAssertEqual(model.storyClue, "")
+        XCTAssertFalse(model.aiCutStoryContextSuggestions.isEmpty)
+
+        // The clue becomes the film's opening title, in the user's own words.
+        model.storyClue = "The day the rain stopped"
+        model.confirmClue()
+        XCTAssertNotEqual(model.screen, .clue)
+        XCTAssertEqual(model.titleDraft(for: .opening).title, "The day the rain stopped")
+        // And the AI branch inherits it rather than asking again.
+        XCTAssertEqual(model.aiCutStoryContext, "The day the rain stopped")
+    }
+
+    func testSkippingTheClueStillMakesTheFilm() throws {
+        let model = makeModel()
+        let trip = try XCTUnwrap(model.trips.first)
+
+        model.requestBuild(trip: trip)
+        model.storyClue = "typed then thought better of it"
+        model.skipClue()
+
+        XCTAssertEqual(model.storyClue, "")
+        XCTAssertNotEqual(model.screen, .clue)
+        XCTAssertFalse(model.titleDraft(for: .opening).title.isEmpty)
+        XCTAssertEqual(model.aiCutStoryContext, "")
+    }
+
+    func testBackFromTheClueReturnsToTheList() throws {
+        let model = makeModel()
+        let trip = try XCTUnwrap(model.trips.first)
+
+        model.requestBuild(trip: trip)
+        XCTAssertEqual(model.screen, .clue)
+        XCTAssertTrue(model.canNavigateBack)
+
+        model.navigateBack()
+        XCTAssertEqual(model.screen, .trips)
     }
 
     func testVideoFrameCopyDoesNotTurnUIKitArtworkUpsideDown() throws {

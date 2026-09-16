@@ -279,78 +279,51 @@ final class TripReelFlowUITests: XCTestCase {
         button(startingWith: "Allow & continue").tap()
 
         XCTAssertTrue(screen("ai-direction-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Pick moments"].exists)
-        XCTAssertTrue(screen("ai-setup-step-moments").exists)
-        XCTAssertFalse(screen("ai-setup-step-story").exists)
-        XCTAssertFalse(screen("ai-setup-step-direction").exists)
-        attachScreenshot(named: "AI moments step")
 
+        // Consent lands straight on style: no moments step, no second clue.
+        XCTAssertTrue(app.staticTexts["Pick a style"].exists)
+        XCTAssertTrue(screen("ai-setup-step-direction").exists)
+        XCTAssertFalse(screen("ai-setup-step-moments").exists)
+        XCTAssertFalse(screen("ai-setup-step-story").exists)
+        XCTAssertFalse(screen("ai-story-context").exists)
+        XCTAssertTrue(screen("ai-direction-choice-dynamic").exists)
+        attachScreenshot(named: "AI style step")
+
+        // Moments are still the user's to change, just not a step to clear.
         let photoPicker = button(startingWith: "Moments for AI")
         XCTAssertTrue(photoPicker.waitForExistence(timeout: 2))
         photoPicker.tap()
-
         XCTAssertTrue(screen("ai-photo-selection-sheet").waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Deselect one moment to choose another"].exists)
-        XCTAssertTrue(app.buttons["Best moments"].exists)
-        let bulkSelection = app.buttons
-            .matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "Select all", "Fill "))
-            .firstMatch
-        XCTAssertTrue(bulkSelection.exists)
-        XCTAssertTrue(app.buttons["Clear"].exists)
-        attachScreenshot(named: "AI exact photo selection")
-
         app.buttons["Done"].firstMatch.tap()
-        XCTAssertFalse(screen("ai-photo-selection-sheet").waitForExistence(timeout: 2))
-        XCTAssertTrue(screen("ai-setup-step-moments").waitForExistence(timeout: 2))
-        XCTAssertTrue(button(startingWith: "Continue").waitForExistence(timeout: 2))
-        button(startingWith: "Continue").tap()
-        XCTAssertTrue(screen("ai-setup-step-story").waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["What happened?"].exists)
-        XCTAssertFalse(screen("ai-setup-step-direction").exists)
-
-        let requiredContinue = button(startingWith: "Continue")
-        XCTAssertTrue(requiredContinue.waitForExistence(timeout: 2))
-        XCTAssertFalse(requiredContinue.isEnabled)
-        let clue = app.textFields.firstMatch
-        XCTAssertTrue(clue.waitForExistence(timeout: 2))
-        clue.tap()
-        clue.typeText("Our students won the competition")
-        XCTAssertTrue(requiredContinue.isEnabled)
-        button(startingWith: "Continue").tap()
         XCTAssertTrue(screen("ai-setup-step-direction").waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Pick a style"].exists)
-        XCTAssertTrue(screen("ai-direction-choice-dynamic").exists)
-        attachScreenshot(named: "AI direction step")
 
-        screen("app-back-button").tap()
-        XCTAssertTrue(screen("ai-setup-step-story").waitForExistence(timeout: 2))
-        screen("app-back-button").tap()
-        XCTAssertTrue(screen("ai-setup-step-moments").waitForExistence(timeout: 2))
+        let create = screen("ai-direction-continue")
+        XCTAssertTrue(create.waitForExistence(timeout: 2))
+        XCTAssertTrue(create.isEnabled)
     }
 
-    func testAICutComparisonKeepsExportAndEditAsDistinctRoutes() {
+    func testAICutComparisonAsksOneQuestionAndTheTapIsTheAnswer() {
         launchApp(at: "aiComparison")
         XCTAssertTrue(screen("ai-comparison-screen").waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Which felt more like your trip?"].exists)
         XCTAssertTrue(screen("compare-firstCut").exists)
         XCTAssertTrue(screen("compare-aiCut").exists)
+        attachScreenshot(named: "Two cuts, one question")
 
-        let export = screen("use-ai-cut-button")
-        XCTAssertTrue(export.waitForExistence(timeout: 2))
-        export.tap()
+        // Nothing explains the director's reasoning back at the user.
+        XCTAssertFalse(screen("ai-comparison-audio").exists)
+        XCTAssertFalse(screen("open-ai-video-button").exists)
+
+        screen("compare-aiCut").tap()
         XCTAssertTrue(screen("export-screen").waitForExistence(timeout: 3))
-
-        screen("app-back-button").tap()
-        XCTAssertTrue(screen("ai-comparison-screen").waitForExistence(timeout: 3))
-        screen("edit-compared-cut-button").tap()
-        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
     }
 
-    func testAICutComparisonKeepsRetiredGenerativeVideoOutOfTheFlow() {
+    func testAICutComparisonStillOffersEditingInsteadOfChoosing() {
         launchApp(at: "aiComparison")
         XCTAssertTrue(screen("ai-comparison-screen").waitForExistence(timeout: 3))
-        XCTAssertFalse(screen("open-ai-video-button").exists)
-        XCTAssertTrue(screen("use-ai-cut-button").exists)
-        XCTAssertTrue(screen("edit-compared-cut-button").exists)
+
+        screen("edit-compared-cut-button").tap()
+        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
     }
 
     func testAIProcessingShowsSecureTransferAndCanCancel() {
