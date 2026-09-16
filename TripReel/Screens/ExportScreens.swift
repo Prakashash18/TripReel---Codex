@@ -1052,6 +1052,8 @@ struct FilmReadyScreen: View {
         .frame(width: cardWidth, height: cardHeight)
         .blur(radius: settled ? 0 : 3)
         .shadow(color: .black.opacity(0.6), radius: 26, y: 20)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("memory-card")
     }
 
     private var cardFront: some View {
@@ -1084,7 +1086,6 @@ struct FilmReadyScreen: View {
                 Text(model.firstCutFilmTitle)
                     .font(TR.display(25))
                     .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("memory-card")
                 MetadataText(text: model.memoryCardMeta, color: .white.opacity(0.62))
             }
             .padding(16)

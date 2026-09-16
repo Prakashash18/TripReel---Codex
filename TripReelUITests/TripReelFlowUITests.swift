@@ -131,6 +131,8 @@ final class TripReelFlowUITests: XCTestCase {
         attachScreenshot(named: "Living memories list")
 
         anniversary.tap()
+        XCTAssertTrue(screen("clue-screen").waitForExistence(timeout: 3))
+        screen("clue-skip").tap()
         XCTAssertTrue(screen("building-screen").waitForExistence(timeout: 3))
     }
 
@@ -295,10 +297,11 @@ final class TripReelFlowUITests: XCTestCase {
         photoPicker.tap()
         XCTAssertTrue(screen("ai-photo-selection-sheet").waitForExistence(timeout: 3))
         app.buttons["Done"].firstMatch.tap()
-        XCTAssertTrue(screen("ai-setup-step-direction").waitForExistence(timeout: 2))
+        XCTAssertTrue(screen("ai-photo-selection-sheet").waitForNonExistence(timeout: 5))
+        XCTAssertTrue(screen("ai-setup-step-direction").waitForExistence(timeout: 5))
 
         let create = screen("ai-direction-continue")
-        XCTAssertTrue(create.waitForExistence(timeout: 2))
+        XCTAssertTrue(create.waitForExistence(timeout: 5))
         XCTAssertTrue(create.isEnabled)
     }
 

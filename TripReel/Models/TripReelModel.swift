@@ -5536,8 +5536,6 @@ final class TripReelModel: ObservableObject {
             titleDrafts[.opening] = opening
         }
         titleCards = localTitlePlan.enabledCards
-        // The AI branch inherits the same line rather than asking again.
-        aiCutStoryContext = clue
         textOverlays = []
         exportHandoff = .normal
         pendingExportIntent = nil
@@ -5558,7 +5556,9 @@ final class TripReelModel: ObservableObject {
         freePreviewEndPhotoID = nil
         freePreviewReason = nil
         selectedAICutPhotoIDs = []
-        aiCutStoryContext = ""
+        // The AI branch inherits the clue rather than asking for it again, so
+        // this has to land after the reset above rather than before it.
+        aiCutStoryContext = clue
         aiCutSetupStep = .direction
         aiCutConsentGranted = false
         aiCutSnapshot = nil
@@ -6229,6 +6229,7 @@ final class TripReelModel: ObservableObject {
         aiCutProgress = 0
         selectedAICutPhotoIDs = []
         aiCutStoryContext = ""
+        storyClue = ""
         aiCutSetupStep = .direction
         aiCutConsentGranted = false
         aiVideoGenerationID = UUID()
