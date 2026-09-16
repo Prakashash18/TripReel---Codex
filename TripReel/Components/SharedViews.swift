@@ -163,6 +163,12 @@ struct MontageView: View {
     var secondsPerSlide = 2.2
     var playbackBehavior: MontagePlaybackBehavior = .loop
     var showsReplayControl = false
+    /// Increment to restart playback from the first frame. Screens that own a
+    /// replay control of their own use this instead of `showsReplayControl`.
+    var playbackToken = 0
+    /// Increment to jump a `.playOnce` montage to its last frame and end
+    /// playback there, exactly as if it had run to completion.
+    var skipToEndToken = 0
     var onPlaybackStarted: (() -> Void)?
     var onPlaybackEnded: (() -> Void)?
     @State private var currentIndex = 0
@@ -246,7 +252,7 @@ struct MontageView: View {
         MontagePlaybackKey(
             content: contentKey,
             behavior: playbackBehavior,
-            generation: playbackGeneration
+            generation: playbackGeneration &+ playbackToken
         )
     }
 
@@ -450,6 +456,20 @@ struct MontageView: View {
             }
         }
         .animation(.easeInOut(duration: 0.22), value: playbackComplete)
+        .task(id: skipToEndToken) {
+            guard skipToEndToken != 0 else { return }
+            skipToLastFrame()
+        }
+    }
+
+    /// Ends playback on the final frame without tearing down the playback task.
+    /// The task's own `advanceToNextItem` then fails and calls `finishPlayback`,
+    /// which is already guarded, so the end callback still fires exactly once.
+    private func skipToLastFrame() {
+        guard playbackBehavior == .playOnce, !timeline.isEmpty, !playbackComplete else { return }
+        currentIndex = timeline.count - 1
+        prepareLoadStateForCurrentItem()
+        finishPlayback()
     }
 
     private func preheatUpcomingPhotos() {

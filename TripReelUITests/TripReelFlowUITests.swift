@@ -63,9 +63,13 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("building-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 7))
 
-        let continueButton = screen("first-cut-continue-button")
-        XCTAssertTrue(continueButton.waitForExistence(timeout: 3))
-        continueButton.tap()
+        let skipToEnd = screen("first-watch-skip-button")
+        XCTAssertTrue(skipToEnd.waitForExistence(timeout: 3))
+        skipToEnd.tap()
+
+        let changeIt = screen("first-watch-change-button")
+        XCTAssertTrue(changeIt.waitForExistence(timeout: 6))
+        changeIt.tap()
         XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
         screen("edit-film-button").tap()
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
@@ -151,16 +155,56 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
     }
 
-    func testFirstCutPlaybackHasOneDecisionThenOffersTwoPaths() {
+    func testFirstCutEndsOnTheKeepOfferRatherThanARoutingScreen() {
         launchApp(at: "firstWatch")
         XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(screen("first-cut-continue-button").exists)
         XCTAssertTrue(screen("first-watch-audio").exists)
         XCTAssertTrue(app.buttons["Pause soundtrack"].waitForExistence(timeout: 2))
         XCTAssertFalse(screen("improve-with-ai-button").exists)
         XCTAssertFalse(screen("edit-film-button").exists)
 
-        screen("first-cut-continue-button").tap()
+        // Nothing is asked for while the film is still playing.
+        XCTAssertFalse(screen("first-watch-keep-button").exists)
+        XCTAssertFalse(screen("story-pass-sheet").exists)
+
+        screen("first-watch-skip-button").tap()
+
+        XCTAssertTrue(screen("first-watch-end-card").waitForExistence(timeout: 6))
+        XCTAssertTrue(screen("first-watch-keep-button").waitForExistence(timeout: 3))
+        XCTAssertTrue(screen("first-watch-replay-button").exists)
+        XCTAssertTrue(screen("first-watch-another-take-button").exists)
+        XCTAssertTrue(screen("first-watch-change-button").exists)
+        attachScreenshot(named: "First Watch keep offer")
+    }
+
+    func testKeepOfferRaisesTheStoryPassOverTheFilmAndKeepsTheFreeTrailer() {
+        launchApp(at: "firstWatch")
+        XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 3))
+
+        screen("first-watch-skip-button").tap()
+        XCTAssertTrue(screen("first-watch-keep-button").waitForExistence(timeout: 6))
+        screen("first-watch-keep-button").tap()
+
+        let sheet = screen("story-pass-sheet")
+        XCTAssertTrue(sheet.waitForExistence(timeout: 6))
+        XCTAssertTrue(app.staticTexts["STORY PASS · THIS MEMORY"].exists)
+        XCTAssertTrue(screen("story-pass-free-trailer-button").exists)
+        // The film is still there underneath, not swapped for a paywall screen.
+        XCTAssertTrue(screen("first-watch-screen").exists)
+        attachScreenshot(named: "Story Pass over First Watch")
+
+        screen("app-back-button").tap()
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(screen("first-watch-keep-button").waitForExistence(timeout: 3))
+    }
+
+    func testChangeItStillReachesTheFirstCutOptions() {
+        launchApp(at: "firstWatch")
+        XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 3))
+
+        screen("first-watch-skip-button").tap()
+        XCTAssertTrue(screen("first-watch-change-button").waitForExistence(timeout: 6))
+        screen("first-watch-change-button").tap()
 
         XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("improve-with-ai-button").exists)
