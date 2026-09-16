@@ -28,6 +28,19 @@ final class TripReelFlowUITests: XCTestCase {
             .firstMatch
     }
 
+    /// Taps only once the element is actually hittable. Studio tools and the
+    /// preview's close button animate in, and a tap on sight lands nowhere.
+    private func tapWhenReady(_ element: XCUIElement, timeout: TimeInterval = 5) {
+        let hittable = expectation(
+            for: NSPredicate(format: "isHittable == true"),
+            evaluatedWith: element
+        )
+        wait(for: [hittable], timeout: timeout)
+        if element.isHittable {
+            element.tap()
+        }
+    }
+
     private func attachScreenshot(named name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name
@@ -60,8 +73,11 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("trips-screen").waitForExistence(timeout: 3))
 
         app.buttons["trip-row-demo-da-nang"].tap()
-        XCTAssertTrue(screen("building-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 7))
+        XCTAssertTrue(screen("clue-screen").waitForExistence(timeout: 3))
+        screen("clue-skip").tap()
+        // Building is a transient screen and can be gone before it is asked
+        // for; the film arriving is what this flow is about.
+        XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 12))
 
         let skipToEnd = screen("first-watch-skip-button")
         XCTAssertTrue(skipToEnd.waitForExistence(timeout: 3))
@@ -103,7 +119,7 @@ final class TripReelFlowUITests: XCTestCase {
             for: NSPredicate(format: "label CONTAINS[c] %@", "Journal"),
             evaluatedWith: stylePreview
         )
-        waitForExpectations(timeout: 2)
+        waitForExpectations(timeout: 8)
         app.buttons["Done"].tap()
 
         let studioExport = screen("studio-export-button")
@@ -115,10 +131,25 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(standardExport.waitForExistence(timeout: 2))
         standardExport.tap()
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
+        XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 15))
+        XCTAssertTrue(screen("memory-card").waitForExistence(timeout: 3))
+        XCTAssertTrue(screen("send-memory").exists)
+        XCTAssertFalse(screen("export-save-warning").exists)
+    }
 
-        button(startingWith: "Save Video").tap()
-        XCTAssertTrue(screen("cleanup-screen").waitForExistence(timeout: 3))
+    func testMemoriesListPinsTheAnniversaryAboveTheRows() {
+        launchApp()
+        XCTAssertTrue(screen("trips-screen").waitForExistence(timeout: 3))
+
+        let anniversary = screen("anniversary-card")
+        XCTAssertTrue(anniversary.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["THIS DAY LAST YEAR"].exists)
+        attachScreenshot(named: "Living memories list")
+
+        anniversary.tap()
+        XCTAssertTrue(screen("clue-screen").waitForExistence(timeout: 3))
+        screen("clue-skip").tap()
+        XCTAssertTrue(screen("building-screen").waitForExistence(timeout: 3))
     }
 
     func testSingleMemoryCollectionRemovesUnhelpfulTabs() {
@@ -137,10 +168,12 @@ final class TripReelFlowUITests: XCTestCase {
 
         screen("full-preview-button").tap()
         XCTAssertTrue(screen("full-film-preview").waitForExistence(timeout: 3))
-        app.buttons["Close preview"].tap()
+        let closePreview = app.buttons["Close preview"]
+        XCTAssertTrue(closePreview.waitForExistence(timeout: 5))
+        tapWhenReady(closePreview)
 
-        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
-        screen("studio-tool-clips").tap()
+        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 5))
+        tapWhenReady(screen("studio-tool-clips"))
         XCTAssertTrue(screen("film-moment-manager-sheet").waitForExistence(timeout: 3))
         app.buttons["Done"].tap()
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
@@ -236,7 +269,7 @@ final class TripReelFlowUITests: XCTestCase {
 
         freeExport.tap()
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
+        XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 15))
     }
 
     func testAIConsentComesBeforeDirectionAndDeclineReturnsSafely() {
@@ -266,78 +299,57 @@ final class TripReelFlowUITests: XCTestCase {
         button(startingWith: "Allow & continue").tap()
 
         XCTAssertTrue(screen("ai-direction-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Pick moments"].exists)
-        XCTAssertTrue(screen("ai-setup-step-moments").exists)
-        XCTAssertFalse(screen("ai-setup-step-story").exists)
-        XCTAssertFalse(screen("ai-setup-step-direction").exists)
-        attachScreenshot(named: "AI moments step")
 
+        // Consent lands straight on style: no moments step, no second clue.
+        XCTAssertTrue(app.staticTexts["Pick a style"].exists)
+        XCTAssertTrue(screen("ai-setup-step-direction").exists)
+        XCTAssertFalse(screen("ai-setup-step-moments").exists)
+        XCTAssertFalse(screen("ai-setup-step-story").exists)
+        XCTAssertFalse(screen("ai-story-context").exists)
+        XCTAssertTrue(screen("ai-direction-choice-dynamic").exists)
+        attachScreenshot(named: "AI style step")
+
+        // Create is already offered: the clue was asked for before the build.
+        let create = button(startingWith: "Create AI cut")
+        XCTAssertTrue(create.waitForExistence(timeout: 3))
+        XCTAssertTrue(create.isEnabled)
+
+        // Moments are still the user's to change, just not a step to clear.
         let photoPicker = button(startingWith: "Moments for AI")
         XCTAssertTrue(photoPicker.waitForExistence(timeout: 2))
         photoPicker.tap()
-
         XCTAssertTrue(screen("ai-photo-selection-sheet").waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Deselect one moment to choose another"].exists)
-        XCTAssertTrue(app.buttons["Best moments"].exists)
-        let bulkSelection = app.buttons
-            .matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "Select all", "Fill "))
-            .firstMatch
-        XCTAssertTrue(bulkSelection.exists)
-        XCTAssertTrue(app.buttons["Clear"].exists)
-        attachScreenshot(named: "AI exact photo selection")
-
         app.buttons["Done"].firstMatch.tap()
-        XCTAssertFalse(screen("ai-photo-selection-sheet").waitForExistence(timeout: 2))
-        XCTAssertTrue(screen("ai-setup-step-moments").waitForExistence(timeout: 2))
-        XCTAssertTrue(button(startingWith: "Continue").waitForExistence(timeout: 2))
-        button(startingWith: "Continue").tap()
-        XCTAssertTrue(screen("ai-setup-step-story").waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["What happened?"].exists)
-        XCTAssertFalse(screen("ai-setup-step-direction").exists)
+        XCTAssertTrue(screen("ai-photo-selection-sheet").waitForNonExistence(timeout: 5))
+        XCTAssertTrue(screen("ai-setup-step-direction").waitForExistence(timeout: 5))
 
-        let requiredContinue = button(startingWith: "Continue")
-        XCTAssertTrue(requiredContinue.waitForExistence(timeout: 2))
-        XCTAssertFalse(requiredContinue.isEnabled)
-        let clue = app.textFields.firstMatch
-        XCTAssertTrue(clue.waitForExistence(timeout: 2))
-        clue.tap()
-        clue.typeText("Our students won the competition")
-        XCTAssertTrue(requiredContinue.isEnabled)
-        button(startingWith: "Continue").tap()
-        XCTAssertTrue(screen("ai-setup-step-direction").waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Pick a style"].exists)
-        XCTAssertTrue(screen("ai-direction-choice-dynamic").exists)
-        attachScreenshot(named: "AI direction step")
-
-        screen("app-back-button").tap()
-        XCTAssertTrue(screen("ai-setup-step-story").waitForExistence(timeout: 2))
-        screen("app-back-button").tap()
-        XCTAssertTrue(screen("ai-setup-step-moments").waitForExistence(timeout: 2))
+        // And it survives the sheet coming and going.
+        XCTAssertTrue(create.waitForExistence(timeout: 8))
+        XCTAssertTrue(create.isEnabled)
     }
 
-    func testAICutComparisonKeepsExportAndEditAsDistinctRoutes() {
+    func testAICutComparisonAsksOneQuestionAndTheTapIsTheAnswer() {
         launchApp(at: "aiComparison")
         XCTAssertTrue(screen("ai-comparison-screen").waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Which felt more like your trip?"].exists)
         XCTAssertTrue(screen("compare-firstCut").exists)
         XCTAssertTrue(screen("compare-aiCut").exists)
+        attachScreenshot(named: "Two cuts, one question")
 
-        let export = screen("use-ai-cut-button")
-        XCTAssertTrue(export.waitForExistence(timeout: 2))
-        export.tap()
+        // Nothing explains the director's reasoning back at the user.
+        XCTAssertFalse(screen("ai-comparison-audio").exists)
+        XCTAssertFalse(screen("open-ai-video-button").exists)
+
+        screen("compare-aiCut").tap()
         XCTAssertTrue(screen("export-screen").waitForExistence(timeout: 3))
-
-        screen("app-back-button").tap()
-        XCTAssertTrue(screen("ai-comparison-screen").waitForExistence(timeout: 3))
-        screen("edit-compared-cut-button").tap()
-        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
     }
 
-    func testAICutComparisonKeepsRetiredGenerativeVideoOutOfTheFlow() {
+    func testAICutComparisonStillOffersEditingInsteadOfChoosing() {
         launchApp(at: "aiComparison")
         XCTAssertTrue(screen("ai-comparison-screen").waitForExistence(timeout: 3))
-        XCTAssertFalse(screen("open-ai-video-button").exists)
-        XCTAssertTrue(screen("use-ai-cut-button").exists)
-        XCTAssertTrue(screen("edit-compared-cut-button").exists)
+
+        screen("edit-compared-cut-button").tap()
+        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
     }
 
     func testAIProcessingShowsSecureTransferAndCanCancel() {
@@ -389,33 +401,22 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertFalse(screen("export-project").exists)
 
         screen("export-standard").tap()
-        XCTAssertTrue(screen("rewarded-export-prompt").waitForExistence(timeout: 3))
-        app.buttons["export-short-preview"].tap()
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
-        XCTAssertTrue(
-            app.staticTexts
-                .matching(NSPredicate(format: "label CONTAINS[c] %@", "doesn’t save exported videos"))
-                .firstMatch
-                .exists
-        )
-        XCTAssertTrue(button(startingWith: "Share Reel").exists)
-        XCTAssertTrue(button(startingWith: "Save Video").exists)
-    }
+        XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 15))
 
-    func testExportChoicesOfferFreeRewardedAndPaidPaths() {
-        app = XCUIApplication()
-        app.launchArguments = ["-qaScreen", "export", "-qaNoHint", "-qaRewardedExportPrompt"]
-        app.launchEnvironment["TRIPREEL_DEVELOPMENT_AUTH_TOKEN"] = String(repeating: "u", count: 32)
-        app.launch()
+        // The film saves itself, so nothing here asks the user to go and do it.
+        XCTAssertFalse(screen("export-save-warning").exists)
+        XCTAssertFalse(button(startingWith: "Save Video").exists)
+        XCTAssertFalse(button(startingWith: "Share Reel").exists)
 
-        XCTAssertTrue(screen("export-screen").waitForExistence(timeout: 3))
-        screen("export-standard").tap()
-        XCTAssertTrue(screen("rewarded-export-prompt").waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["export-short-preview"].exists)
-        XCTAssertTrue(app.buttons["watch-ad-and-export"].exists)
-        XCTAssertTrue(app.buttons["view-paid-export-options"].exists)
-        XCTAssertTrue(app.buttons["Not now"].exists)
+        XCTAssertTrue(screen("memory-card").exists, app.debugDescription)
+        XCTAssertTrue(screen("memory-card-badge").exists)
+        XCTAssertTrue(screen("destination-stories").exists)
+        XCTAssertTrue(screen("destination-messages").exists)
+        XCTAssertTrue(screen("send-memory").exists)
+
+        screen("memory-card-flip").tap()
+        XCTAssertTrue(screen("memory-card-watches").waitForExistence(timeout: 3))
     }
 
     func testCleanupShowsDestructiveWarningBeforePhotosRequest() {

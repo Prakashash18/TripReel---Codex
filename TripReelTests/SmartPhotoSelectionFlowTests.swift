@@ -41,6 +41,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         let trip = makeTrip(count: 2)
 
         model.requestBuild(trip: trip)
+        model.skipClue()
 
         try await waitUntil { model.screen == .building }
 
@@ -70,6 +71,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         let trip = makeTrip(count: 2)
 
         model.requestBuild(trip: trip)
+        model.skipClue()
         try await waitUntil { model.screen == .building }
         let firstIDs = try XCTUnwrap(model.firstCutSnapshot).keptPhotos.map(\.id)
         model.go(.firstCutOptions)
@@ -88,7 +90,9 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         model.useCloudEnhancement()
         XCTAssertEqual(model.screen, .aiDirection)
         XCTAssertFalse(model.isCloudAnalysisConsentPresented)
-        XCTAssertFalse(model.aiCutCanCreate)
+        // The clue is asked for once, up front, so nothing here is still
+        // missing: style and moments are already chosen.
+        XCTAssertTrue(model.aiCutCanCreate)
         model.aiCutStoryContext = "Our students’ competition day"
         XCTAssertTrue(model.aiCutCanCreate)
         let callsOnConsent = await cloud.observedCallCount()
@@ -161,6 +165,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         )
 
         model.requestBuild(trip: makeTrip(count: 2))
+        model.skipClue()
         try await waitUntil { model.screen == .building }
         model.go(.firstCutOptions)
         model.openAICutDirections()
@@ -190,6 +195,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         )
 
         model.requestBuild(trip: makeTrip(count: 3))
+        model.skipClue()
         try await waitUntil { model.screen == .building }
         let first = try XCTUnwrap(model.firstCutSnapshot)
         model.go(.firstCutOptions)
@@ -221,6 +227,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         )
 
         model.requestBuild(trip: makeTrip(count: 3))
+        model.skipClue()
         try await waitUntil { model.screen == .building }
         let first = try XCTUnwrap(model.firstCutSnapshot)
         model.go(.firstCutOptions)
@@ -254,6 +261,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         )
 
         model.requestBuild(trip: makeTrip(count: 3))
+        model.skipClue()
         try await waitUntil { model.screen == .building }
         model.go(.firstCutOptions)
         model.openAICutDirections()
@@ -323,6 +331,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         )
 
         model.requestBuild(trip: trip)
+        model.skipClue()
         try await waitUntil { model.screen == .building }
 
         XCTAssertEqual(model.excludedPhotos.first?.reason, .screenshot)
@@ -369,6 +378,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         )
 
         model.requestBuild(trip: makeTrip(count: 2))
+        model.skipClue()
         try await waitUntil { model.screen == .building }
 
         XCTAssertEqual(Set(try XCTUnwrap(model.firstCutSnapshot).keptPhotos.map(\.id)), ["asset-0", "asset-1"])
@@ -404,6 +414,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         )
 
         model.requestBuild(trip: makeTrip(count: 26))
+        model.skipClue()
         try await waitUntil { model.screen == .building }
         model.openAICutDirections()
         model.useCloudEnhancement()
@@ -443,6 +454,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         )
 
         model.requestBuild(trip: makeTrip(count: 40))
+        model.skipClue()
         try await waitUntil { model.screen == .building }
 
         XCTAssertEqual(model.photos.count, 30)
@@ -467,6 +479,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         )
 
         model.requestBuild(trip: makeTrip(count: 26))
+        model.skipClue()
         try await waitUntil { model.screen == .building }
 
         XCTAssertEqual(model.photos.count, 26)
@@ -489,6 +502,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         )
 
         model.requestBuild(trip: makeTrip(count: 40))
+        model.skipClue()
         try await waitUntil { model.screen == .building }
         let morePhotoIDs = Set(model.excludedPhotos.map(\.id))
         XCTAssertEqual(morePhotoIDs.count, 10)
@@ -544,6 +558,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         )
 
         model.requestBuild(trip: makeTrip(count: 6))
+        model.skipClue()
         try await waitUntil { model.screen == .building }
         model.go(.firstCutOptions)
         model.openAICutDirections()
@@ -585,6 +600,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         )
 
         model.requestBuild(trip: makeTrip(count: 4))
+        model.skipClue()
         try await waitUntil {
             !model.isAnalyzingPhotos && model.photoAnalysisFollowUp != nil
         }
@@ -627,6 +643,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         )
 
         model.requestBuild(trip: makeTrip(count: 2))
+        model.skipClue()
         try await waitUntil { !model.isAnalyzingPhotos && model.libraryErrorMessage != nil }
 
         XCTAssertTrue(model.photos.isEmpty)
@@ -652,6 +669,7 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
 
         model.go(.trips)
         model.requestBuild(trip: makeTrip(count: 2))
+        model.skipClue()
         try await waitUntil { model.isAnalyzingPhotos }
 
         model.clearLibraryState(afterAuthorizationChangedTo: .denied)

@@ -37,35 +37,64 @@ final class TripReelModelTests: XCTestCase {
         )
     }
 
-    func testAIDirectorSetupAdvancesAndBacktracksOneDecisionAtATime() {
+    func testAIDirectorAsksOnlyForStyle() {
         let model = makeModel()
         model.go(.firstCutOptions)
         model.openAICutDirections()
         model.go(.aiDirection)
 
-        XCTAssertEqual(model.aiCutSetupStep, .moments)
-        XCTAssertGreaterThan(model.aiCutSelectedPhotoCount, 0)
-
-        model.advanceAICutSetup()
-        XCTAssertEqual(model.aiCutSetupStep, .story)
-        XCTAssertEqual(model.screen, .aiDirection)
-
-        model.advanceAICutSetup()
-        XCTAssertEqual(model.aiCutSetupStep, .story)
-        model.aiCutStoryContext = "A family day at the gardens"
-        model.advanceAICutSetup()
+        // Consent lands on style. Moments are already chosen on device, and the
+        // clue was asked once, before the film was ever built.
         XCTAssertEqual(model.aiCutSetupStep, .direction)
-
-        model.navigateBack()
-        XCTAssertEqual(model.aiCutSetupStep, .story)
-        XCTAssertEqual(model.screen, .aiDirection)
-
-        model.navigateBack()
-        XCTAssertEqual(model.aiCutSetupStep, .moments)
-        XCTAssertEqual(model.screen, .aiDirection)
+        XCTAssertGreaterThan(model.aiCutSelectedPhotoCount, 0)
+        XCTAssertEqual(AICutSetupStep.allCases.count, 1)
 
         model.navigateBack()
         XCTAssertEqual(model.screen, .firstCutOptions)
+    }
+
+    func testTappingAMemoryAsksForTheClueBeforeBuilding() throws {
+        let model = makeModel()
+        let trip = try XCTUnwrap(model.trips.first)
+
+        model.requestBuild(trip: trip)
+        XCTAssertEqual(model.screen, .clue)
+        XCTAssertEqual(model.storyClue, "")
+        XCTAssertFalse(model.aiCutStoryContextSuggestions.isEmpty)
+
+        // The clue becomes the film's opening title, in the user's own words.
+        model.storyClue = "The day the rain stopped"
+        model.confirmClue()
+        XCTAssertNotEqual(model.screen, .clue)
+        XCTAssertEqual(model.titleDraft(for: .opening).title, "The day the rain stopped")
+        // And the AI branch inherits it rather than asking again.
+        XCTAssertEqual(model.aiCutStoryContext, "The day the rain stopped")
+    }
+
+    func testSkippingTheClueStillMakesTheFilm() throws {
+        let model = makeModel()
+        let trip = try XCTUnwrap(model.trips.first)
+
+        model.requestBuild(trip: trip)
+        model.storyClue = "typed then thought better of it"
+        model.skipClue()
+
+        XCTAssertEqual(model.storyClue, "")
+        XCTAssertNotEqual(model.screen, .clue)
+        XCTAssertFalse(model.titleDraft(for: .opening).title.isEmpty)
+        XCTAssertEqual(model.aiCutStoryContext, "")
+    }
+
+    func testBackFromTheClueReturnsToTheList() throws {
+        let model = makeModel()
+        let trip = try XCTUnwrap(model.trips.first)
+
+        model.requestBuild(trip: trip)
+        XCTAssertEqual(model.screen, .clue)
+        XCTAssertTrue(model.canNavigateBack)
+
+        model.navigateBack()
+        XCTAssertEqual(model.screen, .trips)
     }
 
     func testVideoFrameCopyDoesNotTurnUIKitArtworkUpsideDown() throws {
@@ -307,6 +336,67 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(request.quality, .standard)
     }
 
+    func testFinishedMemorySavesItselfAndMovesCleanupToTheBanner() async throws {
+        let exporter = RecordingVideoExporter()
+        let model = makeFirstWatchModel(exporter: exporter)
+        XCTAssertEqual(model.exportAutosave, .idle)
+
+        model.exportFirstCutFreeTrailer()
+        await waitForDone(model)
+        XCTAssertEqual(model.screen, .done)
+
+        // The user is never asked to go and save it.
+        let deadline = Date().addingTimeInterval(10)
+        while model.exportAutosave == .idle || model.exportAutosave == .saving,
+              Date() < deadline {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(model.exportAutosave, .saved)
+        let savedURL = await exporter.savedURL
+        XCTAssertEqual(savedURL, model.exportedVideoURL)
+
+        // Cleanup no longer stands between the user and the way out.
+        XCTAssertNotEqual(model.screen, .cleanup)
+
+        // Back from a finished memory belongs to the list, not to export.
+        model.navigateBack()
+        XCTAssertEqual(model.screen, .trips)
+    }
+
+    func testCleanupWaitsInTheListAsADismissibleBanner() throws {
+        let model = makeModel()
+        let trip = try XCTUnwrap(model.trips.first)
+        model.startBuild(trip: trip)
+
+        XCTAssertGreaterThan(model.cleanupBannerMomentCount, 0)
+        XCTAssertTrue(model.showsCleanupBanner)
+        XCTAssertTrue(model.cleanupBannerText.contains("nothing was deleted"))
+
+        model.openCleanupFromBanner()
+        XCTAssertEqual(model.screen, .cleanup)
+
+        model.dismissCleanupBanner()
+        XCTAssertFalse(model.showsCleanupBanner)
+
+        // A new memory brings its own left-out moments, so the banner returns.
+        model.startBuild(trip: trip)
+        XCTAssertTrue(model.showsCleanupBanner)
+    }
+
+    func testTrailerNamesWhatItLeftBehindAndTheFullStoryDoesNot() async throws {
+        let exporter = RecordingVideoExporter()
+        let model = makeFirstWatchModel(exporter: exporter)
+
+        model.exportFirstCutFreeTrailer()
+        await waitForDone(model)
+        let trailerText = try XCTUnwrap(model.trailerWithheldText)
+        XCTAssertTrue(trailerText.contains("still in here"))
+
+        model.exportFirstCutFullStory()
+        await waitForDone(model)
+        XCTAssertNil(model.trailerWithheldText)
+    }
+
     /// Yielding a fixed number of times is not a wait: the render finishes on
     /// its own schedule, and a loaded CI machine will still be on `.rendering`
     /// after any number of yields. This waits on the clock instead.
@@ -357,9 +447,10 @@ final class TripReelModelTests: XCTestCase {
         model.navigateBack()
         XCTAssertEqual(model.screen, .secondWatch)
 
+        // A finished memory is already saved, so back belongs to the list.
         model.go(.done)
         model.navigateBack()
-        XCTAssertEqual(model.screen, .export)
+        XCTAssertEqual(model.screen, .trips)
 
         model.go(.trips)
         XCTAssertFalse(model.canNavigateBack)
@@ -1230,44 +1321,6 @@ final class TripReelModelTests: XCTestCase {
         }
         XCTAssertEqual(duration, model.freeExportDurationSeconds, accuracy: 0.001)
         XCTAssertEqual(model.activeExportDurationSeconds, duration, accuracy: 0.001)
-    }
-
-    func testRewardedExportUsesAboutHalfTheStory() async throws {
-        let exporter = RecordingVideoExporter()
-        let model = TripReelModel(arguments: [], useDemoData: false, videoExporter: exporter)
-        let date = Date(timeIntervalSince1970: 1_800_000_000)
-        let assets = (0..<20).map { index in
-            TripAsset(
-                id: "rewarded-\(index)",
-                source: .bundled("my-khe-beach"),
-                creationDate: date.addingTimeInterval(Double(index) * 60),
-                filename: "IMG_\(index).JPG",
-                pixelWidth: 1_024,
-                pixelHeight: 1_536
-            )
-        }
-        model.startBuild(trip: Trip(
-            id: "rewarded-export-trip",
-            place: "Singapore",
-            dates: "Today",
-            startDate: date,
-            endDate: date.addingTimeInterval(19 * 60),
-            assets: assets,
-            coverID: assets[10].id
-        ))
-
-        XCTAssertEqual(model.rewardedExportMomentCount, 10)
-        XCTAssertGreaterThan(model.rewardedExportMomentCount, model.freeExportMomentCount)
-        XCTAssertLessThan(model.rewardedExportMomentCount, model.keptCount)
-
-        model.exportRewardedVersion()
-        for _ in 0..<100 where model.screen != .done { await Task.yield() }
-
-        let recordedRequest = await exporter.lastRequest
-        let request = try XCTUnwrap(recordedRequest)
-        XCTAssertEqual(request.quality, .rewarded)
-        XCTAssertEqual(request.photos.count, 10)
-        XCTAssertTrue(request.quality.includesWatermark)
     }
 
     func testDecliningStoryPassImmediatelyExportsTheFreeVersion() async throws {

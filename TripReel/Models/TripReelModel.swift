@@ -10,6 +10,7 @@ enum AppScreen: String {
     case limited
     case trips
     case empty
+    case clue
     case building
     case firstWatch
     case firstCutOptions
@@ -34,26 +35,25 @@ enum AppScreen: String {
         case .access: 1
         case .limited: 2
         case .trips, .empty: 3
-        case .building: 4
-        case .firstWatch: 5
-        case .firstCutOptions: 6
-        case .aiDirection: 7
-        case .aiProcessing: 8
-        case .aiComparison: 9
-        case .aiVideoIntro, .aiVideoGenerating, .aiVideoReady: 10
-        case .secondWatch: 11
-        case .cut, .pace: 12
-        case .export: 13
-        case .paywall, .rendering: 14
-        case .done: 15
-        case .cleanup: 16
+        case .clue: 4
+        case .building: 5
+        case .firstWatch: 6
+        case .firstCutOptions: 7
+        case .aiDirection: 8
+        case .aiProcessing: 9
+        case .aiComparison: 10
+        case .aiVideoIntro, .aiVideoGenerating, .aiVideoReady: 11
+        case .secondWatch: 12
+        case .cut, .pace: 13
+        case .export: 14
+        case .paywall, .rendering: 15
+        case .done: 16
+        case .cleanup: 17
         }
     }
 }
 
 enum AICutSetupStep: Int, CaseIterable, Hashable, Sendable {
-    case moments
-    case story
     case direction
 
     var position: Int { rawValue + 1 }
@@ -126,6 +126,35 @@ struct Trip: Identifiable, Hashable, Sendable {
         if videos == 0 { return "\(photos) photo\(photos == 1 ? "" : "s")" }
         if photos == 0 { return "\(videos) clip\(videos == 1 ? "" : "s")" }
         return "\(photos) photos · \(videos) clips"
+    }
+
+    /// Three stills spread across the memory, enough for the list to show what
+    /// it holds without building the whole film.
+    var teaserPhotos: [ReelPhoto] {
+        let stills = assets.filter { !$0.isVideo }
+        let usable = stills.isEmpty ? assets : stills
+        guard !usable.isEmpty else { return [] }
+        let picks: [TripAsset]
+        if usable.count <= 3 {
+            picks = usable
+        } else {
+            let step = usable.count / 3
+            picks = [usable[0], usable[step], usable[step * 2]]
+        }
+        let motions: [MontageMotionStyle] = [.zoomIn, .panLeft, .zoomOut]
+        return picks.enumerated().map { index, asset in
+            ReelPhoto(
+                id: "teaser-\(asset.id)",
+                source: asset.source,
+                label: "",
+                time: "",
+                isSimilar: false,
+                pixelWidth: asset.pixelWidth,
+                pixelHeight: asset.pixelHeight,
+                frameStyle: .fullBleed,
+                motionStyle: motions[index % motions.count]
+            )
+        }
     }
 
     var coverSource: PhotoSource {
@@ -1568,6 +1597,13 @@ private struct LibraryDetectionResult: Sendable {
     let nearbyEvents: [DetectedTrip]
 }
 
+enum ExportAutosaveState: Equatable, Sendable {
+    case idle
+    case saving
+    case saved
+    case failed
+}
+
 enum ExportQuality: Equatable, Sendable {
     case standard
     case rewarded
@@ -2383,10 +2419,14 @@ final class TripReelModel: ObservableObject {
     /// owns the other overlays that navigation has to know about.
     @Published var isStoryPassPresented = false
     @Published private(set) var cloudConsentIsSettings = false
-    @Published private(set) var aiCutSetupStep: AICutSetupStep = .moments
+    @Published private(set) var aiCutSetupStep: AICutSetupStep = .direction
     @Published private(set) var selectedAICutDirection: AICutDirection?
     @Published private(set) var selectedAICutPhotoIDs: Set<String> = []
     @Published var aiCutStoryContext = ""
+    /// One optional line in the user's words, asked once at the moment they tap
+    /// a memory. It shapes the on-device title plan whether or not AI ever runs.
+    @Published var storyClue = ""
+    @Published private(set) var clueTrip: Trip?
     @Published private(set) var firstCutSnapshot: TripEditSnapshot?
     @Published private(set) var aiCutSnapshot: TripEditSnapshot?
     @Published private(set) var selectedCutSource: TripCutSource = .firstCut
@@ -2433,6 +2473,12 @@ final class TripReelModel: ObservableObject {
     )
     @Published private(set) var isSavingExport = false
     @Published private(set) var exportSaveMessage: String?
+    /// The finished film is saved to Photos as encoding ends, so the Memory
+    /// Card never has to warn the user that leaving would lose it.
+    @Published private(set) var exportAutosave: ExportAutosaveState = .idle
+    /// The moments left out of the memory are reviewable later from a banner in
+    /// the list, rather than as a step the user must clear to finish.
+    @Published var isCleanupBannerDismissed = false
 
     let usesDemoData: Bool
 
@@ -2443,6 +2489,7 @@ final class TripReelModel: ObservableObject {
     private let nativePhotoIntelligence: any NativePhotoIntelligenceServing
     private let videoClipIntelligence: any VideoClipIntelligenceServing
     private let preferenceStore: UserDefaults
+    private static let preferredCutKey = "memories.prefers-ai-cuts"
     private let manualPhotoImporter = ManualPhotoImportService()
     private var workTask: Task<Void, Never>?
     private var photoAnalysisTask: Task<Void, Never>?
@@ -2817,6 +2864,82 @@ final class TripReelModel: ObservableObject {
         }
         let digest = SHA256.hash(data: Data(components.joined(separator: "|").utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// What the card says it did, so the badge is never a claim the app has not
+    /// actually carried out yet.
+    var memoryCardBadge: String {
+        switch exportAutosave {
+        case .idle, .saving:
+            return "Saving to Photos · \(exportQuality.includesWatermark ? "720p" : "1080p")"
+        case .saved:
+            return exportQuality.includesWatermark
+                ? "Saved to Photos · 720p · watermarked"
+                : "Saved to Photos · 1080p · no watermark"
+        case .failed:
+            return "Not saved to Photos yet"
+        }
+    }
+
+    var memoryCardMeta: String {
+        "\(tripDates) · \(activeExportPhotos.count) moments"
+    }
+
+    /// The trailer's job: name what it left behind rather than let the viewer
+    /// believe they already have the whole memory.
+    var trailerWithheldText: String? {
+        guard exportQuality.includesWatermark else { return nil }
+        let count = max(0, keptCount - activeExportPhotos.count)
+        guard count > 0 else { return nil }
+        return "\(count) moment\(count == 1 ? "" : "s") still in here. Keep the full \(filmDurationText)."
+    }
+
+    var cleanupBannerMomentCount: Int { cleanupCandidatePhotos.count }
+
+    var showsCleanupBanner: Bool {
+        !isCleanupBannerDismissed && cleanupBannerMomentCount > 0
+    }
+
+    var cleanupBannerText: String {
+        let count = cleanupBannerMomentCount
+        return "\(count) moment\(count == 1 ? " was" : "s were") left out of \(tripShortPlace). Review them whenever you like — nothing was deleted."
+    }
+
+    /// The memory queued behind this one, so finishing offers somewhere to go
+    /// that is not the end of the app.
+    var anniversaryMemory: Trip? {
+        if usesDemoData {
+            return trips.dropFirst().first ?? trips.first
+        }
+        let calendar = Calendar.current
+        let now = Date()
+        guard let todayOrdinal = calendar.ordinality(of: .day, in: .year, for: now) else { return nil }
+        return trips.first { trip in
+            guard let years = calendar.dateComponents([.year], from: trip.startDate, to: now).year,
+                  years >= 1,
+                  let ordinal = calendar.ordinality(of: .day, in: .year, for: trip.startDate) else {
+                return false
+            }
+            let delta = abs(ordinal - todayOrdinal)
+            return min(delta, 365 - delta) <= 3
+        }
+    }
+
+    var anniversaryMemoryLine: String? {
+        guard let trip = anniversaryMemory else { return nil }
+        let years = Calendar.current.dateComponents(
+            [.year],
+            from: trip.startDate,
+            to: Date()
+        ).year ?? 1
+        let span = max(1, years)
+        return span == 1
+            ? "\(trip.shortPlace), a year ago today"
+            : "\(trip.shortPlace), \(span) years ago today"
+    }
+
+    var nextMemoryTrip: Trip? {
+        trips.first { $0.id != selectedTrip?.id }
     }
 
     var activeExportDurationText: String {
@@ -3234,7 +3357,7 @@ final class TripReelModel: ObservableObject {
     var canNavigateBack: Bool {
         if isStoryPassPresented { return true }
         switch screen {
-        case .access, .limited, .firstWatch, .firstCutOptions, .aiDirection, .aiComparison,
+        case .access, .limited, .clue, .firstWatch, .firstCutOptions, .aiDirection, .aiComparison,
              .aiVideoIntro, .aiVideoReady, .secondWatch, .pace, .export, .paywall, .done:
             return true
         case .welcome, .trips, .empty, .building, .aiProcessing, .aiVideoGenerating,
@@ -3253,6 +3376,8 @@ final class TripReelModel: ObservableObject {
             go(.welcome, direction: .backward)
         case .limited:
             go(.access, direction: .backward)
+        case .clue:
+            go(.trips, direction: .backward)
         case .firstWatch:
             go(.trips, direction: .backward)
         case .firstCutOptions:
@@ -3275,7 +3400,7 @@ final class TripReelModel: ObservableObject {
             pendingExportIntent = nil
             go(.export, direction: .backward)
         case .done:
-            go(.export, direction: .backward)
+            go(.trips, direction: .backward)
         case .welcome, .trips, .empty, .building, .aiProcessing, .aiVideoGenerating,
              .cut, .rendering, .cleanup:
             break
@@ -3460,7 +3585,6 @@ final class TripReelModel: ObservableObject {
         aiCutConsentGranted
             && selectedAICutDirection != nil
             && !selectedAICutPhotoIDs.isEmpty
-            && !aiCutStoryContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Moments omitted from the cut currently on screen. An AI cut can restore
@@ -3481,6 +3605,26 @@ final class TripReelModel: ObservableObject {
     /// this path never prepares an upload or presents cloud consent.
     func requestBuild(trip: Trip) {
         guard !trip.assets.isEmpty else { return }
+        clueTrip = trip
+        storyClue = ""
+        go(.clue, direction: .forward)
+    }
+
+    func confirmClue() {
+        beginBuildAfterClue()
+    }
+
+    /// A real skip, not a disguised requirement: the film is made either way.
+    func skipClue() {
+        storyClue = ""
+        beginBuildAfterClue()
+    }
+
+    private func beginBuildAfterClue() {
+        guard let trip = clueTrip else {
+            go(.trips, direction: .backward)
+            return
+        }
         if usesDemoData {
             startBuild(trip: trip)
             return
@@ -3513,7 +3657,7 @@ final class TripReelModel: ObservableObject {
 
     func openAICutDirections() {
         aiCutFailure = nil
-        aiCutSetupStep = .moments
+        aiCutSetupStep = .direction
         selectedAICutDirection = recommendedAICutDirection
         resetAICutPhotoSelection()
         aiCutConsentGranted = false
@@ -3522,36 +3666,12 @@ final class TripReelModel: ObservableObject {
     }
 
     func advanceAICutSetup() {
-        switch aiCutSetupStep {
-        case .moments:
-            guard !selectedAICutPhotoIDs.isEmpty else { return }
-            navigationDirection = .forward
-            aiCutSetupStep = .story
-        case .story:
-            guard !aiCutStoryContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return
-            }
-            navigationDirection = .forward
-            aiCutSetupStep = .direction
-        case .direction:
-            break
-        }
+        // Style is the only decision left in the AI branch.
     }
 
     @discardableResult
     func retreatAICutSetup() -> Bool {
-        switch aiCutSetupStep {
-        case .moments:
-            return false
-        case .story:
-            navigationDirection = .backward
-            aiCutSetupStep = .moments
-            return true
-        case .direction:
-            navigationDirection = .backward
-            aiCutSetupStep = .story
-            return true
-        }
+        false
     }
 
     func selectAICutDirection(_ direction: AICutDirection) {
@@ -3786,7 +3906,7 @@ final class TripReelModel: ObservableObject {
             retryAICut()
         case .reviewMoments:
             self.aiCutFailure = nil
-            aiCutSetupStep = .moments
+            aiCutSetupStep = .direction
             go(.aiDirection, direction: .backward)
         case .startAgain:
             self.aiCutFailure = nil
@@ -3997,6 +4117,18 @@ final class TripReelModel: ObservableObject {
         Do not add or remove people or important objects. No speech, text, logos, or watermarks. \
         Avoid warped hands, distorted faces, abrupt motion, and invented scenes.
         """
+    }
+
+    /// The tap is the whole answer. Which cut the user reached for is the only
+    /// signal worth keeping, and it steers the on-device recommendation next
+    /// time rather than being explained back to them.
+    func chooseCut(_ source: TripCutSource) {
+        preferenceStore.set(source == .aiCut, forKey: Self.preferredCutKey)
+        exportCut(source)
+    }
+
+    var prefersAICuts: Bool {
+        preferenceStore.bool(forKey: Self.preferredCutKey)
     }
 
     func exportCut(_ source: TripCutSource) {
@@ -5384,6 +5516,7 @@ final class TripReelModel: ObservableObject {
         guard !trip.assets.isEmpty else { return }
         let isNearbyTrip = nearbyEvents.contains(where: { $0.id == trip.id })
         selectedTrip = trip
+        isCleanupBannerDismissed = false
         photoEditOverrides = [:]
         photos = Self.makeReelPhotos(
             from: trip,
@@ -5397,6 +5530,11 @@ final class TripReelModel: ObservableObject {
             isNearby: isNearbyTrip
         )
         titleDrafts = localTitlePlan.drafts
+        let clue = storyClue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !clue.isEmpty, var opening = titleDrafts[.opening] {
+            opening.title = clue
+            titleDrafts[.opening] = opening
+        }
         titleCards = localTitlePlan.enabledCards
         textOverlays = []
         exportHandoff = .normal
@@ -5418,8 +5556,10 @@ final class TripReelModel: ObservableObject {
         freePreviewEndPhotoID = nil
         freePreviewReason = nil
         selectedAICutPhotoIDs = []
-        aiCutStoryContext = ""
-        aiCutSetupStep = .moments
+        // The AI branch inherits the clue rather than asking for it again, so
+        // this has to land after the reset above rather than before it.
+        aiCutStoryContext = clue
+        aiCutSetupStep = .direction
         aiCutConsentGranted = false
         aiCutSnapshot = nil
         aiCutSummary = nil
@@ -5706,11 +5846,6 @@ final class TripReelModel: ObservableObject {
         startRender(quality: .standard, handoff: .normal)
     }
 
-    func exportRewardedVersion() {
-        pendingExportIntent = nil
-        startRender(quality: .rewarded, handoff: .normal)
-    }
-
     func startRender(hd: Bool = false) {
         startRender(quality: hd ? .hd : .standard, handoff: .normal)
     }
@@ -5742,6 +5877,7 @@ final class TripReelModel: ObservableObject {
             downloadProgress: nil
         )
         exportSaveMessage = nil
+        exportAutosave = .idle
         go(.rendering)
 
         if usesDemoData {
@@ -5755,6 +5891,7 @@ final class TripReelModel: ObservableObject {
                 }
                 try? await Task.sleep(nanoseconds: 450_000_000)
                 guard !Task.isCancelled, self.exportGeneration == generation else { return }
+                self.exportAutosave = .saved
                 self.go(.done)
             }
             return
@@ -5793,6 +5930,7 @@ final class TripReelModel: ObservableObject {
                 self.exportedVideoURL = url
                 self.renderProgress = 1
                 self.go(.done)
+                await self.autosaveExportToPhotos(generation: generation)
             } catch is CancellationError {
                 return
             } catch {
@@ -5886,6 +6024,44 @@ final class TripReelModel: ObservableObject {
         let handoff = exportHandoff
         dismissExportMessage()
         startRender(quality: quality, handoff: handoff)
+    }
+
+    /// Saving is the app's job, not a chore handed to the user on the way out.
+    /// A failure is not an alert: the card offers a retry instead, because the
+    /// film still exists and nothing has been lost.
+    private func autosaveExportToPhotos(generation: UUID) async {
+        guard exportedVideoURL != nil else { return }
+        exportAutosave = .saving
+        let saved = await saveExportToPhotos()
+        guard exportGeneration == generation else { return }
+        exportAutosave = saved ? .saved : .failed
+        if !saved { exportErrorMessage = nil }
+    }
+
+    func retryAutosaveToPhotos() {
+        let generation = exportGeneration
+        Task { [weak self] in
+            await self?.autosaveExportToPhotos(generation: generation)
+        }
+    }
+
+    func dismissCleanupBanner() {
+        isCleanupBannerDismissed = true
+    }
+
+    func openCleanupFromBanner() {
+        cleanupShowsGrid = false
+        go(.cleanup, direction: .forward)
+    }
+
+    /// Finishing a memory should offer the next one rather than the end of the
+    /// app; this starts it from the list the user already has.
+    func startNextMemory() {
+        guard let next = nextMemoryTrip else {
+            go(.trips, direction: .backward)
+            return
+        }
+        startBuild(trip: next)
     }
 
     @discardableResult
@@ -6053,7 +6229,8 @@ final class TripReelModel: ObservableObject {
         aiCutProgress = 0
         selectedAICutPhotoIDs = []
         aiCutStoryContext = ""
-        aiCutSetupStep = .moments
+        storyClue = ""
+        aiCutSetupStep = .direction
         aiCutConsentGranted = false
         aiVideoGenerationID = UUID()
         aiVideoTask?.cancel()

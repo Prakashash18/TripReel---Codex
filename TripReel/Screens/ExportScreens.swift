@@ -138,8 +138,6 @@ private struct RenderedFilmPreview: View {
 struct ExportScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @EnvironmentObject private var purchases: RevenueCatPurchaseService
-    @EnvironmentObject private var rewardedExports: RewardedExportService
-    @State private var showsExportChoices = false
 
     var body: some View {
         ZStack {
@@ -189,7 +187,7 @@ struct ExportScreen: View {
                         )
                     }
 
-                    Text("Tap an option to see what’s included.")
+                    Text("Two outcomes: a short watermarked trailer, or all of it.")
                         .font(TR.ui(12))
                         .foregroundStyle(.white.opacity(0.54))
                         .multilineTextAlignment(.center)
@@ -217,198 +215,12 @@ struct ExportScreen: View {
         } message: {
             Text(model.exportErrorMessage ?? "Please try again.")
         }
-        .sheet(isPresented: $showsExportChoices) {
-            ExportChoiceSheet(
-                freeDurationText: model.freeExportDurationText,
-                freeMomentCount: model.freeExportMomentCount,
-                extendedDurationText: model.rewardedExportDurationText,
-                extendedMomentCount: model.rewardedExportMomentCount,
-                extendedIsUnlocked: rewardedExports.hasUnlockedExtendedPreview(
-                    versionID: model.rewardedExportVersionID
-                ),
-                exportFree: exportFreePreview,
-                watchAd: unlockExtendedPreview,
-                showPaidOptions: showPaidOptions
-            )
-            .environmentObject(purchases)
-            .environmentObject(rewardedExports)
-            .presentationDetents([.fraction(0.72), .large])
-            .presentationDragIndicator(.visible)
-            .interactiveDismissDisabled(rewardedExports.isLoading)
-        }
     }
 
     private func beginFreeExport() {
-        rewardedExports.clearMessage()
-        showsExportChoices = true
-    }
-
-    private func exportFreePreview() {
-        showsExportChoices = false
         model.requestExport(.standard, isUnlocked: false)
     }
 
-    private func unlockExtendedPreview() {
-        let versionID = model.rewardedExportVersionID
-        Task {
-            guard await rewardedExports.watchAdAndUnlock(versionID: versionID) else { return }
-            showsExportChoices = false
-            model.exportRewardedVersion()
-        }
-    }
-
-    private func showPaidOptions() {
-        showsExportChoices = false
-        model.requestExport(
-            .highDefinition,
-            isUnlocked: purchases.hasFullExportAccess(for: model.exportStoryID)
-        )
-    }
-
-}
-
-private struct ExportChoiceSheet: View {
-    @EnvironmentObject private var purchases: RevenueCatPurchaseService
-    @EnvironmentObject private var rewardedExports: RewardedExportService
-    @Environment(\.dismiss) private var dismiss
-    let freeDurationText: String
-    let freeMomentCount: Int
-    let extendedDurationText: String
-    let extendedMomentCount: Int
-    let extendedIsUnlocked: Bool
-    let exportFree: () -> Void
-    let watchAd: () -> Void
-    let showPaidOptions: () -> Void
-
-    var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 14) {
-                MetadataText(text: "CHOOSE AN EXPORT", color: TR.accent)
-                    .accessibilityIdentifier("rewarded-export-prompt")
-
-                Text("How much of your story?")
-                    .font(TR.display(30))
-                    .foregroundStyle(TR.cream)
-
-                Text("Start free, watch an ad for more, or keep it all.")
-                    .font(TR.ui(14))
-                    .foregroundStyle(.white.opacity(0.64))
-
-                exportChoice(
-                    eyebrow: "FREE",
-                    title: "Short preview",
-                    detail: "\(freeDurationText) · \(freeMomentCount) standout moments",
-                    symbol: "play.rectangle",
-                    actionTitle: "Export free",
-                    accessibilityID: "export-short-preview",
-                    action: exportFree
-                )
-
-                exportChoice(
-                    eyebrow: extendedIsUnlocked ? "UNLOCKED" : "WATCH 1 AD",
-                    title: "Half the story",
-                    detail: "About 50% · \(extendedDurationText) · \(extendedMomentCount) moments",
-                    symbol: "play.tv",
-                    actionTitle: rewardedExports.isLoading
-                        ? "Getting ad ready…"
-                        : (extendedIsUnlocked ? "Export longer preview" : "Watch ad & export"),
-                    accessibilityID: "watch-ad-and-export",
-                    highlighted: true,
-                    action: watchAd
-                )
-
-                Button(action: showPaidOptions) {
-                    HStack(spacing: 13) {
-                        RoundedIcon(symbol: "sparkles.rectangle.stack", tint: TR.accent, size: 40)
-                        VStack(alignment: .leading, spacing: 4) {
-                            MetadataText(text: "FULL STORY", color: TR.accent)
-                            Text("Unlock this story")
-                                .font(TR.ui(16, weight: .semibold))
-                            Text(paidPriceSummary)
-                                .font(TR.ui(12))
-                                .foregroundStyle(.white.opacity(0.58))
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .foregroundStyle(TR.accent)
-                    }
-                    .foregroundStyle(TR.cream)
-                    .padding(15)
-                    .glassCard(cornerRadius: 18, highlighted: true)
-                }
-                .buttonStyle(TactileButtonStyle())
-                .accessibilityIdentifier("view-paid-export-options")
-
-                if let message = rewardedExports.message {
-                    Text(message)
-                        .font(TR.ui(12, weight: .medium))
-                        .foregroundStyle(TR.cut.opacity(0.92))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Button("Not now") { dismiss() }
-                    .font(TR.ui(14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.68))
-                    .frame(maxWidth: .infinity)
-                    .buttonStyle(.plain)
-                    .disabled(rewardedExports.isLoading)
-
-                Text("Previews are 720p and watermarked. The ad version stays unlocked for this edit.")
-                    .font(TR.ui(11))
-                    .foregroundStyle(.white.opacity(0.42))
-                    .frame(maxWidth: .infinity)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.horizontal, 24)
-            .padding(.top, 8)
-            .padding(.bottom, 20)
-        }
-        .background(Color(red: 0.10, green: 0.075, blue: 0.06))
-    }
-
-    private func exportChoice(
-        eyebrow: String,
-        title: String,
-        detail: String,
-        symbol: String,
-        actionTitle: String,
-        accessibilityID: String,
-        highlighted: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 13) {
-                RoundedIcon(symbol: symbol, tint: highlighted ? TR.accent : TR.keep, size: 40)
-                VStack(alignment: .leading, spacing: 4) {
-                    MetadataText(text: eyebrow, color: highlighted ? TR.accent : TR.keep)
-                    Text(title).font(TR.ui(16, weight: .semibold))
-                    Text(detail).font(TR.ui(12)).foregroundStyle(.white.opacity(0.58))
-                }
-                Spacer()
-                if highlighted && rewardedExports.isLoading {
-                    ProgressView().controlSize(.small).tint(TR.accent)
-                } else {
-                    Text(actionTitle)
-                        .font(TR.ui(12, weight: .semibold))
-                        .foregroundStyle(highlighted ? TR.accent : TR.keep)
-                        .multilineTextAlignment(.trailing)
-                }
-            }
-            .foregroundStyle(TR.cream)
-            .padding(15)
-            .glassCard(cornerRadius: 18, highlighted: highlighted)
-        }
-        .buttonStyle(TactileButtonStyle())
-        .disabled(rewardedExports.isLoading)
-        .accessibilityIdentifier(accessibilityID)
-    }
-
-    private var paidPriceSummary: String {
-        guard let price = purchases.storyPassPackage?.localizedPriceString else {
-            return "Complete video · 1080p · no watermark"
-        }
-        return "One-time Story Pass · \(price)"
-    }
 }
 
 private struct ExportOptionCard: View {
@@ -1096,6 +908,13 @@ struct RenderingScreen: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 44)
                         .padding(.top, 10)
+                } else {
+                    Text("Saving to Photos as it finishes. You won't have to remember.")
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.42))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 44)
+                        .padding(.top, 10)
                 }
 
                 GeometryReader { proxy in
@@ -1134,51 +953,109 @@ struct RenderingScreen: View {
     }
 }
 
+/// The finished memory presented as an object rather than a file the user is
+/// warned to go and save. It is already in Photos by the time this appears.
 struct FilmReadyScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @EnvironmentObject private var purchases: RevenueCatPurchaseService
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var readyFeedback = false
     @State private var sharePayload: MP4SharePayload?
+    @State private var showsWatchSide = false
+    @State private var settled = false
+
+    private var cardWidth: CGFloat { settled ? 224 : 172 }
+    private var cardHeight: CGFloat { settled ? 360 : 230 }
 
     var body: some View {
         ZStack {
             WarmBackground(variant: .export)
 
-            ViewThatFits(in: .vertical) {
-                readyContent(previewWidth: 350, compact: false)
-                readyContent(previewWidth: 236, compact: true)
+            VStack(spacing: 0) {
+                MetadataText(text: model.memoryCardBadge, color: badgeColor)
+                    .padding(.horizontal, 24)
+                    .multilineTextAlignment(.center)
+                    .trEntrance(0, distance: 6)
+                    .accessibilityIdentifier("memory-card-badge")
+
+                memoryCard
+                    .padding(.top, 14)
+
+                Button(showsWatchSide ? "Show the film" : "Who watched this") {
+                    flipCard()
+                }
+                .font(TR.ui(11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.42))
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("memory-card-flip")
+
+                Spacer(minLength: 12)
+
+                if model.exportAutosave == .failed {
+                    retrySaveNotice
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 11)
+                }
+
+                if let withheld = model.trailerWithheldText {
+                    upsell(withheld)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 11)
+                }
+
+                destinations
+                    .padding(.horizontal, 24)
+                    .trEntrance(2, distance: 10)
             }
+            .padding(.top, 10)
+            .padding(.bottom, 20)
         }
-        .onAppear { readyFeedback.toggle() }
+        .task {
+            readyFeedback.toggle()
+            guard !reduceMotion else {
+                settled = true
+                return
+            }
+            await Task.yield()
+            withAnimation(TRMotion.cardArrival) { settled = true }
+        }
         .sensoryFeedback(.success, trigger: readyFeedback)
         .sheet(item: $sharePayload) { payload in
-            MP4ShareController(payload: payload) {
-                sharePayload = nil
-            }
-            .ignoresSafeArea()
-        }
-        .alert(
-            "Couldn't save the film",
-            isPresented: Binding(
-                get: { model.exportErrorMessage != nil },
-                set: { if !$0 { model.dismissExportMessage() } }
-            )
-        ) {
-            Button("OK", role: .cancel) { model.dismissExportMessage() }
-        } message: {
-            Text(model.exportErrorMessage ?? "Please try again.")
+            MP4ShareController(payload: payload) { sharePayload = nil }
+                .ignoresSafeArea()
         }
         .accessibilityIdentifier("film-ready-screen")
     }
 
-    private func readyContent(previewWidth: CGFloat, compact: Bool) -> some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: compact ? 4 : 10)
+    private var badgeColor: Color {
+        switch model.exportAutosave {
+        case .saved: TR.keep
+        case .failed: TR.cut
+        case .idle, .saving: .white.opacity(0.62)
+        }
+    }
 
-            MetadataText(text: "\(model.activeExportMediaSummary) · \(model.activeExportDurationText)", color: .white.opacity(0.57))
-                .padding(.horizontal, 62)
-                .padding(.bottom, compact ? 10 : 20)
-                .trEntrance(0, distance: 6)
+    // The card keeps the size and blur the rendering thumbnail ended on and
+    // resolves from there, so the film reads as one object being finished
+    // rather than a new screen arriving.
+    private var memoryCard: some View {
+        ZStack {
+            cardFront
+                .opacity(showsWatchSide ? 0 : 1)
+                .rotation3DEffect(.degrees(showsWatchSide ? 180 : 0), axis: (x: 0, y: 1, z: 0))
+            cardBack
+                .opacity(showsWatchSide ? 1 : 0)
+                .rotation3DEffect(.degrees(showsWatchSide ? 0 : -180), axis: (x: 0, y: 1, z: 0))
+        }
+        .frame(width: cardWidth, height: cardHeight)
+        .blur(radius: settled ? 0 : 3)
+        .shadow(color: .black.opacity(0.6), radius: 26, y: 20)
+    }
 
+    private var cardFront: some View {
+        ZStack(alignment: .bottomLeading) {
             Group {
                 if let url = model.exportedVideoURL {
                     RenderedFilmPreview(url: url)
@@ -1191,109 +1068,203 @@ struct FilmReadyScreen: View {
                         showLabels: false,
                         look: model.montageLook,
                         motionIntensity: model.montageMotionIntensity,
-                        secondsPerSlide: model.secondsPerPhoto,
-                        playbackBehavior: .playOnce,
-                        showsReplayControl: true
+                        secondsPerSlide: model.secondsPerPhoto
                     )
                 }
             }
-                .frame(width: previewWidth, height: previewWidth * 14 / 9)
-                .clipShape(RoundedRectangle(cornerRadius: compact ? 18 : 22, style: .continuous))
-                .shadow(color: .black.opacity(0.58), radius: 30, y: 22)
-                .trEntrance(1, distance: 12)
 
-            Text("Save your video")
-                .font(TR.display(compact ? 27 : 30))
-                .multilineTextAlignment(.center)
-                .padding(.top, compact ? 12 : 20)
-                .trEntrance(2, distance: 8)
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.88)],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+            .allowsHitTesting(false)
 
-            Spacer(minLength: compact ? 4 : 14)
-
-            VStack(spacing: compact ? 8 : 11) {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .foregroundStyle(TR.accent)
-                    Text("Memories doesn’t save exported videos automatically. Save a copy to Photos before leaving.")
-                        .font(TR.ui(11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.vertical, compact ? 10 : 12)
-                .background(.white.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("export-save-warning")
-
-                Button {
-                    saveFilm()
-                } label: {
-                    HStack(spacing: 8) {
-                        if model.isSavingExport {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(TR.ink)
-                        }
-                        Label(model.isSavingExport ? "Saving…" : "Save Video", systemImage: "square.and.arrow.down")
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .buttonStyle(CreamButtonStyle())
-                .disabled(model.isSavingExport)
-                .accessibilityIdentifier("save-film")
-
-                if let url = model.exportedVideoURL {
-                    Button {
-                        sharePayload = MP4SharePayload(
-                            url: url,
-                            title: "\(model.tripShortPlace) · Memories reel"
-                        )
-                    } label: {
-                        Label("Share Reel", systemImage: "square.and.arrow.up")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(GlassButtonStyle())
-                    .accessibilityIdentifier("share-film")
-                } else {
-                    Button("Share Reel") { }
-                        .buttonStyle(GlassButtonStyle())
-                        .disabled(true)
-                        .accessibilityIdentifier("share-film")
-                }
-
-                Text("Instagram or TikTok not shown? Save Video, then upload it from the app.")
-                    .font(TR.ui(11))
-                    .foregroundStyle(.white.opacity(0.52))
-                    .multilineTextAlignment(.center)
-
-                Button("Make another") {
-                    model.restart()
-                }
-                .font(TR.ui(13, weight: .medium))
-                .foregroundStyle(.white.opacity(0.46))
-                .buttonStyle(.plain)
-                .padding(.vertical, compact ? 3 : 6)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(model.firstCutFilmTitle)
+                    .font(TR.display(25))
+                    .fixedSize(horizontal: false, vertical: true)
+                MetadataText(text: model.memoryCardMeta, color: .white.opacity(0.62))
             }
-            .padding(.horizontal, 26)
-            .trEntrance(3, distance: 10)
+            .padding(16)
         }
-        .padding(.bottom, compact ? 0 : 12)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        // One card, read as one thing. Combining also guarantees the face is an
+        // element even when the film has no title yet, which an identifier on
+        // the title text alone did not.
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("memory-card")
     }
 
-    private func saveFilm() {
-        if model.usesDemoData {
-            model.cleanupShowsGrid = false
-            model.go(.cleanup)
-        } else {
-            Task {
-                if await model.saveExportToPhotos() {
-                    model.cleanupShowsGrid = false
-                    model.go(.cleanup)
+    // There is no link layer yet, so this side says so plainly instead of
+    // showing a count the app cannot know.
+    private var cardBack: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            MetadataText(text: "Who watched", color: TR.accent)
+                .accessibilityIdentifier("memory-card-watches")
+            Text("—")
+                .font(TR.display(44))
+            Text("Nobody can watch it until you send it. Sending is the only thing that makes this number real.")
+                .font(TR.ui(13))
+                .foregroundStyle(.white.opacity(0.66))
+                .fixedSize(horizontal: false, vertical: true)
+            Rectangle()
+                .fill(.white.opacity(0.12))
+                .frame(height: 1)
+            Text("Counts are opens, not people. Memories never sees who watched.")
+                .font(TR.ui(11))
+                .foregroundStyle(.white.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(TR.sheet)
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(TR.accent.opacity(0.3), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var retrySaveNotice: some View {
+        HStack(spacing: 11) {
+            Text("This one isn't in Photos yet.")
+                .font(TR.ui(12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.82))
+            Spacer(minLength: 0)
+            Button("Try again") {
+                model.retryAutosaveToPhotos()
+            }
+            .font(TR.ui(11, weight: .semibold))
+            .foregroundStyle(TR.ink)
+            .padding(.horizontal, 13)
+            .frame(height: 32)
+            .background(TR.cream, in: Capsule())
+            .buttonStyle(.plain)
+            .disabled(model.isSavingExport)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(TR.cut.opacity(0.12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(TR.cut.opacity(0.4), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityIdentifier("memory-card-save-retry")
+    }
+
+    private func upsell(_ text: String) -> some View {
+        HStack(spacing: 11) {
+            Text(text)
+                .font(TR.ui(12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.82))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button("Keep it all") {
+                model.requestExport(
+                    .highDefinition,
+                    isUnlocked: purchases.hasFullExportAccess(for: model.exportStoryID)
+                )
+            }
+            .font(TR.ui(11, weight: .semibold))
+            .foregroundStyle(TR.ink)
+            .padding(.horizontal, 13)
+            .frame(height: 32)
+            .background(TR.accent, in: Capsule())
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(TR.accent.opacity(0.1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(TR.accent.opacity(0.34), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityIdentifier("memory-card-upsell")
+    }
+
+    private var destinations: some View {
+        VStack(spacing: 11) {
+            HStack(spacing: 9) {
+                destination("Stories", symbol: "circle.circle")
+                destination("Reels", symbol: "play.rectangle")
+                destination("Messages", symbol: "message")
+                destination("More", symbol: "square.and.arrow.up")
+            }
+
+            Button("Send this memory") {
+                share()
+            }
+            .buttonStyle(CreamButtonStyle())
+            .accessibilityIdentifier("send-memory")
+
+            if let next = model.nextMemoryTrip {
+                Button {
+                    model.startNextMemory()
+                } label: {
+                    HStack(spacing: 12) {
+                        PhotoAssetView(source: next.coverSource)
+                            .frame(width: 40, height: 40)
+                            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("\(next.shortPlace) is ready too")
+                                .font(TR.ui(12, weight: .semibold))
+                                .foregroundStyle(TR.cream)
+                            Text("\(next.photoCount) moments waiting")
+                                .font(TR.ui(10))
+                                .foregroundStyle(.white.opacity(0.5))
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.34))
+                    }
+                    .padding(.horizontal, 15)
+                    .padding(.vertical, 12)
+                    .glassCard(cornerRadius: 16)
                 }
+                .buttonStyle(TactileButtonStyle())
+                .accessibilityIdentifier("next-memory")
             }
         }
+    }
+
+    // Every destination raises the system sheet. Naming them is the point: the
+    // user picks where it is going before iOS asks how.
+    private func destination(_ title: String, symbol: String) -> some View {
+        Button {
+            share()
+        } label: {
+            VStack(spacing: 7) {
+                Image(systemName: symbol)
+                    .font(.system(size: 16, weight: .regular))
+                Text(title)
+                    .font(TR.ui(11, weight: .semibold))
+            }
+            .foregroundStyle(TR.cream)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 13)
+            .glassCard(cornerRadius: 16)
+        }
+        .buttonStyle(TactileButtonStyle())
+        .accessibilityIdentifier("destination-\(title.lowercased())")
+    }
+
+    private func flipCard() {
+        withAnimation(reduceMotion ? .easeInOut(duration: 0.16) : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.6)) {
+            showsWatchSide.toggle()
+        }
+    }
+
+    private func share() {
+        guard let url = model.exportedVideoURL else { return }
+        sharePayload = MP4SharePayload(
+            url: url,
+            title: "\(model.tripShortPlace) · Memories"
+        )
     }
 }
 

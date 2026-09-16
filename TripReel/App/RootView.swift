@@ -17,6 +17,8 @@ struct RootView: View {
                 TripsScreen()
             case .empty:
                 EmptyTripsScreen()
+            case .clue:
+                ClueScreen()
             case .building:
                 BuildingScreen()
             case .firstWatch:
