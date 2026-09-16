@@ -277,9 +277,7 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertFalse(model.isStoryPassPresented)
         XCTAssertNotEqual(model.screen, .paywall)
         XCTAssertNotEqual(model.screen, .export)
-        for _ in 0..<200 where model.screen != .done {
-            await Task.yield()
-        }
+        await waitForDone(model)
 
         XCTAssertEqual(model.screen, .done)
         XCTAssertEqual(model.exportQuality, .hd)
@@ -299,9 +297,7 @@ final class TripReelModelTests: XCTestCase {
 
         XCTAssertFalse(model.isStoryPassPresented)
         XCTAssertNotEqual(model.screen, .paywall)
-        for _ in 0..<200 where model.screen != .done {
-            await Task.yield()
-        }
+        await waitForDone(model)
 
         XCTAssertEqual(model.screen, .done)
         XCTAssertEqual(model.exportQuality, .standard)
@@ -309,6 +305,16 @@ final class TripReelModelTests: XCTestCase {
         let recordedRequest = await exporter.lastRequest
         let request = try XCTUnwrap(recordedRequest)
         XCTAssertEqual(request.quality, .standard)
+    }
+
+    /// Yielding a fixed number of times is not a wait: the render finishes on
+    /// its own schedule, and a loaded CI machine will still be on `.rendering`
+    /// after any number of yields. This waits on the clock instead.
+    private func waitForDone(_ model: TripReelModel, timeout: TimeInterval = 20) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while model.screen != .done, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
     }
 
     /// A built memory parked on First Watch, long enough that the free trailer

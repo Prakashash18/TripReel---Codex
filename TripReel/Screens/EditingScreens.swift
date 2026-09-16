@@ -74,7 +74,10 @@ struct FirstWatchScreen: View {
                 playbackToken: replayToken,
                 skipToEndToken: skipToken,
                 onPlaybackStarted: {
-                    playbackComplete = false
+                    // This lands only once the first frame is ready, which on a
+                    // slow device is after the viewer could already have skipped
+                    // to the end. It must never put the film back into play.
+                    guard !playbackComplete else { return }
                     playbackRun &+= 1
                     soundtrack.play(
                         track: firstCutTrack,
@@ -205,6 +208,9 @@ struct FirstWatchScreen: View {
             }
             .font(TR.ui(13, weight: .semibold))
             .foregroundStyle(.white.opacity(0.62))
+            .padding(.vertical, 11)
+            .padding(.horizontal, 16)
+            .contentShape(Rectangle())
             .buttonStyle(.plain)
             .accessibilityHint("Jumps to the last frame of the film")
             .accessibilityIdentifier("first-watch-skip-button")
@@ -243,6 +249,11 @@ struct FirstWatchScreen: View {
                 quietAction("Watch again", identifier: "first-watch-replay-button") {
                     playbackComplete = false
                     replayToken &+= 1
+                    soundtrack.play(
+                        track: firstCutTrack,
+                        volume: soundtrackVolume,
+                        restart: true
+                    )
                 }
                 quietAction("Another take", identifier: "first-watch-another-take-button") {
                     model.openAICutDirections()
@@ -276,6 +287,8 @@ struct FirstWatchScreen: View {
         Button(title, action: action)
             .font(TR.ui(13, weight: .semibold))
             .foregroundStyle(.white.opacity(0.62))
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
             .buttonStyle(.plain)
             .accessibilityIdentifier(identifier)
     }
