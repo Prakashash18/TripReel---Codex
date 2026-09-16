@@ -28,6 +28,19 @@ final class TripReelFlowUITests: XCTestCase {
             .firstMatch
     }
 
+    /// Taps only once the element is actually hittable. Studio tools and the
+    /// preview's close button animate in, and a tap on sight lands nowhere.
+    private func tapWhenReady(_ element: XCUIElement, timeout: TimeInterval = 5) {
+        let hittable = expectation(
+            for: NSPredicate(format: "isHittable == true"),
+            evaluatedWith: element
+        )
+        wait(for: [hittable], timeout: timeout)
+        if element.isHittable {
+            element.tap()
+        }
+    }
+
     private func attachScreenshot(named name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name
@@ -62,8 +75,9 @@ final class TripReelFlowUITests: XCTestCase {
         app.buttons["trip-row-demo-da-nang"].tap()
         XCTAssertTrue(screen("clue-screen").waitForExistence(timeout: 3))
         screen("clue-skip").tap()
-        XCTAssertTrue(screen("building-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 7))
+        // Building is a transient screen and can be gone before it is asked
+        // for; the film arriving is what this flow is about.
+        XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 12))
 
         let skipToEnd = screen("first-watch-skip-button")
         XCTAssertTrue(skipToEnd.waitForExistence(timeout: 3))
@@ -156,10 +170,10 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("full-film-preview").waitForExistence(timeout: 3))
         let closePreview = app.buttons["Close preview"]
         XCTAssertTrue(closePreview.waitForExistence(timeout: 5))
-        closePreview.tap()
+        tapWhenReady(closePreview)
 
-        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
-        screen("studio-tool-clips").tap()
+        XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 5))
+        tapWhenReady(screen("studio-tool-clips"))
         XCTAssertTrue(screen("film-moment-manager-sheet").waitForExistence(timeout: 3))
         app.buttons["Done"].tap()
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
@@ -395,10 +409,7 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertFalse(button(startingWith: "Save Video").exists)
         XCTAssertFalse(button(startingWith: "Share Reel").exists)
 
-        XCTAssertTrue(
-            screen("memory-card").exists,
-            screen("film-ready-screen").debugDescription
-        )
+        XCTAssertTrue(screen("memory-card").exists, app.debugDescription)
         XCTAssertTrue(screen("memory-card-badge").exists)
         XCTAssertTrue(screen("destination-stories").exists)
         XCTAssertTrue(screen("destination-messages").exists)
