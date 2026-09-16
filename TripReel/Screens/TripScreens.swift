@@ -327,13 +327,13 @@ struct ClueScreen: View {
                         .tracking(-0.5)
                         .foregroundStyle(TR.cream)
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("clue-screen")
                     Text("One line, in your words. It shapes the titles — and it never leaves your phone unless you ask for AI.")
                         .font(TR.ui(14))
                         .foregroundStyle(.white.opacity(0.66))
                         .lineSpacing(3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .accessibilityIdentifier("clue-screen")
 
                 TextField("", text: $model.storyClue, axis: .vertical)
                     .font(TR.ui(14))

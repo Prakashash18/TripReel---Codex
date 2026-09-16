@@ -447,9 +447,10 @@ final class TripReelModelTests: XCTestCase {
         model.navigateBack()
         XCTAssertEqual(model.screen, .secondWatch)
 
+        // A finished memory is already saved, so back belongs to the list.
         model.go(.done)
         model.navigateBack()
-        XCTAssertEqual(model.screen, .export)
+        XCTAssertEqual(model.screen, .trips)
 
         model.go(.trips)
         XCTAssertFalse(model.canNavigateBack)

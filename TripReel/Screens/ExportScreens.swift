@@ -1052,7 +1052,6 @@ struct FilmReadyScreen: View {
         .frame(width: cardWidth, height: cardHeight)
         .blur(radius: settled ? 0 : 3)
         .shadow(color: .black.opacity(0.6), radius: 26, y: 20)
-        .accessibilityIdentifier("memory-card")
     }
 
     private var cardFront: some View {
@@ -1085,6 +1084,7 @@ struct FilmReadyScreen: View {
                 Text(model.firstCutFilmTitle)
                     .font(TR.display(25))
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("memory-card")
                 MetadataText(text: model.memoryCardMeta, color: .white.opacity(0.62))
             }
             .padding(16)
@@ -1097,6 +1097,7 @@ struct FilmReadyScreen: View {
     private var cardBack: some View {
         VStack(alignment: .leading, spacing: 14) {
             MetadataText(text: "Who watched", color: TR.accent)
+                .accessibilityIdentifier("memory-card-watches")
             Text("—")
                 .font(TR.display(44))
             Text("Nobody can watch it until you send it. Sending is the only thing that makes this number real.")
@@ -1120,7 +1121,6 @@ struct FilmReadyScreen: View {
                 .stroke(TR.accent.opacity(0.3), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .accessibilityIdentifier("memory-card-watches")
     }
 
     private var retrySaveNotice: some View {

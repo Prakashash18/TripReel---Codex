@@ -1505,11 +1505,11 @@ struct AICutComparisonScreen: View {
                         .font(TR.display(34))
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("ai-comparison-screen")
                 }
                 .padding(.horizontal, 30)
                 .padding(.leading, 20)
                 .trEntrance(0, distance: 8)
-                .accessibilityIdentifier("ai-comparison-screen")
 
                 Spacer(minLength: 16)
 
