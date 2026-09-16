@@ -1,0 +1,109 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Unit and UI tests
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    env:
+      SCHEME: TripReel
+      PROJECT: TripReel.xcodeproj
+      # Simulator runs need no signing identity, and the app target ships an
+      # empty REVENUECAT_PUBLIC_SDK_KEY, so RevenueCat stays unconfigured here
+      # and no test reaches StoreKit.
+      SIGNING_OFF: >-
+        CODE_SIGNING_ALLOWED=NO
+        CODE_SIGNING_REQUIRED=NO
+        CODE_SIGN_IDENTITY=
+        DEVELOPMENT_TEAM=
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Uses the runner image's default Xcode, which is the maintained one; a
+      # newer Xcode sitting alongside it may be a beta. To pin a version, add
+      # `sudo xcode-select -s /Applications/Xcode_<version>.app/Contents/Developer`
+      # here after checking which are installed in this step's log.
+      - name: Show toolchain
+        run: |
+          set -euo pipefail
+          ls -d /Applications/Xcode*.app
+          xcodebuild -version
+
+      - name: Choose an iOS simulator
+        id: simulator
+        run: |
+          set -euo pipefail
+          xcrun simctl list runtimes
+          udid=$(python3 scripts/select_test_simulator.py)
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: DerivedData/SourcePackages
+          key: spm-${{ runner.os }}-${{ hashFiles('TripReel.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Build for testing
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -destination "id=${{ steps.simulator.outputs.udid }}" \
+            -derivedDataPath DerivedData \
+            -skipMacroValidation \
+            $SIGNING_OFF
+
+      - name: Unit tests
+        run: |
+          set -o pipefail
+          xcodebuild test-without-building \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -destination "id=${{ steps.simulator.outputs.udid }}" \
+            -derivedDataPath DerivedData \
+            -only-testing:TripReelTests \
+            -resultBundlePath TestResults/UnitTests.xcresult \
+            $SIGNING_OFF
+
+      # Runs even when the unit tests fail, so one push reports both results.
+      # Simulator UI runs flake for reasons unrelated to the diff, so a failing
+      # test gets one retry before it is called a failure.
+      - name: UI tests
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          xcodebuild test-without-building \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -destination "id=${{ steps.simulator.outputs.udid }}" \
+            -derivedDataPath DerivedData \
+            -only-testing:TripReelUITests \
+            -resultBundlePath TestResults/UITests.xcresult \
+            -retry-tests-on-failure \
+            -test-iterations 2 \
+            $SIGNING_OFF
+
+      # The .xcresult bundles carry the failure messages and the screenshots
+      # the UI tests attach, which is the whole diagnostic when a run goes red.
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcresults
+          path: TestResults
+          retention-days: 14
+          if-no-files-found: warn
