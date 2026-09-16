@@ -133,7 +133,10 @@ struct FirstWatchScreen: View {
                 Color.black.opacity(0.42)
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
-                    .onTapGesture { model.dismissStoryPass() }
+                    .onTapGesture {
+                        guard !purchases.isPurchasing else { return }
+                        model.dismissStoryPass()
+                    }
                     .transition(.opacity)
                     .accessibilityHidden(true)
             }
@@ -234,6 +237,7 @@ struct FirstWatchScreen: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityIdentifier("first-watch-end-card")
+            .accessibilityHidden(model.isStoryPassPresented)
 
             Button(keepTitle) {
                 keepThisOne()
@@ -245,6 +249,7 @@ struct FirstWatchScreen: View {
                     : "Opens the Story Pass for this memory"
             )
             .accessibilityIdentifier("first-watch-keep-button")
+            .accessibilityHidden(model.isStoryPassPresented)
 
             HStack(spacing: 20) {
                 quietAction("Watch again", identifier: "first-watch-replay-button") {
@@ -290,6 +295,10 @@ struct FirstWatchScreen: View {
             .contentShape(Rectangle())
             .buttonStyle(.plain)
             .accessibilityIdentifier(identifier)
+            // Transparent and non-hit-testable still leaves these reachable by
+            // VoiceOver behind the sheet, and "Change it" would navigate away
+            // from the purchase. Hidden per button, never via their container.
+            .accessibilityHidden(model.isStoryPassPresented)
     }
 
     private var soundtrackButton: some View {
@@ -346,6 +355,12 @@ struct FirstWatchScreen: View {
                 return
             }
             guard purchases.hasFullExportAccess(for: model.exportStoryID) else { return }
+            // StoreKit can take long enough that the viewer has dismissed the
+            // sheet, or left First Watch entirely, before this lands. The pass
+            // is already recorded and survives, so their next export is free;
+            // what must not happen is a render starting over whatever screen
+            // they moved on to.
+            guard model.isStoryPassPresented, model.screen == .firstWatch else { return }
             model.exportFirstCutFullStory()
         }
     }
