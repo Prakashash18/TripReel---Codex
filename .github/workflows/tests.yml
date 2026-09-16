@@ -57,6 +57,7 @@ jobs:
           restore-keys: spm-${{ runner.os }}-
 
       - name: Build for testing
+        id: build
         run: |
           set -o pipefail
           xcodebuild build-for-testing \
@@ -79,11 +80,13 @@ jobs:
             -resultBundlePath TestResults/UnitTests.xcresult \
             $SIGNING_OFF
 
-      # Runs even when the unit tests fail, so one push reports both results.
+      # Runs even when the unit tests fail, so one push reports both results --
+      # but not when the build failed, because a UI run against a half-built
+      # test runner only fails with "Missing bundle ID" five minutes later.
       # Simulator UI runs flake for reasons unrelated to the diff, so a failing
       # test gets one retry before it is called a failure.
       - name: UI tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           set -o pipefail
           xcodebuild test-without-building \

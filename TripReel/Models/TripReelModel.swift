@@ -3236,10 +3236,10 @@ final class TripReelModel: ObservableObject {
         switch screen {
         case .access, .limited, .firstWatch, .firstCutOptions, .aiDirection, .aiComparison,
              .aiVideoIntro, .aiVideoReady, .secondWatch, .pace, .export, .paywall, .done:
-            true
+            return true
         case .welcome, .trips, .empty, .building, .aiProcessing, .aiVideoGenerating,
              .cut, .rendering, .cleanup:
-            false
+            return false
         }
     }
 
