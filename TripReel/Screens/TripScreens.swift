@@ -29,6 +29,9 @@ struct TripsScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var collection: MemoryCollection = .overseas
     @Namespace private var collectionSelection
+    @State private var rowCentres: [String: CGFloat] = [:]
+    @State private var viewportCentre: CGFloat = 0
+    @State private var playingTripID: String?
 
     private var availableCollections: [MemoryCollection] {
         MemoryCollection.available(
@@ -47,6 +50,24 @@ struct TripsScreen: View {
 
     private var isShowingLocalMemories: Bool {
         activeCollection == .local
+    }
+
+    private func updatePlayingRow() {
+        guard !reduceMotion, viewportCentre > 0, !rowCentres.isEmpty else {
+            playingTripID = nil
+            return
+        }
+        let nearest = rowCentres.min {
+            abs($0.value - viewportCentre) < abs($1.value - viewportCentre)
+        }
+        // A row scrolled well clear of the middle plays nothing, so an
+        // off-screen card never keeps decoding.
+        guard let nearest, abs(nearest.value - viewportCentre) < 160 else {
+            playingTripID = nil
+            return
+        }
+        guard playingTripID != nearest.key else { return }
+        playingTripID = nearest.key
     }
 
     private var cleanupBanner: some View {
@@ -121,10 +142,22 @@ struct TripsScreen: View {
                             emptyCollection
                         } else {
                             ForEach(Array(displayedMemories.enumerated()), id: \.element.id) { index, trip in
-                                TripRow(trip: trip, isNearby: isShowingLocalMemories) {
+                                TripRow(
+                                    trip: trip,
+                                    isNearby: isShowingLocalMemories,
+                                    isPlaying: playingTripID == trip.id
+                                ) {
                                     model.requestBuild(trip: trip)
                                 }
                                 .trEntrance(min(index, 4), distance: 8)
+                                .background(
+                                    GeometryReader { proxy in
+                                        Color.clear.preference(
+                                            key: RowCentreKey.self,
+                                            value: [trip.id: proxy.frame(in: .global).midY]
+                                        )
+                                    }
+                                )
                             }
 
                             if isShowingLocalMemories {
@@ -136,6 +169,15 @@ struct TripsScreen: View {
                                     .padding(.horizontal, 24)
                                     .padding(.top, 8)
                             }
+                        }
+
+                        if let anniversary = model.anniversaryMemory,
+                           let line = model.anniversaryMemoryLine,
+                           !isShowingLocalMemories {
+                            AnniversaryCard(trip: anniversary, line: line) {
+                                model.requestBuild(trip: anniversary)
+                            }
+                            .trEntrance(0, distance: 10)
                         }
 
                         if model.showsCleanupBanner {
@@ -157,6 +199,22 @@ struct TripsScreen: View {
                     .padding(.bottom, 32)
                 }
                 .trEntrance(2, distance: 10)
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: ViewportCentreKey.self,
+                            value: proxy.frame(in: .global).midY
+                        )
+                    }
+                )
+                .onPreferenceChange(RowCentreKey.self) { centres in
+                    rowCentres = centres
+                    updatePlayingRow()
+                }
+                .onPreferenceChange(ViewportCentreKey.self) { centre in
+                    viewportCentre = centre
+                    updatePlayingRow()
+                }
                 .refreshable {
                     await model.refreshPhotoLibraryIfAuthorized(force: true)
                 }
@@ -233,9 +291,82 @@ struct TripsScreen: View {
     }
 }
 
+private struct RowCentreKey: PreferenceKey {
+    static let defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue()) { _, latest in latest }
+    }
+}
+
+private struct ViewportCentreKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let next = nextValue()
+        if next > 0 { value = next }
+    }
+}
+
+/// The only earned reason to open the app on a day the user took no photos.
+private struct AnniversaryCard: View {
+    let trip: Trip
+    let line: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .bottomLeading) {
+                MontageView(
+                    photos: trip.teaserPhotos,
+                    showLabels: false,
+                    secondsPerSlide: 2.2
+                )
+
+                LinearGradient(
+                    colors: [.black.opacity(0.1), .black.opacity(0.86)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .allowsHitTesting(false)
+
+                HStack(alignment: .bottom, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        MetadataText(text: "This day last year", color: TR.accent)
+                        Text(line)
+                            .font(TR.display(27))
+                            .foregroundStyle(TR.cream)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Text("Watch")
+                        .font(TR.ui(12, weight: .semibold))
+                        .foregroundStyle(TR.ink)
+                        .padding(.horizontal, 14)
+                        .frame(height: 34)
+                        .background(TR.cream, in: Capsule())
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
+            }
+            .frame(height: 156)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(TR.accent.opacity(0.4), lineWidth: 1)
+            )
+        }
+        .buttonStyle(TactileButtonStyle())
+        .accessibilityLabel("This day last year. \(line)")
+        .accessibilityIdentifier("anniversary-card")
+    }
+}
+
 private struct TripRow: View {
     let trip: Trip
     let isNearby: Bool
+    var isPlaying = false
     let action: () -> Void
 
     private var storyTitle: String {
@@ -245,9 +376,19 @@ private struct TripRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 14) {
-                PhotoAssetView(source: trip.coverSource)
-                    .frame(width: 76, height: 76)
-                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                Group {
+                    if isPlaying, !trip.teaserPhotos.isEmpty {
+                        MontageView(
+                            photos: trip.teaserPhotos,
+                            showLabels: false,
+                            secondsPerSlide: 1.0
+                        )
+                    } else {
+                        PhotoAssetView(source: trip.coverSource)
+                    }
+                }
+                .frame(width: 76, height: 76)
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(storyTitle)

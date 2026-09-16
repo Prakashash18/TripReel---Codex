@@ -128,6 +128,35 @@ struct Trip: Identifiable, Hashable, Sendable {
         return "\(photos) photos · \(videos) clips"
     }
 
+    /// Three stills spread across the memory, enough for the list to show what
+    /// it holds without building the whole film.
+    var teaserPhotos: [ReelPhoto] {
+        let stills = assets.filter { !$0.isVideo }
+        let usable = stills.isEmpty ? assets : stills
+        guard !usable.isEmpty else { return [] }
+        let picks: [TripAsset]
+        if usable.count <= 3 {
+            picks = usable
+        } else {
+            let step = usable.count / 3
+            picks = [usable[0], usable[step], usable[step * 2]]
+        }
+        let motions: [MontageMotionStyle] = [.zoomIn, .panLeft, .zoomOut]
+        return picks.enumerated().map { index, asset in
+            ReelPhoto(
+                id: "teaser-\(asset.id)",
+                source: asset.source,
+                label: "",
+                time: "",
+                isSimilar: false,
+                pixelWidth: asset.pixelWidth,
+                pixelHeight: asset.pixelHeight,
+                frameStyle: .fullBleed,
+                motionStyle: motions[index % motions.count]
+            )
+        }
+    }
+
     var coverSource: PhotoSource {
         assets.first(where: { $0.id == coverID })?.source
             ?? assets.first?.source
@@ -2873,6 +2902,37 @@ final class TripReelModel: ObservableObject {
 
     /// The memory queued behind this one, so finishing offers somewhere to go
     /// that is not the end of the app.
+    var anniversaryMemory: Trip? {
+        if usesDemoData {
+            return trips.dropFirst().first ?? trips.first
+        }
+        let calendar = Calendar.current
+        let now = Date()
+        guard let todayOrdinal = calendar.ordinality(of: .day, in: .year, for: now) else { return nil }
+        return trips.first { trip in
+            guard let years = calendar.dateComponents([.year], from: trip.startDate, to: now).year,
+                  years >= 1,
+                  let ordinal = calendar.ordinality(of: .day, in: .year, for: trip.startDate) else {
+                return false
+            }
+            let delta = abs(ordinal - todayOrdinal)
+            return min(delta, 365 - delta) <= 3
+        }
+    }
+
+    var anniversaryMemoryLine: String? {
+        guard let trip = anniversaryMemory else { return nil }
+        let years = Calendar.current.dateComponents(
+            [.year],
+            from: trip.startDate,
+            to: Date()
+        ).year ?? 1
+        let span = max(1, years)
+        return span == 1
+            ? "\(trip.shortPlace), a year ago today"
+            : "\(trip.shortPlace), \(span) years ago today"
+    }
+
     var nextMemoryTrip: Trip? {
         trips.first { $0.id != selectedTrip?.id }
     }

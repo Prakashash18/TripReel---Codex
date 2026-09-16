@@ -121,6 +121,19 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertFalse(screen("export-save-warning").exists)
     }
 
+    func testMemoriesListPinsTheAnniversaryAboveTheRows() {
+        launchApp()
+        XCTAssertTrue(screen("trips-screen").waitForExistence(timeout: 3))
+
+        let anniversary = screen("anniversary-card")
+        XCTAssertTrue(anniversary.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["THIS DAY LAST YEAR"].exists)
+        attachScreenshot(named: "Living memories list")
+
+        anniversary.tap()
+        XCTAssertTrue(screen("building-screen").waitForExistence(timeout: 3))
+    }
+
     func testSingleMemoryCollectionRemovesUnhelpfulTabs() {
         launchApp()
         XCTAssertTrue(screen("trips-screen").waitForExistence(timeout: 3))
