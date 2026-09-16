@@ -83,8 +83,7 @@ struct FirstWatchScreen: View {
                     )
                 },
                 onPlaybackEnded: {
-                    playbackComplete = true
-                    soundtrack.finishNaturally()
+                    endPlayback()
                 }
             )
                 .ignoresSafeArea()
@@ -202,7 +201,7 @@ struct FirstWatchScreen: View {
             }
 
             Button("Skip to the end") {
-                skipToken &+= 1
+                skipToEnd()
             }
             .font(TR.ui(13, weight: .semibold))
             .foregroundStyle(.white.opacity(0.62))
@@ -302,6 +301,21 @@ struct FirstWatchScreen: View {
         .accessibilityLabel(soundtrack.isPlaying ? "Pause soundtrack" : "Play soundtrack")
         .accessibilityHint(firstCutTrack.map { "Soundtrack: \($0.name)" } ?? "No soundtrack selected")
         .accessibilityIdentifier("first-watch-audio")
+    }
+
+    /// The screen owns what it shows. Skipping ends the film here and asks the
+    /// montage to hold its last frame, instead of waiting to be told the film
+    /// ended by a callback coming back out of playback.
+    private func skipToEnd() {
+        guard !playbackComplete else { return }
+        skipToken &+= 1
+        endPlayback()
+    }
+
+    private func endPlayback() {
+        guard !playbackComplete else { return }
+        playbackComplete = true
+        soundtrack.finishNaturally()
     }
 
     private func keepThisOne() {

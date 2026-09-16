@@ -456,7 +456,8 @@ struct MontageView: View {
             }
         }
         .animation(.easeInOut(duration: 0.22), value: playbackComplete)
-        .onChange(of: skipToEndToken) { _, _ in
+        .task(id: skipToEndToken) {
+            guard skipToEndToken != 0 else { return }
             skipToLastFrame()
         }
     }

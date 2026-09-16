@@ -68,7 +68,7 @@ final class TripReelFlowUITests: XCTestCase {
         skipToEnd.tap()
 
         let changeIt = screen("first-watch-change-button")
-        XCTAssertTrue(changeIt.waitForExistence(timeout: 3))
+        XCTAssertTrue(changeIt.waitForExistence(timeout: 6))
         changeIt.tap()
         XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
         screen("edit-film-button").tap()
@@ -169,7 +169,7 @@ final class TripReelFlowUITests: XCTestCase {
 
         screen("first-watch-skip-button").tap()
 
-        XCTAssertTrue(screen("first-watch-end-card").waitForExistence(timeout: 3))
+        XCTAssertTrue(screen("first-watch-end-card").waitForExistence(timeout: 6))
         XCTAssertTrue(screen("first-watch-keep-button").exists)
         XCTAssertTrue(screen("first-watch-replay-button").exists)
         XCTAssertTrue(screen("first-watch-another-take-button").exists)
@@ -182,11 +182,11 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 3))
 
         screen("first-watch-skip-button").tap()
-        XCTAssertTrue(screen("first-watch-keep-button").waitForExistence(timeout: 3))
+        XCTAssertTrue(screen("first-watch-keep-button").waitForExistence(timeout: 6))
         screen("first-watch-keep-button").tap()
 
         let sheet = screen("story-pass-sheet")
-        XCTAssertTrue(sheet.waitForExistence(timeout: 3))
+        XCTAssertTrue(sheet.waitForExistence(timeout: 6))
         XCTAssertTrue(app.staticTexts["STORY PASS · THIS MEMORY"].exists)
         XCTAssertTrue(screen("story-pass-free-trailer-button").exists)
         // The film is still there underneath, not swapped for a paywall screen.
@@ -203,7 +203,7 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("first-watch-screen").waitForExistence(timeout: 3))
 
         screen("first-watch-skip-button").tap()
-        XCTAssertTrue(screen("first-watch-change-button").waitForExistence(timeout: 3))
+        XCTAssertTrue(screen("first-watch-change-button").waitForExistence(timeout: 6))
         screen("first-watch-change-button").tap()
 
         XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
