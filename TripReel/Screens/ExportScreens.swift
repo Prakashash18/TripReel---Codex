@@ -1052,8 +1052,6 @@ struct FilmReadyScreen: View {
         .frame(width: cardWidth, height: cardHeight)
         .blur(radius: settled ? 0 : 3)
         .shadow(color: .black.opacity(0.6), radius: 26, y: 20)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("memory-card")
     }
 
     private var cardFront: some View {
@@ -1091,6 +1089,11 @@ struct FilmReadyScreen: View {
             .padding(16)
         }
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        // One card, read as one thing. Combining also guarantees the face is an
+        // element even when the film has no title yet, which an identifier on
+        // the title text alone did not.
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("memory-card")
     }
 
     // There is no link layer yet, so this side says so plainly instead of

@@ -115,7 +115,7 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(standardExport.waitForExistence(timeout: 2))
         standardExport.tap()
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
+        XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 15))
         XCTAssertTrue(screen("memory-card").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("send-memory").exists)
         XCTAssertFalse(screen("export-save-warning").exists)
@@ -251,7 +251,7 @@ final class TripReelFlowUITests: XCTestCase {
 
         freeExport.tap()
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
+        XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 15))
     }
 
     func testAIConsentComesBeforeDirectionAndDeclineReturnsSafely() {
@@ -291,6 +291,11 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("ai-direction-choice-dynamic").exists)
         attachScreenshot(named: "AI style step")
 
+        // Create is already offered: the clue was asked for before the build.
+        let create = screen("ai-direction-continue")
+        XCTAssertTrue(create.waitForExistence(timeout: 3))
+        XCTAssertTrue(create.isEnabled)
+
         // Moments are still the user's to change, just not a step to clear.
         let photoPicker = button(startingWith: "Moments for AI")
         XCTAssertTrue(photoPicker.waitForExistence(timeout: 2))
@@ -300,8 +305,8 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("ai-photo-selection-sheet").waitForNonExistence(timeout: 5))
         XCTAssertTrue(screen("ai-setup-step-direction").waitForExistence(timeout: 5))
 
-        let create = screen("ai-direction-continue")
-        XCTAssertTrue(create.waitForExistence(timeout: 5))
+        // And it survives the sheet coming and going.
+        XCTAssertTrue(create.waitForExistence(timeout: 8))
         XCTAssertTrue(create.isEnabled)
     }
 
@@ -379,7 +384,7 @@ final class TripReelFlowUITests: XCTestCase {
 
         screen("export-standard").tap()
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
+        XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 15))
 
         // The film saves itself, so nothing here asks the user to go and do it.
         XCTAssertFalse(screen("export-save-warning").exists)

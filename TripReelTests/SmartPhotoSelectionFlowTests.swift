@@ -90,7 +90,9 @@ final class SmartPhotoSelectionFlowTests: XCTestCase {
         model.useCloudEnhancement()
         XCTAssertEqual(model.screen, .aiDirection)
         XCTAssertFalse(model.isCloudAnalysisConsentPresented)
-        XCTAssertFalse(model.aiCutCanCreate)
+        // The clue is asked for once, up front, so nothing here is still
+        // missing: style and moments are already chosen.
+        XCTAssertTrue(model.aiCutCanCreate)
         model.aiCutStoryContext = "Our students’ competition day"
         XCTAssertTrue(model.aiCutCanCreate)
         let callsOnConsent = await cloud.observedCallCount()
