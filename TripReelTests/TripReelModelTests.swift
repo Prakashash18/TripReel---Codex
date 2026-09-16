@@ -307,6 +307,67 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(request.quality, .standard)
     }
 
+    func testFinishedMemorySavesItselfAndMovesCleanupToTheBanner() async throws {
+        let exporter = RecordingVideoExporter()
+        let model = makeFirstWatchModel(exporter: exporter)
+        XCTAssertEqual(model.exportAutosave, .idle)
+
+        model.exportFirstCutFreeTrailer()
+        await waitForDone(model)
+        XCTAssertEqual(model.screen, .done)
+
+        // The user is never asked to go and save it.
+        let deadline = Date().addingTimeInterval(10)
+        while model.exportAutosave == .idle || model.exportAutosave == .saving,
+              Date() < deadline {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(model.exportAutosave, .saved)
+        let savedURL = await exporter.savedURL
+        XCTAssertEqual(savedURL, model.exportedVideoURL)
+
+        // Cleanup no longer stands between the user and the way out.
+        XCTAssertNotEqual(model.screen, .cleanup)
+
+        // Back from a finished memory belongs to the list, not to export.
+        model.navigateBack()
+        XCTAssertEqual(model.screen, .trips)
+    }
+
+    func testCleanupWaitsInTheListAsADismissibleBanner() throws {
+        let model = makeModel()
+        let trip = try XCTUnwrap(model.trips.first)
+        model.startBuild(trip: trip)
+
+        XCTAssertGreaterThan(model.cleanupBannerMomentCount, 0)
+        XCTAssertTrue(model.showsCleanupBanner)
+        XCTAssertTrue(model.cleanupBannerText.contains("nothing was deleted"))
+
+        model.openCleanupFromBanner()
+        XCTAssertEqual(model.screen, .cleanup)
+
+        model.dismissCleanupBanner()
+        XCTAssertFalse(model.showsCleanupBanner)
+
+        // A new memory brings its own left-out moments, so the banner returns.
+        model.startBuild(trip: trip)
+        XCTAssertTrue(model.showsCleanupBanner)
+    }
+
+    func testTrailerNamesWhatItLeftBehindAndTheFullStoryDoesNot() async throws {
+        let exporter = RecordingVideoExporter()
+        let model = makeFirstWatchModel(exporter: exporter)
+
+        model.exportFirstCutFreeTrailer()
+        await waitForDone(model)
+        let trailerText = try XCTUnwrap(model.trailerWithheldText)
+        XCTAssertTrue(trailerText.contains("still in here"))
+
+        model.exportFirstCutFullStory()
+        await waitForDone(model)
+        XCTAssertNil(model.trailerWithheldText)
+    }
+
     /// Yielding a fixed number of times is not a wait: the render finishes on
     /// its own schedule, and a loaded CI machine will still be on `.rendering`
     /// after any number of yields. This waits on the clock instead.

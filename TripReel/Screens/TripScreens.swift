@@ -49,6 +49,39 @@ struct TripsScreen: View {
         activeCollection == .local
     }
 
+    private var cleanupBanner: some View {
+        HStack(spacing: 11) {
+            Button {
+                model.openCleanupFromBanner()
+            } label: {
+                Text(model.cleanupBannerText)
+                    .font(TR.ui(11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(TactileButtonStyle())
+            .accessibilityIdentifier("cleanup-banner")
+
+            Button {
+                model.dismissCleanupBanner()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .frame(width: 26, height: 26)
+                    .background(.white.opacity(0.08), in: Circle())
+            }
+            .buttonStyle(TactileButtonStyle(pressedScale: 0.92))
+            .accessibilityLabel("Dismiss")
+            .accessibilityIdentifier("cleanup-banner-dismiss")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .glassCard(cornerRadius: 14)
+    }
+
     var body: some View {
         ZStack {
             WarmBackground(variant: .trips)
@@ -103,6 +136,11 @@ struct TripsScreen: View {
                                     .padding(.horizontal, 24)
                                     .padding(.top, 8)
                             }
+                        }
+
+                        if model.showsCleanupBanner {
+                            cleanupBanner
+                                .trEntrance(0, distance: 8)
                         }
 
                         if model.usesDemoData {

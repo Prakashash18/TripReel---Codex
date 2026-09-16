@@ -1568,6 +1568,13 @@ private struct LibraryDetectionResult: Sendable {
     let nearbyEvents: [DetectedTrip]
 }
 
+enum ExportAutosaveState: Equatable, Sendable {
+    case idle
+    case saving
+    case saved
+    case failed
+}
+
 enum ExportQuality: Equatable, Sendable {
     case standard
     case rewarded
@@ -2433,6 +2440,12 @@ final class TripReelModel: ObservableObject {
     )
     @Published private(set) var isSavingExport = false
     @Published private(set) var exportSaveMessage: String?
+    /// The finished film is saved to Photos as encoding ends, so the Memory
+    /// Card never has to warn the user that leaving would lose it.
+    @Published private(set) var exportAutosave: ExportAutosaveState = .idle
+    /// The moments left out of the memory are reviewable later from a banner in
+    /// the list, rather than as a step the user must clear to finish.
+    @Published var isCleanupBannerDismissed = false
 
     let usesDemoData: Bool
 
@@ -2817,6 +2830,51 @@ final class TripReelModel: ObservableObject {
         }
         let digest = SHA256.hash(data: Data(components.joined(separator: "|").utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// What the card says it did, so the badge is never a claim the app has not
+    /// actually carried out yet.
+    var memoryCardBadge: String {
+        switch exportAutosave {
+        case .idle, .saving:
+            return "Saving to Photos · \(exportQuality.includesWatermark ? "720p" : "1080p")"
+        case .saved:
+            return exportQuality.includesWatermark
+                ? "Saved to Photos · 720p · watermarked"
+                : "Saved to Photos · 1080p · no watermark"
+        case .failed:
+            return "Not saved to Photos yet"
+        }
+    }
+
+    var memoryCardMeta: String {
+        "\(tripDates) · \(activeExportPhotos.count) moments"
+    }
+
+    /// The trailer's job: name what it left behind rather than let the viewer
+    /// believe they already have the whole memory.
+    var trailerWithheldText: String? {
+        guard exportQuality.includesWatermark else { return nil }
+        let count = max(0, keptCount - activeExportPhotos.count)
+        guard count > 0 else { return nil }
+        return "\(count) moment\(count == 1 ? "" : "s") still in here. Keep the full \(filmDurationText)."
+    }
+
+    var cleanupBannerMomentCount: Int { cleanupCandidatePhotos.count }
+
+    var showsCleanupBanner: Bool {
+        !isCleanupBannerDismissed && cleanupBannerMomentCount > 0
+    }
+
+    var cleanupBannerText: String {
+        let count = cleanupBannerMomentCount
+        return "\(count) moment\(count == 1 ? " was" : "s were") left out of \(tripShortPlace). Review them whenever you like — nothing was deleted."
+    }
+
+    /// The memory queued behind this one, so finishing offers somewhere to go
+    /// that is not the end of the app.
+    var nextMemoryTrip: Trip? {
+        trips.first { $0.id != selectedTrip?.id }
     }
 
     var activeExportDurationText: String {
@@ -3275,7 +3333,7 @@ final class TripReelModel: ObservableObject {
             pendingExportIntent = nil
             go(.export, direction: .backward)
         case .done:
-            go(.export, direction: .backward)
+            go(.trips, direction: .backward)
         case .welcome, .trips, .empty, .building, .aiProcessing, .aiVideoGenerating,
              .cut, .rendering, .cleanup:
             break
@@ -5384,6 +5442,7 @@ final class TripReelModel: ObservableObject {
         guard !trip.assets.isEmpty else { return }
         let isNearbyTrip = nearbyEvents.contains(where: { $0.id == trip.id })
         selectedTrip = trip
+        isCleanupBannerDismissed = false
         photoEditOverrides = [:]
         photos = Self.makeReelPhotos(
             from: trip,
@@ -5737,6 +5796,7 @@ final class TripReelModel: ObservableObject {
             downloadProgress: nil
         )
         exportSaveMessage = nil
+        exportAutosave = .idle
         go(.rendering)
 
         if usesDemoData {
@@ -5750,6 +5810,7 @@ final class TripReelModel: ObservableObject {
                 }
                 try? await Task.sleep(nanoseconds: 450_000_000)
                 guard !Task.isCancelled, self.exportGeneration == generation else { return }
+                self.exportAutosave = .saved
                 self.go(.done)
             }
             return
@@ -5788,6 +5849,7 @@ final class TripReelModel: ObservableObject {
                 self.exportedVideoURL = url
                 self.renderProgress = 1
                 self.go(.done)
+                await self.autosaveExportToPhotos(generation: generation)
             } catch is CancellationError {
                 return
             } catch {
@@ -5881,6 +5943,44 @@ final class TripReelModel: ObservableObject {
         let handoff = exportHandoff
         dismissExportMessage()
         startRender(quality: quality, handoff: handoff)
+    }
+
+    /// Saving is the app's job, not a chore handed to the user on the way out.
+    /// A failure is not an alert: the card offers a retry instead, because the
+    /// film still exists and nothing has been lost.
+    private func autosaveExportToPhotos(generation: UUID) async {
+        guard exportedVideoURL != nil else { return }
+        exportAutosave = .saving
+        let saved = await saveExportToPhotos()
+        guard exportGeneration == generation else { return }
+        exportAutosave = saved ? .saved : .failed
+        if !saved { exportErrorMessage = nil }
+    }
+
+    func retryAutosaveToPhotos() {
+        let generation = exportGeneration
+        Task { [weak self] in
+            await self?.autosaveExportToPhotos(generation: generation)
+        }
+    }
+
+    func dismissCleanupBanner() {
+        isCleanupBannerDismissed = true
+    }
+
+    func openCleanupFromBanner() {
+        cleanupShowsGrid = false
+        go(.cleanup, direction: .forward)
+    }
+
+    /// Finishing a memory should offer the next one rather than the end of the
+    /// app; this starts it from the list the user already has.
+    func startNextMemory() {
+        guard let next = nextMemoryTrip else {
+            go(.trips, direction: .backward)
+            return
+        }
+        startBuild(trip: next)
     }
 
     @discardableResult

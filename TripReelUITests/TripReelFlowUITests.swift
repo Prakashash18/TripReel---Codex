@@ -116,9 +116,9 @@ final class TripReelFlowUITests: XCTestCase {
         standardExport.tap()
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
-
-        button(startingWith: "Save Video").tap()
-        XCTAssertTrue(screen("cleanup-screen").waitForExistence(timeout: 3))
+        XCTAssertTrue(screen("memory-card").waitForExistence(timeout: 3))
+        XCTAssertTrue(screen("send-memory").exists)
+        XCTAssertFalse(screen("export-save-warning").exists)
     }
 
     func testSingleMemoryCollectionRemovesUnhelpfulTabs() {
@@ -391,14 +391,20 @@ final class TripReelFlowUITests: XCTestCase {
         screen("export-standard").tap()
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
-        XCTAssertTrue(
-            app.staticTexts
-                .matching(NSPredicate(format: "label CONTAINS[c] %@", "doesn’t save exported videos"))
-                .firstMatch
-                .exists
-        )
-        XCTAssertTrue(button(startingWith: "Share Reel").exists)
-        XCTAssertTrue(button(startingWith: "Save Video").exists)
+
+        // The film saves itself, so nothing here asks the user to go and do it.
+        XCTAssertFalse(screen("export-save-warning").exists)
+        XCTAssertFalse(button(startingWith: "Save Video").exists)
+        XCTAssertFalse(button(startingWith: "Share Reel").exists)
+
+        XCTAssertTrue(screen("memory-card").exists)
+        XCTAssertTrue(screen("memory-card-badge").exists)
+        XCTAssertTrue(screen("destination-stories").exists)
+        XCTAssertTrue(screen("destination-messages").exists)
+        XCTAssertTrue(screen("send-memory").exists)
+
+        screen("memory-card-flip").tap()
+        XCTAssertTrue(screen("memory-card-watches").waitForExistence(timeout: 3))
     }
 
     func testCleanupShowsDestructiveWarningBeforePhotosRequest() {
