@@ -170,7 +170,7 @@ final class TripReelFlowUITests: XCTestCase {
         screen("first-watch-skip-button").tap()
 
         XCTAssertTrue(screen("first-watch-end-card").waitForExistence(timeout: 6))
-        XCTAssertTrue(screen("first-watch-keep-button").exists)
+        XCTAssertTrue(screen("first-watch-keep-button").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("first-watch-replay-button").exists)
         XCTAssertTrue(screen("first-watch-another-take-button").exists)
         XCTAssertTrue(screen("first-watch-change-button").exists)

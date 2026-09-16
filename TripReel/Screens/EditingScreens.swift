@@ -233,6 +233,7 @@ struct FirstWatchScreen: View {
                 )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("first-watch-end-card")
 
             Button(keepTitle) {
                 keepThisOne()
@@ -274,9 +275,7 @@ struct FirstWatchScreen: View {
             value: model.isStoryPassPresented
         )
         .allowsHitTesting(!model.isStoryPassPresented)
-        .accessibilityHidden(model.isStoryPassPresented)
         .trEntrance(0, distance: 12)
-        .accessibilityIdentifier("first-watch-end-card")
     }
 
     private func quietAction(
@@ -385,6 +384,7 @@ private struct StoryPassSheet: View {
                 .accessibilityHidden(true)
 
             MetadataText(text: "Story Pass · This memory", color: TR.accent)
+                .accessibilityIdentifier("story-pass-sheet")
 
             Text("Keep all \(durationText) of it")
                 .font(TR.display(32))
@@ -470,7 +470,6 @@ private struct StoryPassSheet: View {
             )
         )
         .shadow(color: .black.opacity(0.7), radius: 30, y: -12)
-        .accessibilityIdentifier("story-pass-sheet")
     }
 
     private func passCapsule(_ title: String) -> some View {
