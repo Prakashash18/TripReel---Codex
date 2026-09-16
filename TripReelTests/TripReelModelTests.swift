@@ -284,7 +284,8 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(model.screen, .done)
         XCTAssertEqual(model.exportQuality, .hd)
         XCTAssertFalse(model.exportQuality.includesWatermark)
-        let request = try XCTUnwrap(await exporter.lastRequest)
+        let recordedRequest = await exporter.lastRequest
+        let request = try XCTUnwrap(recordedRequest)
         XCTAssertEqual(request.quality, .hd)
         XCTAssertGreaterThan(request.photos.count, freeMomentCount)
     }
@@ -305,7 +306,8 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(model.screen, .done)
         XCTAssertEqual(model.exportQuality, .standard)
         XCTAssertTrue(model.exportQuality.includesWatermark)
-        let request = try XCTUnwrap(await exporter.lastRequest)
+        let recordedRequest = await exporter.lastRequest
+        let request = try XCTUnwrap(recordedRequest)
         XCTAssertEqual(request.quality, .standard)
     }
 
