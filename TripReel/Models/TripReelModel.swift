@@ -5706,11 +5706,6 @@ final class TripReelModel: ObservableObject {
         startRender(quality: .standard, handoff: .normal)
     }
 
-    func exportRewardedVersion() {
-        pendingExportIntent = nil
-        startRender(quality: .rewarded, handoff: .normal)
-    }
-
     func startRender(hd: Bool = false) {
         startRender(quality: hd ? .hd : .standard, handoff: .normal)
     }

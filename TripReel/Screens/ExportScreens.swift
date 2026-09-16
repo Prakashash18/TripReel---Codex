@@ -138,8 +138,6 @@ private struct RenderedFilmPreview: View {
 struct ExportScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @EnvironmentObject private var purchases: RevenueCatPurchaseService
-    @EnvironmentObject private var rewardedExports: RewardedExportService
-    @State private var showsExportChoices = false
 
     var body: some View {
         ZStack {
@@ -189,7 +187,7 @@ struct ExportScreen: View {
                         )
                     }
 
-                    Text("Tap an option to see what’s included.")
+                    Text("Two outcomes: a short watermarked trailer, or all of it.")
                         .font(TR.ui(12))
                         .foregroundStyle(.white.opacity(0.54))
                         .multilineTextAlignment(.center)
@@ -217,198 +215,12 @@ struct ExportScreen: View {
         } message: {
             Text(model.exportErrorMessage ?? "Please try again.")
         }
-        .sheet(isPresented: $showsExportChoices) {
-            ExportChoiceSheet(
-                freeDurationText: model.freeExportDurationText,
-                freeMomentCount: model.freeExportMomentCount,
-                extendedDurationText: model.rewardedExportDurationText,
-                extendedMomentCount: model.rewardedExportMomentCount,
-                extendedIsUnlocked: rewardedExports.hasUnlockedExtendedPreview(
-                    versionID: model.rewardedExportVersionID
-                ),
-                exportFree: exportFreePreview,
-                watchAd: unlockExtendedPreview,
-                showPaidOptions: showPaidOptions
-            )
-            .environmentObject(purchases)
-            .environmentObject(rewardedExports)
-            .presentationDetents([.fraction(0.72), .large])
-            .presentationDragIndicator(.visible)
-            .interactiveDismissDisabled(rewardedExports.isLoading)
-        }
     }
 
     private func beginFreeExport() {
-        rewardedExports.clearMessage()
-        showsExportChoices = true
-    }
-
-    private func exportFreePreview() {
-        showsExportChoices = false
         model.requestExport(.standard, isUnlocked: false)
     }
 
-    private func unlockExtendedPreview() {
-        let versionID = model.rewardedExportVersionID
-        Task {
-            guard await rewardedExports.watchAdAndUnlock(versionID: versionID) else { return }
-            showsExportChoices = false
-            model.exportRewardedVersion()
-        }
-    }
-
-    private func showPaidOptions() {
-        showsExportChoices = false
-        model.requestExport(
-            .highDefinition,
-            isUnlocked: purchases.hasFullExportAccess(for: model.exportStoryID)
-        )
-    }
-
-}
-
-private struct ExportChoiceSheet: View {
-    @EnvironmentObject private var purchases: RevenueCatPurchaseService
-    @EnvironmentObject private var rewardedExports: RewardedExportService
-    @Environment(\.dismiss) private var dismiss
-    let freeDurationText: String
-    let freeMomentCount: Int
-    let extendedDurationText: String
-    let extendedMomentCount: Int
-    let extendedIsUnlocked: Bool
-    let exportFree: () -> Void
-    let watchAd: () -> Void
-    let showPaidOptions: () -> Void
-
-    var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 14) {
-                MetadataText(text: "CHOOSE AN EXPORT", color: TR.accent)
-                    .accessibilityIdentifier("rewarded-export-prompt")
-
-                Text("How much of your story?")
-                    .font(TR.display(30))
-                    .foregroundStyle(TR.cream)
-
-                Text("Start free, watch an ad for more, or keep it all.")
-                    .font(TR.ui(14))
-                    .foregroundStyle(.white.opacity(0.64))
-
-                exportChoice(
-                    eyebrow: "FREE",
-                    title: "Short preview",
-                    detail: "\(freeDurationText) · \(freeMomentCount) standout moments",
-                    symbol: "play.rectangle",
-                    actionTitle: "Export free",
-                    accessibilityID: "export-short-preview",
-                    action: exportFree
-                )
-
-                exportChoice(
-                    eyebrow: extendedIsUnlocked ? "UNLOCKED" : "WATCH 1 AD",
-                    title: "Half the story",
-                    detail: "About 50% · \(extendedDurationText) · \(extendedMomentCount) moments",
-                    symbol: "play.tv",
-                    actionTitle: rewardedExports.isLoading
-                        ? "Getting ad ready…"
-                        : (extendedIsUnlocked ? "Export longer preview" : "Watch ad & export"),
-                    accessibilityID: "watch-ad-and-export",
-                    highlighted: true,
-                    action: watchAd
-                )
-
-                Button(action: showPaidOptions) {
-                    HStack(spacing: 13) {
-                        RoundedIcon(symbol: "sparkles.rectangle.stack", tint: TR.accent, size: 40)
-                        VStack(alignment: .leading, spacing: 4) {
-                            MetadataText(text: "FULL STORY", color: TR.accent)
-                            Text("Unlock this story")
-                                .font(TR.ui(16, weight: .semibold))
-                            Text(paidPriceSummary)
-                                .font(TR.ui(12))
-                                .foregroundStyle(.white.opacity(0.58))
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .foregroundStyle(TR.accent)
-                    }
-                    .foregroundStyle(TR.cream)
-                    .padding(15)
-                    .glassCard(cornerRadius: 18, highlighted: true)
-                }
-                .buttonStyle(TactileButtonStyle())
-                .accessibilityIdentifier("view-paid-export-options")
-
-                if let message = rewardedExports.message {
-                    Text(message)
-                        .font(TR.ui(12, weight: .medium))
-                        .foregroundStyle(TR.cut.opacity(0.92))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Button("Not now") { dismiss() }
-                    .font(TR.ui(14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.68))
-                    .frame(maxWidth: .infinity)
-                    .buttonStyle(.plain)
-                    .disabled(rewardedExports.isLoading)
-
-                Text("Previews are 720p and watermarked. The ad version stays unlocked for this edit.")
-                    .font(TR.ui(11))
-                    .foregroundStyle(.white.opacity(0.42))
-                    .frame(maxWidth: .infinity)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.horizontal, 24)
-            .padding(.top, 8)
-            .padding(.bottom, 20)
-        }
-        .background(Color(red: 0.10, green: 0.075, blue: 0.06))
-    }
-
-    private func exportChoice(
-        eyebrow: String,
-        title: String,
-        detail: String,
-        symbol: String,
-        actionTitle: String,
-        accessibilityID: String,
-        highlighted: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 13) {
-                RoundedIcon(symbol: symbol, tint: highlighted ? TR.accent : TR.keep, size: 40)
-                VStack(alignment: .leading, spacing: 4) {
-                    MetadataText(text: eyebrow, color: highlighted ? TR.accent : TR.keep)
-                    Text(title).font(TR.ui(16, weight: .semibold))
-                    Text(detail).font(TR.ui(12)).foregroundStyle(.white.opacity(0.58))
-                }
-                Spacer()
-                if highlighted && rewardedExports.isLoading {
-                    ProgressView().controlSize(.small).tint(TR.accent)
-                } else {
-                    Text(actionTitle)
-                        .font(TR.ui(12, weight: .semibold))
-                        .foregroundStyle(highlighted ? TR.accent : TR.keep)
-                        .multilineTextAlignment(.trailing)
-                }
-            }
-            .foregroundStyle(TR.cream)
-            .padding(15)
-            .glassCard(cornerRadius: 18, highlighted: highlighted)
-        }
-        .buttonStyle(TactileButtonStyle())
-        .disabled(rewardedExports.isLoading)
-        .accessibilityIdentifier(accessibilityID)
-    }
-
-    private var paidPriceSummary: String {
-        guard let price = purchases.storyPassPackage?.localizedPriceString else {
-            return "Complete video · 1080p · no watermark"
-        }
-        return "One-time Story Pass · \(price)"
-    }
 }
 
 private struct ExportOptionCard: View {
