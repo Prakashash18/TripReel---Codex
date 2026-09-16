@@ -2,7 +2,6 @@ import SwiftUI
 
 struct TripReelPrivacyPolicyView: View {
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var rewardedExports: RewardedExportService
     @State private var showsTermsOfUse = false
 
     var body: some View {
@@ -38,10 +37,6 @@ struct TripReelPrivacyPolicyView: View {
                             "Apple processes payments. RevenueCat receives an anonymous app user identifier and Story Pass purchase status so Memories can unlock one full HD export. RevenueCat never receives your photos, previews, films, titles, or location data. Story Pass is a consumable whose memory unlock is retained on the purchasing device."
                         )
                         section(
-                            "Optional rewarded ads",
-                            "A short Memory Preview is always available without an ad. You may choose to watch one rewarded ad to unlock an extended, watermarked preview using about half of the story. Google Mobile Ads and Google's consent platform may process device, consent, approximate location, advertising, and ad-interaction information to show, measure, and protect that ad, subject to your privacy choices. Memories disables Google's publisher first-party identifier and does not request Apple's tracking permission. Your photos, videos, titles, finished films, embedded locations, and OpenAI request data are never sent to Google for advertising. Once earned, that extended edit can be rendered, saved, or shared again without another ad."
-                        )
-                        section(
                             "Your choices",
                             "You can finish, export, and manually edit using only the on-device First Cut. Every AI edit starts with an explicit OpenAI sharing decision, followed by moment and creative-direction choices. Nothing is prepared until you tap Create AI cut. The comparison screen shows the verified changes AI made, and you decide whether to use them or keep the First Cut. Declining or closing sends nothing and returns to First Cut. Revoking Photos access in iOS Settings stops further library access."
                         )
@@ -53,12 +48,6 @@ struct TripReelPrivacyPolicyView: View {
                                 destination: URL(string: "https://developers.openai.com/api/docs/guides/your-data")!
                             )
                             Link("RevenueCat privacy policy", destination: URL(string: "https://www.revenuecat.com/privacy")!)
-                            Link("Google privacy policy", destination: URL(string: "https://policies.google.com/privacy")!)
-                            if rewardedExports.privacyOptionsRequired {
-                                Button("Advertising privacy choices") {
-                                    Task { await rewardedExports.presentPrivacyOptions() }
-                                }
-                            }
                             Link(
                                 "Memories support",
                                 destination: URL(string: "https://github.com/Prakashash18/TripReel---Codex/issues")!
@@ -165,8 +154,8 @@ struct MemoriesTermsOfUseView: View {
                             "Story Pass purchases are processed by Apple. Each pass is a consumable purchase that unlocks the selected memory's full-length HD export on that device. Charges and refunds are governed by Apple's terms and the purchase information shown before confirmation."
                         )
                         termsSection(
-                            "Rewarded free exports",
-                            "A short, watermarked Memory Preview is available without an ad. An optional rewarded ad unlocks an extended preview using about half of the story on this device, including another render or share of that same version. A Story Pass unlocks the complete 1080p story without a watermark. If no ad reward is reported, you can try again or use the short preview. Memories does not send your photos, videos, titles, or finished film to the advertiser."
+                            "Free trailers",
+                            "A short, watermarked trailer can be exported without a purchase. A Story Pass unlocks the complete 1080p story without a watermark."
                         )
 
                         Link(

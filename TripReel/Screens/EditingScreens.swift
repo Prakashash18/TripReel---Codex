@@ -633,7 +633,6 @@ struct AICutDirectionScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsPhotoSelection = false
-    @FocusState private var storyFieldFocused: Bool
 
     var body: some View {
         ZStack {
@@ -646,8 +645,6 @@ struct AICutDirectionScreen: View {
                     switch model.aiCutSetupStep {
                     case .moments:
                         momentsStep
-                    case .story:
-                        storyStep
                     case .direction:
                         directionStep
                     }
@@ -669,9 +666,6 @@ struct AICutDirectionScreen: View {
             }
         }
         .animation(reduceMotion ? .easeInOut(duration: 0.16) : TRMotion.navigation, value: model.aiCutSetupStep)
-        .onChange(of: model.aiCutSetupStep) { _, _ in
-            storyFieldFocused = false
-        }
         .sheet(isPresented: $showsPhotoSelection) {
             AICutPhotoSelectionSheet()
                 .environmentObject(model)
@@ -686,7 +680,7 @@ struct AICutDirectionScreen: View {
     private var stepHeader: some View {
         VStack(alignment: .leading, spacing: 13) {
             ScreenHeading(
-                eyebrow: "AI Director · step \(model.aiCutSetupStep.position) of 3",
+                eyebrow: "AI Director · step \(model.aiCutSetupStep == .moments ? 1 : 2) of 2",
                 title: stepTitle,
                 size: 42
             )
@@ -698,9 +692,13 @@ struct AICutDirectionScreen: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 6) {
-                ForEach(AICutSetupStep.allCases, id: \.self) { step in
+                ForEach([AICutSetupStep.moments, .direction], id: \.self) { step in
                     Capsule()
-                        .fill(step.rawValue <= model.aiCutSetupStep.rawValue ? TR.accent : .white.opacity(0.16))
+                        .fill(
+                            step == .moments || model.aiCutSetupStep == .direction
+                                ? TR.accent
+                                : .white.opacity(0.16)
+                        )
                         .frame(
                             width: step == model.aiCutSetupStep ? 30 : 10,
                             height: 5
@@ -725,12 +723,6 @@ struct AICutDirectionScreen: View {
         }
         .trEntrance(1, distance: 8)
         .accessibilityIdentifier("ai-setup-step-moments")
-    }
-
-    private var storyStep: some View {
-        storyContextEditor
-            .trEntrance(1, distance: 8)
-            .accessibilityIdentifier("ai-setup-step-story")
     }
 
     private var directionStep: some View {
@@ -767,82 +759,9 @@ struct AICutDirectionScreen: View {
         .accessibilityIdentifier("ai-setup-step-direction")
     }
 
-    private var storyContextEditor: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack {
-                Text("Your clue · required")
-                    .font(TR.ui(13, weight: .semibold))
-                Spacer()
-                Text("\(model.aiCutStoryContext.count)/\(CloudPhotoAnalysisClient.maximumStoryContextCharacters)")
-                    .font(TR.mono(9))
-                    .foregroundStyle(.white.opacity(0.34))
-            }
-
-            TextField(
-                "e.g. Our students’ competition day",
-                text: $model.aiCutStoryContext,
-                axis: .vertical
-            )
-            .font(TR.ui(13))
-            .lineLimit(2...3)
-            .textInputAutocapitalization(.sentences)
-            .focused($storyFieldFocused)
-            .padding(.horizontal, 13)
-            .padding(.vertical, 12)
-            .background(.black.opacity(0.20))
-            .overlay(
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .stroke(.white.opacity(0.12), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-            .onChange(of: model.aiCutStoryContext) { _, value in
-                if value.count > CloudPhotoAnalysisClient.maximumStoryContextCharacters {
-                    model.aiCutStoryContext = String(
-                        value.prefix(CloudPhotoAnalysisClient.maximumStoryContextCharacters)
-                    )
-                }
-            }
-            .accessibilityIdentifier("ai-story-context")
-
-            if !storyContextIsValid {
-                Label("Add a short clue to continue", systemImage: "arrow.up")
-                    .font(TR.ui(10, weight: .medium))
-                    .foregroundStyle(TR.accent)
-                    .accessibilityIdentifier("ai-story-context-required")
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 7) {
-                    ForEach(model.aiCutStoryContextSuggestions, id: \.self) { suggestion in
-                        Button(suggestion) {
-                            withAnimation(reduceMotion ? nil : TRMotion.selection) {
-                                model.aiCutStoryContext = suggestion
-                            }
-                        }
-                        .font(TR.ui(10, weight: .semibold))
-                        .foregroundStyle(
-                            model.aiCutStoryContext == suggestion ? TR.ink : .white.opacity(0.64)
-                        )
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 8)
-                        .background(
-                            model.aiCutStoryContext == suggestion ? TR.accent : .white.opacity(0.055)
-                        )
-                        .clipShape(Capsule())
-                        .buttonStyle(TactileButtonStyle(pressedScale: 0.96))
-                    }
-                }
-            }
-        }
-        .foregroundStyle(TR.cream)
-        .padding(15)
-        .glassCard(cornerRadius: 18)
-    }
-
     private var stepFooter: some View {
         VStack(spacing: 9) {
             Button(footerButtonTitle) {
-                storyFieldFocused = false
                 if model.aiCutSetupStep == .direction {
                     model.continueWithAICutDirection()
                 } else {
@@ -885,7 +804,6 @@ struct AICutDirectionScreen: View {
     private var stepTitle: String {
         switch model.aiCutSetupStep {
         case .moments: "Pick moments"
-        case .story: "What happened?"
         case .direction: "Pick a style"
         }
     }
@@ -893,9 +811,7 @@ struct AICutDirectionScreen: View {
     private var stepDetail: String {
         switch model.aiCutSetupStep {
         case .moments:
-            "We picked the strongest. Change them if needed."
-        case .story:
-            "Tell AI what this memory means."
+            "We picked the strongest on your iPhone. Change them if needed."
         case .direction:
             "Choose how the story should feel."
         }
@@ -909,8 +825,6 @@ struct AICutDirectionScreen: View {
         switch model.aiCutSetupStep {
         case .moments:
             model.aiCutSelectedPhotoCount > 0
-        case .story:
-            storyContextIsValid
         case .direction:
             model.aiCutCanCreate
         }
@@ -918,7 +832,7 @@ struct AICutDirectionScreen: View {
 
     private var footerNote: String {
         switch model.aiCutSetupStep {
-        case .moments, .story:
+        case .moments:
             "Nothing is sent yet"
         case .direction:
             "Only \(model.aiCutSelectedPhotoCount) reduced previews and your choices are sent"
@@ -928,17 +842,12 @@ struct AICutDirectionScreen: View {
     private var footerAccessibilityHint: String {
         switch model.aiCutSetupStep {
         case .moments:
-            "Continues to the required story clue"
-        case .story:
             "Continues to reel direction choices"
         case .direction:
             "Sends the selected reduced previews and choices to OpenAI, then creates a comparison cut"
         }
     }
 
-    private var storyContextIsValid: Bool {
-        !model.aiCutStoryContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
 }
 
 private struct AICutPhotoSelectionCard: View {
@@ -1695,9 +1604,10 @@ struct AICutComparisonScreen: View {
                 VStack(spacing: 16) {
                     VStack(spacing: 6) {
                         MetadataText(text: "AI Cut · ready", color: TR.accent)
-                        Text("A different take.")
+                        Text("Which felt more like your trip?")
                             .font(TR.display(35))
-                        Text("Watch either cut, then swipe through what changed.")
+                            .multilineTextAlignment(.center)
+                        Text("Tap either version. The whole card is your answer.")
                             .font(TR.ui(12))
                             .foregroundStyle(.white.opacity(0.55))
                             .multilineTextAlignment(.center)
@@ -1720,6 +1630,15 @@ struct AICutComparisonScreen: View {
                         }
                         .accessibilityLabel("More cut options")
                         .accessibilityIdentifier("ai-comparison-more")
+                    }
+
+                    HStack(spacing: 12) {
+                        cutChoice(
+                            .firstCut,
+                            duration: model.firstCutDurationText,
+                            detail: "\(model.firstCutSnapshot?.keptPhotos.count ?? 0) moments"
+                        )
+                        cutChoice(.aiCut, duration: model.aiCutDurationText, detail: "faster, more people")
                     }
 
                     if let snapshot {
@@ -1747,20 +1666,12 @@ struct AICutComparisonScreen: View {
                             }
                         )
                         .id(previewSource)
-                        .frame(height: 270)
+                        .frame(height: 295)
                         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 22).stroke(.white.opacity(0.14), lineWidth: 1))
                         .shadow(color: .black.opacity(0.45), radius: 24, y: 16)
                         .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.985)))
                     }
-
-                    HStack(spacing: 8) {
-                        comparisonTab(.firstCut, duration: model.firstCutDurationText)
-                        comparisonTab(.aiCut, duration: model.aiCutDurationText)
-                    }
-                    .padding(4)
-                    .background(.black.opacity(0.22))
-                    .clipShape(Capsule())
 
                     if let previewTrack {
                         Button {
@@ -1789,59 +1700,8 @@ struct AICutComparisonScreen: View {
                         .accessibilityIdentifier("ai-comparison-audio")
                     }
 
-                    if previewSource == .aiCut {
-                        TabView(selection: $detailPage) {
-                            AIComparisonDetailPage(
-                                eyebrow: "What changed",
-                                title: model.aiCutDiagnosis?.verdict ?? "A clearer story shape",
-                                detail: model.aiCutSummary ?? "AI rebalanced the strongest moments without changing your originals.",
-                                symbol: "arrow.triangle.branch",
-                                badges: AIComparisonDetailPage.changeBadges(model.aiCutComparison)
-                            )
-                            .tag(0)
-
-                            AIComparisonDetailPage(
-                                eyebrow: "Story & titles",
-                                title: storyRecommendation?.title ?? "A stronger beginning and ending",
-                                detail: titleRecommendation?.title ?? storyRecommendation?.detail ?? "Titles now support the story instead of interrupting it.",
-                                symbol: "text.quote",
-                                badges: [
-                                    titleRecommendation.map { ("textformat", $0.title) },
-                                    model.aiCutComparison.map { ("arrow.up.arrow.down", "\($0.reorderedCount) reordered") }
-                                ].compactMap { $0 }
-                            )
-                            .tag(1)
-
-                            AIComparisonDetailPage(
-                                eyebrow: "Sound & movement",
-                                title: musicRecommendation?.title ?? "A new rhythm",
-                                detail: treatmentRecommendation?.title ?? musicRecommendation?.detail ?? "Music, timing and motion now move as one.",
-                                symbol: "waveform.path",
-                                badges: [
-                                    musicRecommendation.map { ("music.note", $0.title) },
-                                    treatmentRecommendation.map { ("wand.and.stars", $0.title) }
-                                ].compactMap { $0 }
-                            )
-                            .tag(2)
-                        }
-                        .tabViewStyle(.page(indexDisplayMode: .never))
-                        .frame(height: 188)
-                        .accessibilityLabel("AI cut details")
-                        .accessibilityValue("Page \(detailPage + 1) of 3")
-
-                        HStack(spacing: 7) {
-                            ForEach(0..<3, id: \.self) { index in
-                                Capsule()
-                                    .fill(index == detailPage ? TR.accent : .white.opacity(0.20))
-                                    .frame(width: index == detailPage ? 20 : 6, height: 6)
-                                    .animation(reduceMotion ? nil : TRMotion.selection, value: detailPage)
-                            }
-                        }
-                        .accessibilityHidden(true)
-                    }
-
                     VStack(spacing: 11) {
-                        Button(previewSource == .aiCut ? "Export AI Cut" : "Export First Cut") {
+                        Button(previewSource == .aiCut ? "This one feels right" : "Keep the First Cut") {
                             model.exportCut(previewSource)
                         }
                         .buttonStyle(CreamButtonStyle())
@@ -1867,6 +1727,44 @@ struct AICutComparisonScreen: View {
         }
         .onDisappear { soundtrack.stop() }
         .accessibilityIdentifier("ai-comparison-screen")
+    }
+
+    private func cutChoice(_ source: TripCutSource, duration: String, detail: String) -> some View {
+        let choice = model.editSnapshot(for: source) ?? model.firstCutSnapshot
+        return Button {
+            previewSource = source
+        } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                PhotoAssetView(
+                    source: choice?.keptPhotos.first?.source
+                        ?? model.previewSource(at: source == .aiCut ? 2 : 0)
+                )
+                .frame(maxWidth: .infinity)
+                .frame(height: 190)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(alignment: .topTrailing) {
+                    if previewSource == source {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 23, weight: .semibold))
+                            .foregroundStyle(TR.accent)
+                            .padding(10)
+                    }
+                }
+
+                Text(source == .aiCut ? "This one" : "First Cut")
+                    .font(TR.ui(15, weight: .semibold))
+                Text("\(duration) · \(detail)")
+                    .font(TR.mono(9))
+                    .tracking(0.5)
+                    .foregroundStyle(.white.opacity(0.48))
+                    .lineLimit(2)
+            }
+            .foregroundStyle(TR.cream)
+            .padding(10)
+            .glassCard(cornerRadius: 20, highlighted: previewSource == source)
+        }
+        .buttonStyle(TactileButtonStyle())
+        .accessibilityIdentifier("compare-\(source.rawValue)")
     }
 
     private func comparisonTab(_ source: TripCutSource, duration: String) -> some View {

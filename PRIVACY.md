@@ -34,11 +34,9 @@ Under OpenAI's default API controls, OpenAI may retain API content for abuse mon
 
 Apple processes in-app payments. RevenueCat receives an anonymous app user identifier and Story Pass purchase status so Memories can unlock the selected story's full-length HD export. RevenueCat does not receive photos, reduced previews, finished films, titles, or location data from Memories. Story Pass is a consumable and its per-memory unlock is retained locally on the purchasing device.
 
-## Optional rewarded advertising
+## Free trailers
 
-The first Memory Preview export is free without an ad. After that, a user may voluntarily watch one rewarded ad to unlock the current edited preview. Google Mobile Ads and Google's User Messaging Platform may process device, consent, approximate location, advertising, and ad-interaction information to request, show, measure, prevent fraud, and report on that ad, subject to the user's privacy choices. Memories disables Google's publisher first-party identifier and does not request Apple's tracking permission. Photos, videos, titles, finished films, locations embedded in media, and OpenAI request data are never sent to Google for advertising. See [Google's privacy and terms](https://policies.google.com/privacy).
-
-An earned unlock is stored on the device against that version of the edit before rendering. The same version can be rendered, saved, or shared again without another ad. A materially edited free version may require another rewarded ad. Story Pass exports do not require ads.
+A short, watermarked trailer can be exported without a purchase. A Story Pass unlocks the selected memory's complete 1080p story without a watermark.
 
 ## Identity and tracking
 

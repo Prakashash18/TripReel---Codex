@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		0051539D13E50F4B6E5D40F8 /* CloudPhotoAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25675F7E95FAF87ADA8F88A8 /* CloudPhotoAnalysisTests.swift */; };
 		02F83D5C53011524AE1398C8 /* CloudAnalysisConsentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E31473A3CB33C5D5CB4D6EA /* CloudAnalysisConsentView.swift */; };
-		03383F04C2D47D150AF045F2 /* RewardedExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE3D0F2A41ABA0ABB0412E80 /* RewardedExportService.swift */; };
 		03685A570E3F6167F4875D7E /* SharedViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F526A17B9CB876B87F47972A /* SharedViews.swift */; };
 		08F1A48D4B535D401B68FA98 /* RevenueCatPurchaseService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76C5668C5272505DD3B61078 /* RevenueCatPurchaseService.swift */; };
 		0A4F7E98489685E12080D9A3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6E06F6111F0C8AD43B9C48E2 /* Assets.xcassets */; };
@@ -22,8 +21,6 @@
 		35E883DB509955329DED8640 /* TripReelVideoExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAF530D141430C09137C32C7 /* TripReelVideoExporter.swift */; };
 		37BFF96220D40B74CD29FBA9 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4EB0F34B3CF71F2806BAAB30 /* Foundation.framework */; };
 		3B4A11DA4BE48011D11B85C1 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0C94F14F52801D7DCE17C75 /* RootView.swift */; };
-		4C4A460D8CBF82818B201337 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = D638C72CBBFD3C8A2F49F261 /* GoogleMobileAds */; };
-		52A8EA0736F6F1CD7637B66F /* RewardedExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443A9BC615ED77C2A2397D28 /* RewardedExportServiceTests.swift */; };
 		5755EEFD80FB36C7703B5B96 /* TripReelFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 059870F64127AA1BE632B323 /* TripReelFlowUITests.swift */; };
 		687F5FA6FDAC27C9414A4DDE /* ExportScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5681D75E1E86891BDECE3997 /* ExportScreens.swift */; };
 		6C3BEAAD6DA3D3ECD925CAB9 /* NativePhotoIntelligenceScoringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B301E1EDA2D10979D744E47 /* NativePhotoIntelligenceScoringTests.swift */; };
@@ -88,7 +85,6 @@
 		3AA787F8EA870F39698EBBFE /* TripReelTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripReelTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3D414F8959D6FEE8A70349AD /* InstrumentSerif-Italic.ttf */ = {isa = PBXFileReference; includeInIndex = 1; name = "InstrumentSerif-Italic.ttf"; path = "Resources/Fonts/InstrumentSerif-Italic.ttf"; sourceTree = "<group>"; };
 		4285DDAC61479620E0552662 /* AppAttestCloudPhotoAnalysisAuthorizer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppAttestCloudPhotoAnalysisAuthorizer.swift; path = Models/AppAttestCloudPhotoAnalysisAuthorizer.swift; sourceTree = "<group>"; };
-		443A9BC615ED77C2A2397D28 /* RewardedExportServiceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RewardedExportServiceTests.swift; sourceTree = "<group>"; };
 		4AFF49FDB74E5D692B22CD8E /* EditingScreens.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EditingScreens.swift; path = Screens/EditingScreens.swift; sourceTree = "<group>"; };
 		4B8DCE7DB532068210A25145 /* the-long-way-home.m4a */ = {isa = PBXFileReference; includeInIndex = 1; name = "the-long-way-home.m4a"; path = "Resources/Music/the-long-way-home.m4a"; sourceTree = "<group>"; };
 		4EB0F34B3CF71F2806BAAB30 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS14.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
@@ -106,7 +102,6 @@
 		80473A080308842FCD6870AD /* InstrumentSerif-Regular.ttf */ = {isa = PBXFileReference; includeInIndex = 1; name = "InstrumentSerif-Regular.ttf"; path = "Resources/Fonts/InstrumentSerif-Regular.ttf"; sourceTree = "<group>"; };
 		8A2040FAA5B9327ABA708A6D /* OFL-InstrumentSerif.txt */ = {isa = PBXFileReference; includeInIndex = 1; name = "OFL-InstrumentSerif.txt"; path = "Resources/Fonts/OFL-InstrumentSerif.txt"; sourceTree = "<group>"; };
 		A0C94F14F52801D7DCE17C75 /* RootView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RootView.swift; path = App/RootView.swift; sourceTree = "<group>"; };
-		BE3D0F2A41ABA0ABB0412E80 /* RewardedExportService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RewardedExportService.swift; path = Models/RewardedExportService.swift; sourceTree = "<group>"; };
 		CCF0A0C89D6083462203E304 /* TripGrouping.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripGrouping.swift; path = Models/TripGrouping.swift; sourceTree = "<group>"; };
 		CF4E819C7DE6A74BC6011E33 /* TripReel.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = TripReel.app; path = TripReel.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D330E6E20A8C49690476D769 /* TripReelUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TripReelUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -142,7 +137,6 @@
 			files = (
 				E97038C3F926C35A8BBD102D /* Foundation.framework in Frameworks */,
 				C673ACCFF1537DA4A97674F6 /* RevenueCat in Frameworks */,
-				4C4A460D8CBF82818B201337 /* GoogleMobileAds in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -173,7 +167,6 @@
 			children = (
 				25675F7E95FAF87ADA8F88A8 /* CloudPhotoAnalysisTests.swift */,
 				1B301E1EDA2D10979D744E47 /* NativePhotoIntelligenceScoringTests.swift */,
-				443A9BC615ED77C2A2397D28 /* RewardedExportServiceTests.swift */,
 				4EEF1AFDCA123610B9B22C21 /* SmartPhotoSelectionFlowTests.swift */,
 				7261FAE6F1429F10FCF6B0FB /* TripGroupingTests.swift */,
 				514E48831466234832E8F7CA /* TripReelModelTests.swift */,
@@ -223,7 +216,6 @@
 				F4E142A91FFE69ADCC2046A2 /* PhotoAnalysisThumbnailService.swift */,
 				27CAF64BD055FC38101DD307 /* PhotoLibraryService.swift */,
 				76C5668C5272505DD3B61078 /* RevenueCatPurchaseService.swift */,
-				BE3D0F2A41ABA0ABB0412E80 /* RewardedExportService.swift */,
 				15DD6BE9BDEF8E825B997C3E /* SmartPhotoSelection.swift */,
 				CCF0A0C89D6083462203E304 /* TripGrouping.swift */,
 				7B4CEA6A7E939EDB475F36B9 /* TripReelModel.swift */,
@@ -270,7 +262,6 @@
 			name = TripReel;
 			packageProductDependencies = (
 				4F8620EA062890F4FA07143A /* RevenueCat */,
-				D638C72CBBFD3C8A2F49F261 /* GoogleMobileAds */,
 			);
 			productName = TripReel;
 			productReference = CF4E819C7DE6A74BC6011E33 /* TripReel.app */;
@@ -344,7 +335,6 @@
 			mainGroup = 623E839C444C1ADA3044DCEE;
 			packageReferences = (
 				B4BDE843342F447500EE852D /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
-				9BF013C39C75847601F1FA82 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
 			);
 			productRefGroup = 03C920BB0471088C01D4AEBA /* Products */;
 			projectDirPath = "";
@@ -406,7 +396,6 @@
 				0EDA64CF8785CC6C2F226193 /* PhotoAnalysisThumbnailService.swift in Sources */,
 				90621E500B9836F2FFD23AAD /* PhotoLibraryService.swift in Sources */,
 				08F1A48D4B535D401B68FA98 /* RevenueCatPurchaseService.swift in Sources */,
-				03383F04C2D47D150AF045F2 /* RewardedExportService.swift in Sources */,
 				9AFB23DDC4626709D361EC58 /* SmartPhotoSelection.swift in Sources */,
 				23AD737AE0ABFCB3D7D6FF6E /* TripGrouping.swift in Sources */,
 				FB8FB1D1717158D9392252F2 /* TripReelModel.swift in Sources */,
@@ -435,7 +424,6 @@
 			files = (
 				0051539D13E50F4B6E5D40F8 /* CloudPhotoAnalysisTests.swift in Sources */,
 				6C3BEAAD6DA3D3ECD925CAB9 /* NativePhotoIntelligenceScoringTests.swift in Sources */,
-				52A8EA0736F6F1CD7637B66F /* RewardedExportServiceTests.swift in Sources */,
 				85C007FCA74FAA0AC38A3F12 /* SmartPhotoSelectionFlowTests.swift in Sources */,
 				E4A813791061F771EC9D1A25 /* TripGroupingTests.swift in Sources */,
 				C160733D4EE023CCA4219DDF /* TripReelModelTests.swift in Sources */,
@@ -528,8 +516,6 @@
 		24128AC461B9C07820F617F1 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ADMOB_APP_ID = "ca-app-pub-3940256099942544~1458002511";
-				ADMOB_REWARDED_AD_UNIT_ID = "ca-app-pub-3940256099942544/1712485313";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_OBJC_WEAK = NO;
@@ -580,8 +566,6 @@
 		31E4E8357AE1493321B6F804 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ADMOB_APP_ID = "ca-app-pub-3940256099942544~1458002511";
-				ADMOB_REWARDED_AD_UNIT_ID = "ca-app-pub-3940256099942544/1712485313";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_OBJC_WEAK = NO;
@@ -762,14 +746,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		9BF013C39C75847601F1FA82 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
-			requirement = {
-				kind = exactVersion;
-				version = 13.3.0;
-			};
-		};
 		B4BDE843342F447500EE852D /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm.git";
@@ -785,11 +761,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B4BDE843342F447500EE852D /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
 			productName = RevenueCat;
-		};
-		D638C72CBBFD3C8A2F49F261 /* GoogleMobileAds */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 9BF013C39C75847601F1FA82 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
-			productName = GoogleMobileAds;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

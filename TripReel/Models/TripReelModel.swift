@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 import Photos
 import PhotosUI
 import SwiftUI
@@ -10,6 +9,7 @@ enum AppScreen: String {
     case limited
     case trips
     case empty
+    case storyClue
     case building
     case firstWatch
     case firstCutOptions
@@ -34,26 +34,26 @@ enum AppScreen: String {
         case .access: 1
         case .limited: 2
         case .trips, .empty: 3
-        case .building: 4
-        case .firstWatch: 5
-        case .firstCutOptions: 6
-        case .aiDirection: 7
-        case .aiProcessing: 8
-        case .aiComparison: 9
-        case .aiVideoIntro, .aiVideoGenerating, .aiVideoReady: 10
-        case .secondWatch: 11
-        case .cut, .pace: 12
-        case .export: 13
-        case .paywall, .rendering: 14
-        case .done: 15
-        case .cleanup: 16
+        case .storyClue: 4
+        case .building: 5
+        case .firstWatch: 6
+        case .firstCutOptions: 7
+        case .aiDirection: 8
+        case .aiProcessing: 9
+        case .aiComparison: 10
+        case .aiVideoIntro, .aiVideoGenerating, .aiVideoReady: 11
+        case .secondWatch: 12
+        case .cut, .pace: 13
+        case .export: 14
+        case .paywall, .rendering: 15
+        case .done: 16
+        case .cleanup: 17
         }
     }
 }
 
 enum AICutSetupStep: Int, CaseIterable, Hashable, Sendable {
     case moments
-    case story
     case direction
 
     var position: Int { rawValue + 1 }
@@ -1570,7 +1570,6 @@ private struct LibraryDetectionResult: Sendable {
 
 enum ExportQuality: Equatable, Sendable {
     case standard
-    case rewarded
     case hd
 
     var includesWatermark: Bool { self != .hd }
@@ -1583,14 +1582,12 @@ enum ExportHandoff: Equatable, Sendable {
 
 enum ExportIntent: Equatable, Sendable {
     case standard
-    case rewarded
     case highDefinition
     case capCut
 
     var quality: ExportQuality {
         switch self {
         case .standard, .capCut: .standard
-        case .rewarded: .rewarded
         case .highDefinition: .hd
         }
     }
@@ -2371,6 +2368,7 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var trips: [Trip] = []
     @Published private(set) var nearbyEvents: [Trip] = []
     @Published private(set) var selectedTrip: Trip?
+    @Published var storyClue = ""
     @Published private(set) var photos: [ReelPhoto] = []
     @Published private(set) var libraryPreviewPhotos: [ReelPhoto] = []
     @Published private(set) var libraryPhotoCount = 0
@@ -2720,18 +2718,6 @@ final class TripReelModel: ObservableObject {
         Self.durationText(seconds: freeExportDurationSeconds)
     }
 
-    var rewardedExportDurationSeconds: Double {
-        preparedExportContent(for: .rewarded).durationSeconds
-    }
-
-    var rewardedExportDurationText: String {
-        Self.durationText(seconds: rewardedExportDurationSeconds)
-    }
-
-    var rewardedExportMomentCount: Int {
-        preparedExportContent(for: .rewarded).photos.count
-    }
-
     var freeExportIsFullLength: Bool {
         freeExportDurationSeconds >= filmDurationSeconds - 0.01
     }
@@ -2780,43 +2766,6 @@ final class TripReelModel: ObservableObject {
 
     var exportStoryID: String {
         selectedTrip?.id ?? "memory-" + keptPhotos.map(\.id).joined(separator: "-")
-    }
-
-    /// A stable fingerprint for the rendered free edit. Any meaningful change
-    /// to selection, order, crop, timing, titles, overlays, look, or music
-    /// creates a new version and therefore a new rewarded-export decision.
-    var rewardedExportVersionID: String {
-        let content = preparedExportContent(for: .rewarded)
-        var components = [
-            exportStoryID,
-            String(format: "%.4f", pace),
-            montageLook.rawValue,
-            montageMotionIntensity.rawValue,
-            selectedTrackID ?? "none",
-            cutToBeat ? "beat" : "free"
-        ]
-        components += content.photos.map { photo in
-            [
-                photo.id,
-                photo.frameStyle.rawValue,
-                photo.motionStyle.rawValue,
-                String(format: "%.4f", photo.cropScale),
-                String(format: "%.4f", photo.cropOffsetX),
-                String(format: "%.4f", photo.cropOffsetY),
-                String(format: "%.4f", duration(for: photo)),
-                String(format: "%.4f", photo.videoStartSeconds)
-            ].joined(separator: ":")
-        }
-        components += content.titleCards.map { card in
-            [card.kind.rawValue, card.title, card.subtitle, card.style.rawValue,
-             String(format: "%.4f", card.duration), card.afterPhotoID ?? ""].joined(separator: ":")
-        }
-        components += content.textOverlays.map { overlay in
-            [overlay.photoID, overlay.text, overlay.style.rawValue,
-             overlay.placement.rawValue, overlay.animation.rawValue].joined(separator: ":")
-        }
-        let digest = SHA256.hash(data: Data(components.joined(separator: "|").utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     var activeExportDurationText: String {
@@ -3234,7 +3183,7 @@ final class TripReelModel: ObservableObject {
     var canNavigateBack: Bool {
         if isStoryPassPresented { return true }
         switch screen {
-        case .access, .limited, .firstWatch, .firstCutOptions, .aiDirection, .aiComparison,
+        case .access, .limited, .storyClue, .firstWatch, .firstCutOptions, .aiDirection, .aiComparison,
              .aiVideoIntro, .aiVideoReady, .secondWatch, .pace, .export, .paywall, .done:
             return true
         case .welcome, .trips, .empty, .building, .aiProcessing, .aiVideoGenerating,
@@ -3253,6 +3202,9 @@ final class TripReelModel: ObservableObject {
             go(.welcome, direction: .backward)
         case .limited:
             go(.access, direction: .backward)
+        case .storyClue:
+            pendingBuildTrip = nil
+            go(.trips, direction: .backward)
         case .firstWatch:
             go(.trips, direction: .backward)
         case .firstCutOptions:
@@ -3460,7 +3412,6 @@ final class TripReelModel: ObservableObject {
         aiCutConsentGranted
             && selectedAICutDirection != nil
             && !selectedAICutPhotoIDs.isEmpty
-            && !aiCutStoryContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Moments omitted from the cut currently on screen. An AI cut can restore
@@ -3481,12 +3432,27 @@ final class TripReelModel: ObservableObject {
     /// this path never prepares an upload or presents cloud consent.
     func requestBuild(trip: Trip) {
         guard !trip.assets.isEmpty else { return }
+        pendingBuildTrip = trip
+        storyClue = ""
+        selectedTrip = trip
+        go(.storyClue, direction: .forward)
+    }
+
+    /// Starts the locally-created First Cut after the user has optionally told
+    /// Memories what the day meant. The clue never leaves the phone here.
+    func makePendingMemory() {
+        guard let trip = pendingBuildTrip ?? selectedTrip else { return }
+        pendingBuildTrip = nil
         if usesDemoData {
             startBuild(trip: trip)
-            return
+        } else {
+            beginSmartPhotoSelection(for: trip)
         }
-        pendingBuildTrip = nil
-        beginSmartPhotoSelection(for: trip)
+    }
+
+    func skipStoryClueAndBuild() {
+        storyClue = ""
+        makePendingMemory()
     }
 
     func presentCloudAnalysisSettings() {
@@ -3514,6 +3480,7 @@ final class TripReelModel: ObservableObject {
     func openAICutDirections() {
         aiCutFailure = nil
         aiCutSetupStep = .moments
+        aiCutStoryContext = storyClue.trimmingCharacters(in: .whitespacesAndNewlines)
         selectedAICutDirection = recommendedAICutDirection
         resetAICutPhotoSelection()
         aiCutConsentGranted = false
@@ -3526,12 +3493,6 @@ final class TripReelModel: ObservableObject {
         case .moments:
             guard !selectedAICutPhotoIDs.isEmpty else { return }
             navigationDirection = .forward
-            aiCutSetupStep = .story
-        case .story:
-            guard !aiCutStoryContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return
-            }
-            navigationDirection = .forward
             aiCutSetupStep = .direction
         case .direction:
             break
@@ -3543,13 +3504,9 @@ final class TripReelModel: ObservableObject {
         switch aiCutSetupStep {
         case .moments:
             return false
-        case .story:
-            navigationDirection = .backward
-            aiCutSetupStep = .moments
-            return true
         case .direction:
             navigationDirection = .backward
-            aiCutSetupStep = .story
+            aiCutSetupStep = .moments
             return true
         }
     }
@@ -5398,6 +5355,12 @@ final class TripReelModel: ObservableObject {
         )
         titleDrafts = localTitlePlan.drafts
         titleCards = localTitlePlan.enabledCards
+        let trimmedClue = storyClue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedClue.isEmpty {
+            var opening = titleDraft(for: .opening)
+            opening.title = String(trimmedClue.prefix(80))
+            titleDrafts[.opening] = opening
+        }
         textOverlays = []
         exportHandoff = .normal
         pendingExportIntent = nil
@@ -5418,7 +5381,7 @@ final class TripReelModel: ObservableObject {
         freePreviewEndPhotoID = nil
         freePreviewReason = nil
         selectedAICutPhotoIDs = []
-        aiCutStoryContext = ""
+        aiCutStoryContext = trimmedClue
         aiCutSetupStep = .moments
         aiCutConsentGranted = false
         aiCutSnapshot = nil
@@ -5706,11 +5669,6 @@ final class TripReelModel: ObservableObject {
         startRender(quality: .standard, handoff: .normal)
     }
 
-    func exportRewardedVersion() {
-        pendingExportIntent = nil
-        startRender(quality: .rewarded, handoff: .normal)
-    }
-
     func startRender(hd: Bool = false) {
         startRender(quality: hd ? .hd : .standard, handoff: .normal)
     }
@@ -5824,15 +5782,7 @@ final class TripReelModel: ObservableObject {
             )
         }
 
-        let freePhotos = quality == .rewarded
-            ? FreeExportStoryPlanner.extendedPreviewPhotos(
-                from: fullPhotos,
-                titleCards: fullTitleCards,
-                textOverlays: textOverlays,
-                insights: activePhotoInsights,
-                preferredEndPhotoID: freePreviewEndPhotoID
-            )
-            : FreeExportStoryPlanner.previewPhotos(
+        let freePhotos = FreeExportStoryPlanner.previewPhotos(
             from: fullPhotos,
             titleCards: fullTitleCards,
             textOverlays: textOverlays,
@@ -6346,7 +6296,7 @@ final class TripReelModel: ObservableObject {
     private static func makeDemoTrips() -> [Trip] {
         [
             makeDemoTrip(id: "da-nang", place: "Da Nang, Vietnam", dates: "Aug 2 – Aug 9, 2026", count: 84, start: date(2026, 8, 2), end: date(2026, 8, 9), coverName: "my-khe-beach"),
-            makeDemoTrip(id: "kyoto", place: "Kyoto, Japan", dates: "Apr 11 – Apr 18, 2026", count: 212, start: date(2026, 4, 11), end: date(2026, 4, 18), coverName: "hoi-an-lanes"),
+            makeDemoTrip(id: "kyoto", place: "Kyoto, Japan", dates: "Sep 13 – Sep 18, 2025", count: 212, start: date(2025, 9, 13), end: date(2025, 9, 18), coverName: "hoi-an-lanes"),
             makeDemoTrip(id: "lisbon", place: "Lisbon, Portugal", dates: "Nov 3 – Nov 8, 2025", count: 96, start: date(2025, 11, 3), end: date(2025, 11, 8), coverName: "night-market"),
             makeDemoTrip(id: "big-sur", place: "Big Sur, California", dates: "Jun 21 – Jun 23, 2025", count: 41, start: date(2025, 6, 21), end: date(2025, 6, 23), coverName: "han-river")
         ]

@@ -28,6 +28,7 @@ struct TripsScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var collection: MemoryCollection = .overseas
+    @State private var activeMemoryID: String?
     @Namespace private var collectionSelection
 
     private var availableCollections: [MemoryCollection] {
@@ -43,6 +44,11 @@ struct TripsScreen: View {
 
     private var displayedMemories: [Trip] {
         activeCollection == .overseas ? model.trips : model.nearbyEvents
+    }
+
+    private var listedMemories: [Trip] {
+        guard let anniversaryMemory else { return displayedMemories }
+        return displayedMemories.filter { $0.id != anniversaryMemory.id }
     }
 
     private var isShowingLocalMemories: Bool {
@@ -72,6 +78,34 @@ struct TripsScreen: View {
                         .trEntrance(1, distance: 8)
                 }
 
+                if !model.cutPhotoIDs.isEmpty && !model.cleanupCandidatePhotos.isEmpty {
+                    Button {
+                        model.cleanupShowsGrid = false
+                        model.go(.cleanup)
+                    } label: {
+                        HStack(spacing: 11) {
+                            Image(systemName: "sparkles.rectangle.stack")
+                                .foregroundStyle(TR.accent)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("A little cleanup is ready")
+                                    .font(TR.ui(12, weight: .semibold))
+                                Text("Review moments left out of your last film")
+                                    .font(TR.ui(10))
+                                    .foregroundStyle(.white.opacity(0.46))
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(.white.opacity(0.35))
+                        }
+                        .padding(13)
+                        .glassCard(cornerRadius: 16)
+                    }
+                    .buttonStyle(TactileButtonStyle())
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+                    .accessibilityIdentifier("memory-cleanup-banner")
+                }
+
                 ScrollView(showsIndicators: false) {
                     LazyVStack(spacing: 10) {
                         if model.isScanningLibrary && model.trips.isEmpty && model.nearbyEvents.isEmpty {
@@ -87,9 +121,28 @@ struct TripsScreen: View {
                         } else if displayedMemories.isEmpty {
                             emptyCollection
                         } else {
-                            ForEach(Array(displayedMemories.enumerated()), id: \.element.id) { index, trip in
-                                TripRow(trip: trip, isNearby: isShowingLocalMemories) {
+                            if let anniversaryMemory {
+                                AnniversaryMemoryCard(trip: anniversaryMemory) {
+                                    model.requestBuild(trip: anniversaryMemory)
+                                }
+                                .padding(.bottom, 4)
+                            }
+
+                            ForEach(Array(listedMemories.enumerated()), id: \.element.id) { index, trip in
+                                TripRow(
+                                    trip: trip,
+                                    isNearby: isShowingLocalMemories,
+                                    isActive: activeMemoryID == trip.id
+                                ) {
                                     model.requestBuild(trip: trip)
+                                }
+                                .background {
+                                    GeometryReader { proxy in
+                                        Color.clear.preference(
+                                            key: MemoryCardPositionKey.self,
+                                            value: [trip.id: proxy.frame(in: .global).midY]
+                                        )
+                                    }
                                 }
                                 .trEntrance(min(index, 4), distance: 8)
                             }
@@ -118,6 +171,12 @@ struct TripsScreen: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 32)
                 }
+                .onPreferenceChange(MemoryCardPositionKey.self) { positions in
+                    let target = UIScreen.main.bounds.height * 0.48
+                    activeMemoryID = positions.min {
+                        abs($0.value - target) < abs($1.value - target)
+                    }?.key
+                }
                 .trEntrance(2, distance: 10)
                 .refreshable {
                     await model.refreshPhotoLibraryIfAuthorized(force: true)
@@ -126,8 +185,20 @@ struct TripsScreen: View {
         }
         .onChange(of: availableCollections, initial: true) { _, available in
             collection = MemoryCollection.resolvedSelection(collection, available: available)
+            activeMemoryID = displayedMemories.first?.id
         }
         .accessibilityIdentifier("trips-screen")
+    }
+
+    private var anniversaryMemory: Trip? {
+        let calendar = Calendar.current
+        guard let target = calendar.date(byAdding: .year, value: -1, to: Date()) else { return nil }
+        return displayedMemories.min { lhs, rhs in
+            abs(lhs.startDate.timeIntervalSince(target)) < abs(rhs.startDate.timeIntervalSince(target))
+        }.flatMap { trip in
+            guard abs(trip.startDate.timeIntervalSince(target)) <= 8 * 24 * 60 * 60 else { return nil }
+            return trip
+        }
     }
 
     private var collectionPicker: some View {
@@ -198,6 +269,7 @@ struct TripsScreen: View {
 private struct TripRow: View {
     let trip: Trip
     let isNearby: Bool
+    let isActive: Bool
     let action: () -> Void
 
     private var storyTitle: String {
@@ -207,7 +279,7 @@ private struct TripRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 14) {
-                PhotoAssetView(source: trip.coverSource)
+                LivingMemoryPreview(trip: trip, isPlaying: isActive)
                     .frame(width: 76, height: 76)
                     .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
 
@@ -248,6 +320,156 @@ private struct TripRow: View {
             return trip.mediaCountText.uppercased()
         }
         return "\(trip.dates) · \(trip.mediaCountText.uppercased())"
+    }
+}
+
+private struct MemoryCardPositionKey: PreferenceKey {
+    static let defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+private struct LivingMemoryPreview: View {
+    let trip: Trip
+    let isPlaying: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var frameIndex = 0
+    @State private var drifts = false
+
+    private var sources: [PhotoSource] {
+        let values = Array(trip.assets.prefix(3).map(\.source))
+        return values.isEmpty ? [trip.coverSource] : values
+    }
+
+    var body: some View {
+        PhotoAssetView(source: sources[frameIndex % sources.count])
+            .id(sources[frameIndex % sources.count])
+            .scaleEffect(isPlaying && drifts && !reduceMotion ? 1.08 : 1)
+            .transition(.opacity)
+            .animation(.easeInOut(duration: 0.24), value: frameIndex)
+            .task(id: isPlaying) {
+                frameIndex = 0
+                drifts = false
+                guard isPlaying, !reduceMotion else { return }
+                withAnimation(TRMotion.montageDrift(duration: 6)) { drifts = true }
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(1))
+                    guard !Task.isCancelled else { return }
+                    frameIndex = (frameIndex + 1) % sources.count
+                }
+            }
+    }
+}
+
+private struct AnniversaryMemoryCard: View {
+    let trip: Trip
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .bottomLeading) {
+                PhotoAssetView(source: trip.coverSource)
+                    .frame(height: 142)
+                    .overlay {
+                        LinearGradient(colors: [.clear, .black.opacity(0.82)], startPoint: .top, endPoint: .bottom)
+                    }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    MetadataText(text: "This day last year", color: TR.accent)
+                    HStack(alignment: .bottom) {
+                        Text("\(trip.shortPlace), a year ago today")
+                            .font(TR.display(23))
+                            .foregroundStyle(TR.cream)
+                            .lineLimit(2)
+                        Spacer()
+                        Text("Watch")
+                            .font(TR.ui(11, weight: .semibold))
+                            .foregroundStyle(TR.ink)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(TR.cream, in: Capsule())
+                    }
+                }
+                .padding(16)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.12)))
+        }
+        .buttonStyle(TactileButtonStyle())
+        .accessibilityIdentifier("anniversary-memory")
+    }
+}
+
+struct StoryClueScreen: View {
+    @EnvironmentObject private var model: TripReelModel
+    @FocusState private var clueFocused: Bool
+
+    var body: some View {
+        ZStack {
+            PhotoAssetView(source: model.selectedTrip?.coverSource ?? .bundled("golden-bridge"))
+                .ignoresSafeArea()
+            LinearGradient(
+                colors: [.black.opacity(0.22), .black.opacity(0.72), .black.opacity(0.96)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 0) {
+                Spacer()
+
+                MetadataText(text: "\(model.tripShortPlace) · \(model.tripDates)", color: TR.accent)
+                Text("What was this day?")
+                    .font(TR.display(39))
+                    .tracking(-0.5)
+                    .padding(.top, 8)
+
+                TextField("A few words help shape the title", text: $model.storyClue, axis: .vertical)
+                    .font(TR.ui(16))
+                    .lineLimit(2...3)
+                    .padding(16)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.14)))
+                    .focused($clueFocused)
+                    .padding(.top, 18)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(model.aiCutStoryContextSuggestions, id: \.self) { suggestion in
+                            Button(suggestion) { model.storyClue = suggestion }
+                                .font(TR.ui(11, weight: .medium))
+                                .foregroundStyle(model.storyClue == suggestion ? TR.ink : TR.cream.opacity(0.78))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(model.storyClue == suggestion ? TR.accent : .white.opacity(0.09), in: Capsule())
+                        }
+                    }
+                }
+                .padding(.vertical, 14)
+
+                Button("Make my film") {
+                    clueFocused = false
+                    model.makePendingMemory()
+                }
+                .buttonStyle(CreamButtonStyle())
+                .accessibilityIdentifier("make-memory-from-clue")
+
+                Button("Skip — just make it") {
+                    clueFocused = false
+                    model.skipStoryClueAndBuild()
+                }
+                .font(TR.ui(13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.62))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("skip-story-clue")
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 18)
+        }
+        .accessibilityIdentifier("story-clue-screen")
     }
 }
 
