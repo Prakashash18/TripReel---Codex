@@ -64,6 +64,7 @@ final class MemoryAccountService: ObservableObject {
     let isConfigured: Bool
     private let client: SupabaseClient?
     private var authTask: Task<Void, Never>?
+    private var memoryRefreshGeneration = 0
 
     init(bundle: Bundle = .main) {
         let urlString = Self.configurationValue(key: "SUPABASE_URL", bundle: bundle)
@@ -92,11 +93,13 @@ final class MemoryAccountService: ObservableObject {
 
     func restoreSession() async {
         guard let client else { return }
-        if let user = client.auth.currentUser {
-            userID = user.id
-            userEmail = user.email
-            await refreshMemories()
+        guard client.auth.currentSession != nil else { return }
+        guard let session = try? await client.auth.session else {
+            apply(session: nil)
+            return
         }
+        apply(session: session)
+        await refreshMemories()
     }
 
     func signInWithApple(idToken: String, nonce: String) async {
@@ -139,16 +142,32 @@ final class MemoryAccountService: ObservableObject {
             memories = []
             return
         }
+
+        memoryRefreshGeneration &+= 1
+        let refreshGeneration = memoryRefreshGeneration
+
         do {
-            let rows: [SharedMemory] = try await client
-                .from("memories")
-                .select("id,title,duration_seconds,export_tier,share_token,created_at,expires_at,saved_to_phone_at")
-                .order("created_at", ascending: false)
-                .execute()
-                .value
+            let rows = try await fetchMemories(using: client)
+            guard refreshGeneration == memoryRefreshGeneration else { return }
             memories = rows.filter { $0.expiresAt > Date() }
+            message = nil
         } catch {
-            message = "Your shared memories couldn’t be refreshed. Please try again."
+            // A newly-created Supabase session can emit its signed-in event at
+            // the same time as the account screen and app lifecycle request a
+            // refresh. Give the session store one brief chance to settle before
+            // surfacing a real backend or network failure to the user.
+            try? await Task.sleep(for: .milliseconds(350))
+            guard refreshGeneration == memoryRefreshGeneration else { return }
+
+            do {
+                let rows = try await fetchMemories(using: client)
+                guard refreshGeneration == memoryRefreshGeneration else { return }
+                memories = rows.filter { $0.expiresAt > Date() }
+                message = nil
+            } catch {
+                guard refreshGeneration == memoryRefreshGeneration else { return }
+                message = "You’re signed in, but your shared stories couldn’t load yet. Please try again."
+            }
         }
     }
 
@@ -242,6 +261,18 @@ final class MemoryAccountService: ObservableObject {
         userID = session?.user.id
         userEmail = session?.user.email
         if session == nil { memories = [] }
+    }
+
+    private func fetchMemories(using client: SupabaseClient) async throws -> [SharedMemory] {
+        // `currentUser` can outlive an expired token. Asking Auth for `session`
+        // first guarantees the following Data API request has a valid JWT.
+        _ = try await client.auth.session
+        return try await client
+            .from("memories")
+            .select("id,title,duration_seconds,export_tier,share_token,created_at,expires_at,saved_to_phone_at")
+            .order("created_at", ascending: false)
+            .execute()
+            .value
     }
 
     private static func configurationValue(key: String, bundle: Bundle) -> String? {
