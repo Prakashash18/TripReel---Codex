@@ -324,7 +324,7 @@ struct PhotoAccessScreen: View {
                         .tracking(1.2)
                         .foregroundStyle(TR.keep.opacity(0.88))
 
-                    Text("Choose the moments that matter")
+                    Text("Let Memories find the story")
                         .font(TR.display(compact ? 32 : 38))
                         .tracking(-0.38)
                         .multilineTextAlignment(.center)
@@ -336,7 +336,7 @@ struct PhotoAccessScreen: View {
                     .clipShape(RoundedRectangle(cornerRadius: compact ? 18 : 22, style: .continuous))
                     .shadow(color: .black.opacity(0.5), radius: 26, y: 18)
 
-                Text("Set this up once. Memories groups related photos and videos into stories using dates and locations on this iPhone. You stay in control.")
+                Text("Memories finds trips and days using dates and locations on this iPhone, then makes a surprising First Cut. No sorting. No blank timeline.")
                     .font(TR.ui(compact ? 13 : 15))
                     .foregroundStyle(.white.opacity(0.72))
                     .multilineTextAlignment(.center)

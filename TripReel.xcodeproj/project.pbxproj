@@ -11,6 +11,9 @@
 		02F83D5C53011524AE1398C8 /* CloudAnalysisConsentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E31473A3CB33C5D5CB4D6EA /* CloudAnalysisConsentView.swift */; };
 		03685A570E3F6167F4875D7E /* SharedViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F526A17B9CB876B87F47972A /* SharedViews.swift */; };
 		08F1A48D4B535D401B68FA98 /* RevenueCatPurchaseService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76C5668C5272505DD3B61078 /* RevenueCatPurchaseService.swift */; };
+		D001A0010000000000000001 /* MemoryAccountService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D001B0010000000000000001 /* MemoryAccountService.swift */; };
+		D001A0020000000000000002 /* AccountScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = D001B0020000000000000002 /* AccountScreens.swift */; };
+		D001A0030000000000000003 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = D001D0010000000000000001 /* Supabase */; };
 		0A4F7E98489685E12080D9A3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6E06F6111F0C8AD43B9C48E2 /* Assets.xcassets */; };
 		0EDA64CF8785CC6C2F226193 /* PhotoAnalysisThumbnailService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4E142A91FFE69ADCC2046A2 /* PhotoAnalysisThumbnailService.swift */; };
 		18DD83CD21CFB3C78C70DEEC /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4EB0F34B3CF71F2806BAAB30 /* Foundation.framework */; };
@@ -97,6 +100,8 @@
 		6E06F6111F0C8AD43B9C48E2 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = Resources/Assets.xcassets; sourceTree = "<group>"; };
 		7261FAE6F1429F10FCF6B0FB /* TripGroupingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TripGroupingTests.swift; sourceTree = "<group>"; };
 		76C5668C5272505DD3B61078 /* RevenueCatPurchaseService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RevenueCatPurchaseService.swift; path = Models/RevenueCatPurchaseService.swift; sourceTree = "<group>"; };
+		D001B0010000000000000001 /* MemoryAccountService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MemoryAccountService.swift; path = Models/MemoryAccountService.swift; sourceTree = "<group>"; };
+		D001B0020000000000000002 /* AccountScreens.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AccountScreens.swift; path = Screens/AccountScreens.swift; sourceTree = "<group>"; };
 		7B4CEA6A7E939EDB475F36B9 /* TripReelModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelModel.swift; path = Models/TripReelModel.swift; sourceTree = "<group>"; };
 		7D36F5DCECE1CE1B1A95D046 /* TripReelTheme.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelTheme.swift; path = DesignSystem/TripReelTheme.swift; sourceTree = "<group>"; };
 		80473A080308842FCD6870AD /* InstrumentSerif-Regular.ttf */ = {isa = PBXFileReference; includeInIndex = 1; name = "InstrumentSerif-Regular.ttf"; path = "Resources/Fonts/InstrumentSerif-Regular.ttf"; sourceTree = "<group>"; };
@@ -137,6 +142,7 @@
 			files = (
 				E97038C3F926C35A8BBD102D /* Foundation.framework in Frameworks */,
 				C673ACCFF1537DA4A97674F6 /* RevenueCat in Frameworks */,
+				D001A0030000000000000003 /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -216,6 +222,7 @@
 				F4E142A91FFE69ADCC2046A2 /* PhotoAnalysisThumbnailService.swift */,
 				27CAF64BD055FC38101DD307 /* PhotoLibraryService.swift */,
 				76C5668C5272505DD3B61078 /* RevenueCatPurchaseService.swift */,
+				D001B0010000000000000001 /* MemoryAccountService.swift */,
 				15DD6BE9BDEF8E825B997C3E /* SmartPhotoSelection.swift */,
 				CCF0A0C89D6083462203E304 /* TripGrouping.swift */,
 				7B4CEA6A7E939EDB475F36B9 /* TripReelModel.swift */,
@@ -223,6 +230,7 @@
 				2E31473A3CB33C5D5CB4D6EA /* CloudAnalysisConsentView.swift */,
 				4AFF49FDB74E5D692B22CD8E /* EditingScreens.swift */,
 				5681D75E1E86891BDECE3997 /* ExportScreens.swift */,
+				D001B0020000000000000002 /* AccountScreens.swift */,
 				2A57E34712EFD0DD1025208F /* OnboardingScreens.swift */,
 				F425231C9A13610395A5BB50 /* SmartPhotoSelectionViews.swift */,
 				0790BF103B7A3F60D1828A93 /* TripReelPrivacyPolicyView.swift */,
@@ -262,6 +270,7 @@
 			name = TripReel;
 			packageProductDependencies = (
 				4F8620EA062890F4FA07143A /* RevenueCat */,
+				D001D0010000000000000001 /* Supabase */,
 			);
 			productName = TripReel;
 			productReference = CF4E819C7DE6A74BC6011E33 /* TripReel.app */;
@@ -317,6 +326,9 @@
 						CreatedOnToolsVersion = 26.0;
 						ProvisioningStyle = Automatic;
 						SystemCapabilities = {
+							com.apple.SignInWithApple = {
+								enabled = 1;
+							};
 							com.apple.InAppPurchase = {
 								enabled = 1;
 							};
@@ -335,6 +347,7 @@
 			mainGroup = 623E839C444C1ADA3044DCEE;
 			packageReferences = (
 				B4BDE843342F447500EE852D /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
+				D001C0010000000000000001 /* XCRemoteSwiftPackageReference "supabase-swift" */,
 			);
 			productRefGroup = 03C920BB0471088C01D4AEBA /* Products */;
 			projectDirPath = "";
@@ -396,6 +409,7 @@
 				0EDA64CF8785CC6C2F226193 /* PhotoAnalysisThumbnailService.swift in Sources */,
 				90621E500B9836F2FFD23AAD /* PhotoLibraryService.swift in Sources */,
 				08F1A48D4B535D401B68FA98 /* RevenueCatPurchaseService.swift in Sources */,
+				D001A0010000000000000001 /* MemoryAccountService.swift in Sources */,
 				9AFB23DDC4626709D361EC58 /* SmartPhotoSelection.swift in Sources */,
 				23AD737AE0ABFCB3D7D6FF6E /* TripGrouping.swift in Sources */,
 				FB8FB1D1717158D9392252F2 /* TripReelModel.swift in Sources */,
@@ -403,6 +417,7 @@
 				02F83D5C53011524AE1398C8 /* CloudAnalysisConsentView.swift in Sources */,
 				B78502530C9BEFDEDF8FD390 /* EditingScreens.swift in Sources */,
 				687F5FA6FDAC27C9414A4DDE /* ExportScreens.swift in Sources */,
+				D001A0020000000000000002 /* AccountScreens.swift in Sources */,
 				2BB6291452B54692392A9F23 /* OnboardingScreens.swift in Sources */,
 				DFBF2A0C999CE791602EB8C5 /* SmartPhotoSelectionViews.swift in Sources */,
 				CE2639601FAB8F02C58C9DC8 /* TripReelPrivacyPolicyView.swift in Sources */,
@@ -539,6 +554,8 @@
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
+				SUPABASE_PUBLISHABLE_KEY = sb_publishable_Er7UGvVeiLvwEquYlQiLbA_O1HJtHDf;
+				SUPABASE_URL = "https://fdjxxgsvtlvdcphjvcdw.supabase.co";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -589,6 +606,8 @@
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
+				SUPABASE_PUBLISHABLE_KEY = sb_publishable_Er7UGvVeiLvwEquYlQiLbA_O1HJtHDf;
+				SUPABASE_URL = "https://fdjxxgsvtlvdcphjvcdw.supabase.co";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -754,6 +773,14 @@
 				minimumVersion = 5.43.0;
 			};
 		};
+		D001C0010000000000000001 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -761,6 +788,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B4BDE843342F447500EE852D /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
 			productName = RevenueCat;
+		};
+		D001D0010000000000000001 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D001C0010000000000000001 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

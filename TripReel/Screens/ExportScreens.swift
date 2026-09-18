@@ -948,9 +948,12 @@ struct RenderingScreen: View {
 
 struct FilmReadyScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @EnvironmentObject private var account: MemoryAccountService
     @State private var readyFeedback = false
     @State private var sharePayload: MP4SharePayload?
-    @State private var didAttemptAutoSave = false
+    @State private var showsAccount = false
+    @State private var shareLink: URL?
+    @State private var isCreatingLink = false
 
     var body: some View {
         ZStack {
@@ -959,10 +962,10 @@ struct FilmReadyScreen: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
                     MetadataText(
-                        text: model.exportSaveMessage == nil && !model.usesDemoData
-                            ? "Finishing your memory"
-                            : "Saved to Photos · 1080p · no watermark",
-                        color: model.exportSaveMessage == nil && !model.usesDemoData ? TR.accent : TR.keep
+                        text: model.exportSaveMessage == nil
+                            ? "MEMORY READY · NOT SAVED YET"
+                            : "SAVED TO PHOTOS",
+                        color: model.exportSaveMessage == nil ? TR.accent : TR.keep
                     )
                     .padding(.top, 16)
                     .accessibilityIdentifier("film-ready-save-status")
@@ -981,22 +984,47 @@ struct FilmReadyScreen: View {
                             .multilineTextAlignment(.center)
                     }
 
-                    HStack(spacing: 8) {
-                        shareDestination("Stories", symbol: "circle.dashed.inset.filled")
-                        shareDestination("Messages", symbol: "message.fill")
-                        shareDestination("WhatsApp", symbol: "phone.fill")
-                        shareDestination("More", symbol: "ellipsis.circle.fill")
-                    }
-
                     Button {
-                        shareFilm()
+                        saveToPhotos()
                     } label: {
-                        Label("Send this memory", systemImage: "square.and.arrow.up")
+                        Label(
+                            model.exportSaveMessage == nil ? "Save video to Photos" : "Saved to Photos",
+                            systemImage: model.exportSaveMessage == nil ? "square.and.arrow.down" : "checkmark.circle.fill"
+                        )
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(CreamButtonStyle())
-                    .disabled(model.exportedVideoURL == nil)
-                    .accessibilityIdentifier("share-film")
+                    .disabled(model.exportedVideoURL == nil || model.isSavingExport || model.exportSaveMessage != nil)
+                    .accessibilityIdentifier("save-film")
+
+                    HStack(spacing: 10) {
+                        Button {
+                            shareFilm()
+                        } label: {
+                            Label("Share video", systemImage: "square.and.arrow.up")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(GlassButtonStyle())
+
+                        Button {
+                            createShareLink()
+                        } label: {
+                            HStack(spacing: 7) {
+                                if isCreatingLink { ProgressView().controlSize(.small) }
+                                Label("Share link", systemImage: "link")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(GlassButtonStyle())
+                        .disabled(isCreatingLink)
+                    }
+
+                    Text("Memories does not keep a permanent copy. Share links expire after 7 days, so save the video if you want to keep it.")
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.44))
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                        .padding(.horizontal, 8)
 
                     Button {
                         model.restart()
@@ -1027,7 +1055,6 @@ struct FilmReadyScreen: View {
         }
         .onAppear {
             readyFeedback.toggle()
-            autoSaveIfNeeded()
         }
         .sensoryFeedback(.success, trigger: readyFeedback)
         .sheet(item: $sharePayload) { payload in
@@ -1035,6 +1062,29 @@ struct FilmReadyScreen: View {
                 sharePayload = nil
             }
             .ignoresSafeArea()
+        }
+        .sheet(isPresented: $showsAccount) {
+            AccountCenterView(context: .sharing)
+                .environmentObject(account)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { shareLink != nil },
+                set: { if !$0 { shareLink = nil } }
+            )
+        ) {
+            if let shareLink {
+                MemoryLinkReadySheet(
+                    title: model.titleDraft(for: .opening).title,
+                    url: shareLink
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+            }
         }
         .alert(
             "Couldn't save the film",
@@ -1076,35 +1126,32 @@ struct FilmReadyScreen: View {
         .trEntrance(0, distance: 14)
     }
 
-    private func shareDestination(_ title: String, symbol: String) -> some View {
-        Button(action: shareFilm) {
-            VStack(spacing: 7) {
-                Image(systemName: symbol)
-                    .font(.system(size: 17, weight: .semibold))
-                Text(title)
-                    .font(TR.ui(9, weight: .semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
-            .foregroundStyle(TR.cream)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 15))
-        }
-        .buttonStyle(TactileButtonStyle())
-        .disabled(model.exportedVideoURL == nil)
-    }
-
     private func shareFilm() {
         guard let url = model.exportedVideoURL else { return }
         sharePayload = MP4SharePayload(url: url, title: "\(model.tripShortPlace) · Memories")
     }
 
-    private func autoSaveIfNeeded() {
-        guard !didAttemptAutoSave else { return }
-        didAttemptAutoSave = true
-        guard !model.usesDemoData, model.exportedVideoURL != nil else { return }
+    private func saveToPhotos() {
         Task { _ = await model.saveExportToPhotos() }
+    }
+
+    private func createShareLink() {
+        guard let videoURL = model.exportedVideoURL else { return }
+        guard account.isSignedIn else {
+            showsAccount = true
+            return
+        }
+        isCreatingLink = true
+        Task {
+            let url = await account.createShareLink(
+                videoURL: videoURL,
+                title: model.titleDraft(for: .opening).title,
+                durationSeconds: model.activeExportDurationSeconds,
+                isPaid: model.exportQuality == .hd
+            )
+            isCreatingLink = false
+            shareLink = url
+        }
     }
 }
 

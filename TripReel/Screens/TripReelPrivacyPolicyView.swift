@@ -26,7 +26,7 @@ struct TripReelPrivacyPolicyView: View {
                         )
                         section(
                             "Storage and deletion",
-                            "Memories' backend does not intentionally persist cloud previews or edit plans and discards in-memory request copies after use. OpenAI is called with store set to false. Under default API controls, OpenAI may retain API content for abuse monitoring for up to 30 days, or longer when legally or safety-required. Zero Data Retention removes default storage for eligible OpenAI requests, but images flagged by OpenAI's child-safety classifier may still be retained for manual review."
+                            "AI previews and edit plans are not intentionally persisted by Memories. If you explicitly create a share link, the finished exported video—not your photo library or original moments—is uploaded to a private Supabase Storage bucket and linked to your Memories account. A viewer receives only a short-lived playback address after presenting the unguessable share token. The cloud video and link expire after seven days. Saving to Photos is the only permanent copy Memories offers. OpenAI is called with store set to false. Under default API controls, OpenAI may retain API content for abuse monitoring for up to 30 days, or longer when legally or safety-required."
                         )
                         section(
                             "Training, identity, and tracking",
@@ -38,7 +38,7 @@ struct TripReelPrivacyPolicyView: View {
                         )
                         section(
                             "Your choices",
-                            "You can finish, export, and manually edit using only the on-device First Cut. Every AI edit starts with an explicit OpenAI sharing decision, followed by moment and creative-direction choices. Nothing is prepared until you tap Create AI cut. The comparison screen shows the verified changes AI made, and you decide whether to use them or keep the First Cut. Declining or closing sends nothing and returns to First Cut. Revoking Photos access in iOS Settings stops further library access."
+                            "You can create, edit, save, and share a video file without an account. An account is requested only when you choose Create share link. You can remove an active link from Your shared stories before it expires. Every AI edit starts with an explicit OpenAI sharing decision. Declining sends nothing and returns to First Cut. Revoking Photos access in iOS Settings stops further library access."
                         )
 
                         VStack(alignment: .leading, spacing: 10) {
@@ -48,6 +48,7 @@ struct TripReelPrivacyPolicyView: View {
                                 destination: URL(string: "https://developers.openai.com/api/docs/guides/your-data")!
                             )
                             Link("RevenueCat privacy policy", destination: URL(string: "https://www.revenuecat.com/privacy")!)
+                            Link("Supabase privacy policy", destination: URL(string: "https://supabase.com/privacy")!)
                             Link(
                                 "Memories support",
                                 destination: URL(string: "https://github.com/Prakashash18/TripReel---Codex/issues")!
@@ -56,7 +57,7 @@ struct TripReelPrivacyPolicyView: View {
                         .font(TR.ui(13, weight: .semibold))
                         .foregroundStyle(TR.accent)
 
-                        Text("Effective September 13, 2026")
+                        Text("Effective September 18, 2026")
                             .font(TR.mono(10))
                             .tracking(0.8)
                             .foregroundStyle(.white.opacity(0.38))
@@ -89,7 +90,7 @@ struct TripReelPrivacyPolicyView: View {
             MetadataText(text: TR.appStoreName)
             Text("Your memories stay yours.")
                 .font(TR.display(34))
-            Text("This policy explains the private on-device First Cut and what happens only if you explicitly request an AI edit.")
+            Text("This policy explains the private on-device First Cut, optional AI Director, and temporary links you explicitly create.")
                 .font(TR.ui(14))
                 .foregroundStyle(.white.opacity(0.66))
                 .lineSpacing(4)

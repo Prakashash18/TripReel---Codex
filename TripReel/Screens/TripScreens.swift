@@ -26,9 +26,11 @@ enum MemoryCollection: String, CaseIterable, Identifiable {
 
 struct TripsScreen: View {
     @EnvironmentObject private var model: TripReelModel
+    @EnvironmentObject private var account: MemoryAccountService
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var collection: MemoryCollection = .overseas
     @State private var activeMemoryID: String?
+    @State private var showsAccount = false
     @Namespace private var collectionSelection
 
     private var availableCollections: [MemoryCollection] {
@@ -186,6 +188,29 @@ struct TripsScreen: View {
         .onChange(of: availableCollections, initial: true) { _, available in
             collection = MemoryCollection.resolvedSelection(collection, available: available)
             activeMemoryID = displayedMemories.first?.id
+        }
+        .overlay(alignment: .topTrailing) {
+            Button {
+                showsAccount = true
+            } label: {
+                Image(systemName: account.isSignedIn ? "person.crop.circle.fill" : "person.crop.circle")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(account.isSignedIn ? TR.accent : TR.cream)
+                    .frame(width: 42, height: 42)
+                    .background(.black.opacity(0.42), in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.16), lineWidth: 1))
+            }
+            .buttonStyle(TactileButtonStyle(pressedScale: 0.92))
+            .padding(.trailing, 17)
+            .safeAreaPadding(.top, 7)
+            .accessibilityLabel(account.isSignedIn ? "Your account" : "Sign in")
+        }
+        .sheet(isPresented: $showsAccount) {
+            AccountCenterView(context: .account)
+                .environmentObject(account)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
         }
         .accessibilityIdentifier("trips-screen")
     }
