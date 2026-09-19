@@ -1106,6 +1106,7 @@ struct FilmReadyScreen: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(GlassButtonStyle())
+                        .accessibilityIdentifier("share-video-button")
 
                         Button {
                             createShareLink()
@@ -1118,6 +1119,7 @@ struct FilmReadyScreen: View {
                         }
                         .buttonStyle(GlassButtonStyle())
                         .disabled(isCreatingLink)
+                        .accessibilityIdentifier("share-link-button")
                     }
 
                     Text("Memories does not keep a permanent copy. Share links expire after 7 days, so save the video if you want to keep it.")

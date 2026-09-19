@@ -45,7 +45,7 @@ final class TripReelFlowUITests: XCTestCase {
                 .firstMatch
                 .exists
         )
-        XCTAssertTrue(app.staticTexts["Turn the photos that matter into a story."].exists)
+        XCTAssertTrue(app.staticTexts["Your camera roll is already a story."].exists)
         XCTAssertTrue(
             app.descendants(matching: .any)
                 .matching(NSPredicate(format: "label CONTAINS[c] %@", "become one animated story"))
@@ -121,7 +121,8 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
         XCTAssertTrue(screen("film-ready-save-status").exists)
-        XCTAssertTrue(screen("share-film").exists)
+        XCTAssertTrue(screen("share-video-button").exists)
+        XCTAssertTrue(screen("share-link-button").exists)
     }
 
     func testSingleMemoryCollectionRemovesUnhelpfulTabs() {
@@ -378,7 +379,8 @@ final class TripReelFlowUITests: XCTestCase {
         screen("export-standard").tap()
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
-        XCTAssertTrue(app.buttons["share-film"].exists)
+        XCTAssertTrue(screen("share-video-button").exists)
+        XCTAssertTrue(screen("share-link-button").exists)
         XCTAssertTrue(screen("film-ready-save-status").exists)
     }
 
