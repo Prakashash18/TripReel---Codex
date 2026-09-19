@@ -121,6 +121,24 @@ struct AccountCenterView: View {
             .padding(16)
             .glassCard(cornerRadius: 18)
 
+            HStack(spacing: 13) {
+                Image(systemName: "gift.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(TR.keep)
+                    .frame(width: 38, height: 38)
+                    .background(TR.keep.opacity(0.12), in: Circle())
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Monthly full exports")
+                        .font(TR.ui(14, weight: .semibold))
+                    Text("\(account.monthlyExportAllowance.remaining) of 3 remaining")
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.52))
+                }
+                Spacer()
+            }
+            .padding(16)
+            .glassCard(cornerRadius: 18, highlighted: account.monthlyExportAllowance.remaining > 0)
+
             if account.memories.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "link.badge.plus")
@@ -196,7 +214,12 @@ private struct SharedMemoryRow: View {
 
             HStack(spacing: 16) {
                 if let url = memory.shareURL {
-                    ShareLink(item: url, subject: Text(memory.title)) {
+                    ShareLink(
+                        item: url,
+                        subject: Text("Watch \(memory.title)"),
+                        message: Text(memory.shareMessage),
+                        preview: SharePreview("“\(memory.title)” — made with Memories")
+                    ) {
                         Label("Share", systemImage: "square.and.arrow.up")
                     }
                 }
@@ -243,7 +266,12 @@ struct MemoryLinkReadySheet: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 18)
                 Spacer()
-                ShareLink(item: url, subject: Text(title)) {
+                ShareLink(
+                    item: url,
+                    subject: Text("Watch \(title)"),
+                    message: Text(shareMessage),
+                    preview: SharePreview("“\(title)” — made with Memories")
+                ) {
                     Label("Share link", systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity)
                 }
@@ -254,5 +282,18 @@ struct MemoryLinkReadySheet: View {
             }
             .padding(24)
         }
+    }
+
+    private var shareMessage: String {
+        "I made “\(title)” with Memories. Watch it before this private link expires in 7 days."
+    }
+}
+
+private extension SharedMemory {
+    var shareMessage: String {
+        let expiry = daysRemaining == 0
+            ? "today"
+            : "in \(daysRemaining) day\(daysRemaining == 1 ? "" : "s")"
+        return "I made “\(title)” with Memories. Watch it before this private link expires \(expiry)."
     }
 }

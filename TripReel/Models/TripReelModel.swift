@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Photos
 import PhotosUI
@@ -3880,10 +3881,20 @@ final class TripReelModel: ObservableObject {
                     try? FileManager.default.removeItem(at: finishedURL)
                     return
                 }
-                if let previous = self.aiVideoURL, previous != finishedURL {
+                if let previous = self.aiVideoURL,
+                   previous != finishedURL,
+                   !self.isPersistedAIVideoURL(previous) {
                     try? FileManager.default.removeItem(at: previous)
                 }
-                self.aiVideoURL = finishedURL
+                let persistedURL = try self.persistAIVideo(
+                    at: finishedURL,
+                    storyID: self.exportStoryID
+                )
+                if persistedURL != finishedURL {
+                    try? FileManager.default.removeItem(at: finishedURL)
+                }
+                self.aiVideoURL = persistedURL
+                self.aiVideoSaveMessage = "Saved in Memories on this iPhone"
                 self.aiVideoProgress = 1
                 self.aiVideoTask = nil
                 self.go(.aiVideoReady, direction: .forward)
@@ -3928,6 +3939,52 @@ final class TripReelModel: ObservableObject {
                 ?? "Memories couldn't save this AI video to Photos."
             return false
         }
+    }
+
+    private func persistAIVideo(at sourceURL: URL, storyID: String) throws -> URL {
+        let directory = try persistentAIVideoDirectory()
+        let identifier = SHA256.hash(data: Data(storyID.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let destination = directory
+            .appendingPathComponent(identifier, isDirectory: false)
+            .appendingPathExtension("mp4")
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.copyItem(at: sourceURL, to: destination)
+        return destination
+    }
+
+    private func persistedAIVideoURL(storyID: String) -> URL? {
+        guard let directory = try? persistentAIVideoDirectory() else { return nil }
+        let identifier = SHA256.hash(data: Data(storyID.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let url = directory
+            .appendingPathComponent(identifier, isDirectory: false)
+            .appendingPathExtension("mp4")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private func persistentAIVideoDirectory() throws -> URL {
+        let base = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let directory = base.appendingPathComponent("SavedAIVideos", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        return directory
+    }
+
+    private func isPersistedAIVideoURL(_ url: URL) -> Bool {
+        guard let directory = try? persistentAIVideoDirectory() else { return false }
+        return url.standardizedFileURL.path.hasPrefix(directory.standardizedFileURL.path + "/")
     }
 
     private static func aiVideoPrompt(for photos: [ReelPhoto]) -> String {
@@ -5400,9 +5457,12 @@ final class TripReelModel: ObservableObject {
         aiVideoProgress = 0
         aiVideoFailureMessage = nil
         aiVideoSaveMessage = nil
-        if let aiVideoURL {
+        if let aiVideoURL, !isPersistedAIVideoURL(aiVideoURL) {
             try? FileManager.default.removeItem(at: aiVideoURL)
-            self.aiVideoURL = nil
+        }
+        self.aiVideoURL = persistedAIVideoURL(storyID: exportStoryID)
+        if self.aiVideoURL != nil {
+            aiVideoSaveMessage = "Saved in Memories on this iPhone"
         }
         firstCutSnapshot = makeCurrentEditSnapshot()
         go(.building)
@@ -6014,10 +6074,10 @@ final class TripReelModel: ObservableObject {
         aiVideoFailureMessage = nil
         aiVideoProgress = 0
         aiVideoSaveMessage = nil
-        if let aiVideoURL {
+        if let aiVideoURL, !isPersistedAIVideoURL(aiVideoURL) {
             try? FileManager.default.removeItem(at: aiVideoURL)
-            self.aiVideoURL = nil
         }
+        self.aiVideoURL = nil
         pendingBuildTrip = nil
         activeAnalysisTrip = nil
         photoAnalysisFollowUp = nil

@@ -8,6 +8,7 @@ import SwiftUI
 struct FirstWatchScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @EnvironmentObject private var purchases: RevenueCatPurchaseService
+    @EnvironmentObject private var account: MemoryAccountService
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var soundtrack = LocalSoundtrackPlayer()
     @State private var playbackRun = 0
@@ -17,6 +18,8 @@ struct FirstWatchScreen: View {
     @State private var holdDrift = false
     @State private var showsPrivacyPolicy = false
     @State private var showsTermsOfUse = false
+    @State private var showsAccount = false
+    @State private var celebration: ExportUnlockCelebration?
 
     private var firstCut: TripEditSnapshot? {
         model.firstCutSnapshot
@@ -149,6 +152,11 @@ struct FirstWatchScreen: View {
                     withheldText: model.storyPassWithheldText,
                     price: storyPassPrice,
                     buy: buyStoryPass,
+                    useMonthlyExport: claimMonthlyExport,
+                    signInForMonthlyExports: {
+                        model.dismissStoryPass()
+                        showsAccount = true
+                    },
                     sendFreeTrailer: model.exportFirstCutFreeTrailer,
                     showPrivacy: { showsPrivacyPolicy = true },
                     showTerms: { showsTermsOfUse = true }
@@ -178,6 +186,29 @@ struct FirstWatchScreen: View {
         }
         .sheet(isPresented: $showsTermsOfUse) {
             MemoriesTermsOfUseView()
+        }
+        .sheet(isPresented: $showsAccount) {
+            AccountCenterView(context: .sharing)
+                .environmentObject(account)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+        }
+        .fullScreenCover(item: $celebration) { kind in
+            ExportUnlockSuccessView(
+                kind: kind,
+                remainingMonthlyExports: kind == .monthlyGift
+                    ? account.monthlyExportAllowance.remaining
+                    : nil,
+                continueAction: {
+                    celebration = nil
+                    model.exportFirstCutFullStory()
+                },
+                laterAction: {
+                    celebration = nil
+                    model.dismissStoryPass()
+                }
+            )
         }
         .onDisappear {
             soundtrack.stop()
@@ -361,7 +392,17 @@ struct FirstWatchScreen: View {
             // what must not happen is a render starting over whatever screen
             // they moved on to.
             guard model.isStoryPassPresented, model.screen == .firstWatch else { return }
-            model.exportFirstCutFullStory()
+            model.dismissStoryPass()
+            celebration = .storyPass
+        }
+    }
+
+    private func claimMonthlyExport() {
+        Task {
+            guard await account.claimMonthlyExport(storyID: model.exportStoryID) else { return }
+            guard model.isStoryPassPresented, model.screen == .firstWatch else { return }
+            model.dismissStoryPass()
+            celebration = .monthlyGift
         }
     }
 }
@@ -375,11 +416,14 @@ private struct PlaybackHoldKey: Hashable {
 /// user just watched — never about export settings.
 private struct StoryPassSheet: View {
     @EnvironmentObject private var purchases: RevenueCatPurchaseService
+    @EnvironmentObject private var account: MemoryAccountService
     let durationText: String
     let withheldPhotos: [ReelPhoto]
     let withheldText: String
     let price: String?
     let buy: () -> Void
+    let useMonthlyExport: () -> Void
+    let signInForMonthlyExports: () -> Void
     let sendFreeTrailer: () -> Void
     let showPrivacy: () -> Void
     let showTerms: () -> Void
@@ -445,6 +489,29 @@ private struct StoryPassSheet: View {
                 .buttonStyle(CreamButtonStyle())
                 .disabled(purchases.isPurchasing)
                 .accessibilityIdentifier("story-pass-buy-button")
+            }
+
+            if account.isSignedIn, account.monthlyExportAllowance.remaining > 0 {
+                Button {
+                    useMonthlyExport()
+                } label: {
+                    Label(
+                        "Use free full export · \(account.monthlyExportAllowance.remaining) left",
+                        systemImage: "gift.fill"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(GlassButtonStyle())
+                .disabled(account.isBusy || purchases.isPurchasing)
+                .accessibilityIdentifier("story-pass-monthly-free-button")
+            } else if !account.isSignedIn {
+                Button("Sign in for 3 free full exports each month") {
+                    signInForMonthlyExports()
+                }
+                .font(TR.ui(12, weight: .semibold))
+                .foregroundStyle(TR.keep)
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
             }
 
             Button("Send the free trailer instead") {
@@ -2300,6 +2367,13 @@ struct AIVideoReadyScreen: View {
                             .padding(.vertical, 8)
                             .buttonStyle(.plain)
                     }
+
+                    Text("This AI clip is kept privately on this iPhone, so you can reopen this memory and decide about Story Pass later. Save it to Photos for a permanent copy.")
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.44))
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                        .padding(.horizontal, 10)
 
                     if let message = model.aiVideoSaveMessage {
                         Label(message, systemImage: "checkmark.circle.fill")

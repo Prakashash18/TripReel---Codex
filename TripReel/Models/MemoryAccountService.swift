@@ -35,6 +35,27 @@ struct SharedMemory: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
+struct MonthlyExportAllowance: Codable, Equatable, Sendable {
+    let limit: Int
+    let used: Int
+    let remaining: Int
+
+    static let unavailable = MonthlyExportAllowance(limit: 3, used: 0, remaining: 0)
+}
+
+private struct MonthlyExportClaim: Codable, Sendable {
+    let allowed: Bool
+    let remaining: Int
+}
+
+private struct MonthlyExportClaimParameters: Encodable {
+    let storyID: String
+
+    enum CodingKeys: String, CodingKey {
+        case storyID = "p_story_id"
+    }
+}
+
 private struct NewSharedMemory: Encodable {
     let ownerID: UUID
     let title: String
@@ -58,6 +79,8 @@ final class MemoryAccountService: ObservableObject {
     @Published private(set) var userID: UUID?
     @Published private(set) var userEmail: String?
     @Published private(set) var memories: [SharedMemory] = []
+    @Published private(set) var monthlyExportAllowance = MonthlyExportAllowance.unavailable
+    @Published private(set) var isLoadingMonthlyAllowance = false
     @Published private(set) var isBusy = false
     @Published var message: String?
 
@@ -82,7 +105,11 @@ final class MemoryAccountService: ObservableObject {
             for await (_, session) in client.auth.authStateChanges {
                 guard !Task.isCancelled else { return }
                 self.apply(session: session)
-                if session != nil { await self.refreshMemories() }
+                if session != nil {
+                    async let memories: Void = self.refreshMemories()
+                    async let allowance: Void = self.refreshMonthlyExportAllowance()
+                    _ = await (memories, allowance)
+                }
             }
         }
     }
@@ -99,7 +126,9 @@ final class MemoryAccountService: ObservableObject {
             return
         }
         apply(session: session)
-        await refreshMemories()
+        async let memories: Void = refreshMemories()
+        async let allowance: Void = refreshMonthlyExportAllowance()
+        _ = await (memories, allowance)
     }
 
     func signInWithApple(idToken: String, nonce: String) async {
@@ -119,7 +148,9 @@ final class MemoryAccountService: ObservableObject {
                 )
             )
             apply(session: session)
-            await refreshMemories()
+            async let memories: Void = refreshMemories()
+            async let allowance: Void = refreshMonthlyExportAllowance()
+            _ = await (memories, allowance)
         } catch {
             message = "Sign in didn’t finish. Nothing was uploaded. Please try again."
         }
@@ -132,8 +163,67 @@ final class MemoryAccountService: ObservableObject {
             userID = nil
             userEmail = nil
             memories = []
+            monthlyExportAllowance = .unavailable
         } catch {
             message = "Couldn’t sign out. Check your connection and try again."
+        }
+    }
+
+    func refreshMonthlyExportAllowance() async {
+        guard let client, userID != nil else {
+            monthlyExportAllowance = .unavailable
+            return
+        }
+
+        isLoadingMonthlyAllowance = true
+        defer { isLoadingMonthlyAllowance = false }
+        do {
+            let rows: [MonthlyExportAllowance] = try await client
+                .rpc("monthly_export_allowance")
+                .execute()
+                .value
+            if let allowance = rows.first {
+                monthlyExportAllowance = allowance
+            }
+        } catch {
+            // Older builds can run before the allowance migration is applied.
+            // Keep Story Pass available and avoid presenting an unusable free claim.
+            monthlyExportAllowance = .unavailable
+        }
+    }
+
+    /// Atomically reserves one of this account's three monthly full exports.
+    /// Repeating the same story ID is idempotent and never spends a second credit.
+    func claimMonthlyExport(storyID: String) async -> Bool {
+        guard let client, userID != nil else {
+            message = "Sign in to use your monthly free exports."
+            return false
+        }
+
+        isBusy = true
+        message = nil
+        defer { isBusy = false }
+        do {
+            let rows: [MonthlyExportClaim] = try await client
+                .rpc(
+                    "claim_monthly_export",
+                    params: MonthlyExportClaimParameters(storyID: storyID)
+                )
+                .execute()
+                .value
+            guard let claim = rows.first else { return false }
+            monthlyExportAllowance = MonthlyExportAllowance(
+                limit: monthlyExportAllowance.limit,
+                used: max(0, monthlyExportAllowance.limit - claim.remaining),
+                remaining: claim.remaining
+            )
+            if !claim.allowed {
+                message = "You’ve used this month’s three free full exports. Story Pass is still available for this memory."
+            }
+            return claim.allowed
+        } catch {
+            message = "Your free export couldn’t be reserved. Please check your connection and try again."
+            return false
         }
     }
 
@@ -260,7 +350,10 @@ final class MemoryAccountService: ObservableObject {
     private func apply(session: Session?) {
         userID = session?.user.id
         userEmail = session?.user.email
-        if session == nil { memories = [] }
+        if session == nil {
+            memories = []
+            monthlyExportAllowance = .unavailable
+        }
     }
 
     private func fetchMemories(using client: SupabaseClient) async throws -> [SharedMemory] {

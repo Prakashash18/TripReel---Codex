@@ -557,13 +557,155 @@ private struct ProjectFormatSheet: View {
     }
 }
 
+enum ExportUnlockCelebration: String, Identifiable {
+    case storyPass
+    case monthlyGift
+
+    var id: String { rawValue }
+
+    var eyebrow: String {
+        switch self {
+        case .storyPass: "STORY PASS · UNLOCKED"
+        case .monthlyGift: "A GIFT FROM MEMORIES"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .storyPass: "This memory is yours."
+        case .monthlyGift: "Your full story is ready."
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .storyPass: "Every moment, in 1080p, without a watermark."
+        case .monthlyGift: "One monthly free export used. Every moment is included."
+        }
+    }
+}
+
+struct ExportUnlockSuccessView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let kind: ExportUnlockCelebration
+    let remainingMonthlyExports: Int?
+    let continueAction: () -> Void
+    let laterAction: () -> Void
+    @State private var revealed = false
+    @State private var orbit = false
+
+    var body: some View {
+        ZStack {
+            WarmBackground(variant: .export)
+
+            Circle()
+                .fill(TR.accent.opacity(0.13))
+                .frame(width: 330, height: 330)
+                .blur(radius: 8)
+                .scaleEffect(revealed ? 1 : 0.35)
+
+            ForEach(0..<8, id: \.self) { index in
+                Image(systemName: index.isMultiple(of: 2) ? "sparkle" : "circle.fill")
+                    .font(.system(size: index.isMultiple(of: 2) ? 15 : 6, weight: .semibold))
+                    .foregroundStyle(index.isMultiple(of: 3) ? TR.keep : TR.accent)
+                    .offset(y: -128)
+                    .rotationEffect(.degrees(Double(index) * 45 + (orbit ? 18 : 0)))
+                    .opacity(revealed ? 0.9 : 0)
+            }
+
+            VStack(spacing: 22) {
+                Spacer()
+
+                ZStack {
+                    Circle()
+                        .fill(TR.accent.opacity(0.16))
+                        .frame(width: 112, height: 112)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 48, weight: .light))
+                        .foregroundStyle(TR.accent)
+                }
+                .scaleEffect(revealed ? 1 : 0.4)
+                .opacity(revealed ? 1 : 0)
+
+                VStack(spacing: 11) {
+                    MetadataText(text: kind.eyebrow, color: TR.keep)
+                    Text(kind.title)
+                        .font(TR.display(42))
+                        .tracking(-0.7)
+                        .multilineTextAlignment(.center)
+                    Text(kind.detail)
+                        .font(TR.ui(15))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                }
+                .offset(y: revealed ? 0 : 18)
+                .opacity(revealed ? 1 : 0)
+
+                HStack(spacing: 8) {
+                    successCapsule("1080p")
+                    successCapsule("Full story")
+                    successCapsule("No watermark")
+                }
+                .opacity(revealed ? 1 : 0)
+
+                if let remainingMonthlyExports {
+                    Text("\(remainingMonthlyExports) free full export\(remainingMonthlyExports == 1 ? "" : "s") left this month")
+                        .font(TR.ui(12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+
+                Spacer()
+
+                Button("Create my full video", action: continueAction)
+                    .buttonStyle(CreamButtonStyle())
+                    .accessibilityIdentifier("continue-after-unlock")
+
+                Button("Do this later", action: laterAction)
+                    .font(TR.ui(14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("finish-unlock-later")
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 34)
+        }
+        .sensoryFeedback(.success, trigger: revealed)
+        .onAppear {
+            if reduceMotion {
+                revealed = true
+            } else {
+                withAnimation(.spring(response: 0.72, dampingFraction: 0.72)) {
+                    revealed = true
+                }
+                withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) {
+                    orbit = true
+                }
+            }
+        }
+        .accessibilityIdentifier("export-unlock-success")
+    }
+
+    private func successCapsule(_ title: String) -> some View {
+        Text(title)
+            .font(TR.ui(10, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.74))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.07), in: Capsule())
+    }
+}
+
 struct PaywallScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @EnvironmentObject private var purchases: RevenueCatPurchaseService
+    @EnvironmentObject private var account: MemoryAccountService
     @State private var selectedPackageID: String?
     @State private var showsPrivacyPolicy = false
     @State private var showsTermsOfUse = false
     @State private var didResumeExport = false
+    @State private var celebration: ExportUnlockCelebration?
+    @State private var showsAccount = false
 
     private var selectedPackage: Package? {
         purchases.packages.first { $0.identifier == selectedPackageID }
@@ -642,6 +784,8 @@ struct PaywallScreen: View {
                     } else {
                         configurationNotice
                     }
+
+                    monthlyExportOption
 
                     if let message = purchases.message {
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -732,7 +876,70 @@ struct PaywallScreen: View {
         .sheet(isPresented: $showsTermsOfUse) {
             MemoriesTermsOfUseView()
         }
+        .sheet(isPresented: $showsAccount) {
+            AccountCenterView(context: .sharing)
+                .environmentObject(account)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+        }
+        .fullScreenCover(item: $celebration) { kind in
+            ExportUnlockSuccessView(
+                kind: kind,
+                remainingMonthlyExports: kind == .monthlyGift
+                    ? account.monthlyExportAllowance.remaining
+                    : nil,
+                continueAction: {
+                    celebration = nil
+                    resumeIfUnlockedByOffer()
+                },
+                laterAction: {
+                    celebration = nil
+                    model.keepEditingInsteadOfUpgrading()
+                }
+            )
+        }
         .accessibilityIdentifier("paywall-screen")
+    }
+
+    @ViewBuilder
+    private var monthlyExportOption: some View {
+        if account.isSignedIn, account.monthlyExportAllowance.remaining > 0 {
+            Button {
+                claimMonthlyExport()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "gift.fill")
+                        .foregroundStyle(TR.keep)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Use a free full export")
+                            .font(TR.ui(14, weight: .semibold))
+                        Text("\(account.monthlyExportAllowance.remaining) of 3 left this month")
+                            .font(TR.ui(11))
+                            .foregroundStyle(.white.opacity(0.54))
+                    }
+                    Spacer()
+                    Image(systemName: "arrow.right")
+                        .foregroundStyle(.white.opacity(0.42))
+                }
+                .padding(16)
+                .glassCard(cornerRadius: 18, highlighted: true)
+            }
+            .buttonStyle(TactileButtonStyle())
+            .disabled(account.isBusy || purchases.isPurchasing)
+            .accessibilityIdentifier("use-monthly-free-export")
+        } else if !account.isSignedIn {
+            Button {
+                showsAccount = true
+            } label: {
+                Label("Sign in for 3 free full exports each month", systemImage: "person.crop.circle.badge.plus")
+                    .font(TR.ui(12, weight: .semibold))
+                    .foregroundStyle(TR.keep)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private func packageRow(_ package: Package) -> some View {
@@ -825,8 +1032,16 @@ struct PaywallScreen: View {
         guard let package = selectedPackage else { return }
         Task {
             if await purchases.purchase(package, unlockingStoryID: model.exportStoryID) {
-                resumeIfUnlocked()
+                guard purchases.hasFullExportAccess(for: model.exportStoryID) else { return }
+                celebration = .storyPass
             }
+        }
+    }
+
+    private func claimMonthlyExport() {
+        Task {
+            guard await account.claimMonthlyExport(storyID: model.exportStoryID) else { return }
+            celebration = .monthlyGift
         }
     }
 
@@ -836,6 +1051,12 @@ struct PaywallScreen: View {
 
     private func resumeIfUnlocked() {
         guard purchases.hasFullExportAccess(for: model.exportStoryID), !didResumeExport else { return }
+        didResumeExport = true
+        model.resumePendingExportAfterPurchase()
+    }
+
+    private func resumeIfUnlockedByOffer() {
+        guard !didResumeExport else { return }
         didResumeExport = true
         model.resumePendingExportAfterPurchase()
     }
