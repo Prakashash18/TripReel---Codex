@@ -227,13 +227,12 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
     }
 
-    func testPaywallExplainsTheFreeLimitAndExportsItImmediately() {
+    func testPaywallShowsClearExportChoicesAndExportsPreview() {
         launchApp(at: "paywall")
 
         XCTAssertTrue(screen("paywall-screen").waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Keep every moment"].exists)
-        XCTAssertTrue(screen("paywall-free-summary").exists)
-        XCTAssertTrue(screen("full-story-highlight").exists)
+        XCTAssertTrue(app.staticTexts["Choose your export"].exists)
+        XCTAssertTrue(app.staticTexts["The complete film in 1080p, without a watermark."].exists)
         let freeExport = screen("export-free-from-paywall")
         XCTAssertTrue(freeExport.exists)
 

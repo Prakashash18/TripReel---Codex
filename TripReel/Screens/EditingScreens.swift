@@ -51,7 +51,7 @@ struct FirstWatchScreen: View {
     }
 
     private var storyPassPrice: String? {
-        purchases.storyPassPackage?.localizedPriceString
+        purchases.storyPassPackage.flatMap { purchases.displayPrice(for: $0) }
     }
 
     private var holdDriftAnimation: Animation? {

@@ -1,5 +1,6 @@
 import Foundation
 import RevenueCat
+import StoreKit
 
 struct ExportPremiumRequirement: Equatable, Sendable {
     let photoCount: Int
@@ -70,6 +71,7 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isPurchasing = false
     @Published private(set) var message: String?
+    @Published private(set) var storefrontCurrencyCode: String?
 
     let storyPassPackageIdentifier: String
 
@@ -127,6 +129,7 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject {
         defer { isLoading = false }
 
         do {
+            storefrontCurrencyCode = await Storefront.current?.currency?.identifier
             let offerings = try await Purchases.shared.offerings()
             packages = Self.sortedPackages(from: offerings.current)
                 .filter(isStoryPass)
@@ -166,6 +169,20 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject {
 
     var storyPassPackage: Package? {
         packages.first(where: isStoryPass)
+    }
+
+    /// Sandbox product metadata may disagree with Apple's final payment sheet.
+    /// Never show a number when its storefront currency cannot be verified.
+    func displayPrice(for package: Package) -> String? {
+        if Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt" {
+            return nil
+        }
+        guard let storefrontCurrencyCode,
+              let productCurrencyCode = package.storeProduct.currencyCode,
+              storefrontCurrencyCode.caseInsensitiveCompare(productCurrencyCode) == .orderedSame else {
+            return nil
+        }
+        return package.localizedPriceString
     }
 
     func hasFullExportAccess(for storyID: String) -> Bool {
