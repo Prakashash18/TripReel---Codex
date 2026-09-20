@@ -1,5 +1,6 @@
 import AuthenticationServices
 import SwiftUI
+import UIKit
 
 enum AccountPresentationContext {
     case account
@@ -193,6 +194,7 @@ struct AccountCenterView: View {
 private struct SharedMemoryRow: View {
     @EnvironmentObject private var account: MemoryAccountService
     let memory: SharedMemory
+    @State private var copyConfirmation: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
@@ -214,13 +216,24 @@ private struct SharedMemoryRow: View {
 
             HStack(spacing: 16) {
                 if let url = memory.shareURL {
-                    ShareLink(
-                        item: url,
-                        subject: Text("Watch \(memory.title)"),
-                        message: Text(memory.shareMessage),
-                        preview: SharePreview("“\(memory.title)” — made with Memories")
-                    ) {
-                        Label("Share", systemImage: "square.and.arrow.up")
+                    ShareLink(item: url) {
+                        Label("Share link", systemImage: "square.and.arrow.up")
+                    }
+                    Menu {
+                        Button("Copy link", systemImage: "link") {
+                            UIPasteboard.general.url = url
+                            copyConfirmation = "Link copied"
+                        }
+                        Button("Copy invitation", systemImage: "text.quote") {
+                            UIPasteboard.general.string = MemoryShareCopy.invitation(
+                                title: memory.title,
+                                url: url,
+                                expiry: memory.daysRemaining == 0 ? "today" : "in \(memory.daysRemaining) day\(memory.daysRemaining == 1 ? "" : "s")"
+                            )
+                            copyConfirmation = "Invitation copied"
+                        }
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
                     }
                 }
                 Button(role: .destructive) {
@@ -230,6 +243,12 @@ private struct SharedMemoryRow: View {
                 }
             }
             .font(TR.ui(12, weight: .semibold))
+            if let copyConfirmation {
+                Text(copyConfirmation)
+                    .font(TR.ui(11, weight: .semibold))
+                    .foregroundStyle(TR.keep)
+                    .accessibilityAddTraits(.updatesFrequently)
+            }
         }
         .foregroundStyle(TR.cream)
         .padding(17)
@@ -246,6 +265,7 @@ struct MemoryLinkReadySheet: View {
     @Environment(\.dismiss) private var dismiss
     let title: String
     let url: URL
+    @State private var copyConfirmation: String?
 
     var body: some View {
         ZStack {
@@ -266,16 +286,31 @@ struct MemoryLinkReadySheet: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 18)
                 Spacer()
-                ShareLink(
-                    item: url,
-                    subject: Text("Watch \(title)"),
-                    message: Text(shareMessage),
-                    preview: SharePreview("“\(title)” — made with Memories")
-                ) {
+                ShareLink(item: url) {
                     Label("Share link", systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(CreamButtonStyle())
+                HStack(spacing: 18) {
+                    Button("Copy link") {
+                        UIPasteboard.general.url = url
+                        copyConfirmation = "Link copied"
+                    }
+                    Button("Copy invitation") {
+                        UIPasteboard.general.string = MemoryShareCopy.invitation(
+                            title: title,
+                            url: url,
+                            expiry: "in 7 days"
+                        )
+                        copyConfirmation = "Invitation copied"
+                    }
+                }
+                .font(TR.ui(13, weight: .semibold))
+                .foregroundStyle(TR.accent)
+                Text(copyConfirmation ?? "For Facebook posts, copy the link and paste it into your caption.")
+                    .font(TR.ui(11))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .multilineTextAlignment(.center)
                 Button("Done") { dismiss() }
                     .font(TR.ui(14, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.58))
@@ -284,16 +319,10 @@ struct MemoryLinkReadySheet: View {
         }
     }
 
-    private var shareMessage: String {
-        "I made “\(title)” with Memories. Watch it before this private link expires in 7 days."
-    }
 }
 
-private extension SharedMemory {
-    var shareMessage: String {
-        let expiry = daysRemaining == 0
-            ? "today"
-            : "in \(daysRemaining) day\(daysRemaining == 1 ? "" : "s")"
-        return "I made “\(title)” with Memories. Watch it before this private link expires \(expiry)."
+private enum MemoryShareCopy {
+    static func invitation(title: String, url: URL, expiry: String) -> String {
+        "I made “\(title)” with Memories. Watch it before this private link expires \(expiry):\n\(url.absoluteString)"
     }
 }
