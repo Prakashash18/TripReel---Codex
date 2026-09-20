@@ -121,6 +121,8 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
         XCTAssertTrue(screen("film-ready-save-status").exists)
+        XCTAssertTrue(screen("film-ready-video-status").exists)
+        XCTAssertTrue(screen("film-ready-link-status").exists)
         XCTAssertTrue(screen("share-video-button").exists)
         XCTAssertTrue(screen("share-link-button").exists)
     }
@@ -240,6 +242,10 @@ final class TripReelFlowUITests: XCTestCase {
         freeExport.tap()
         XCTAssertTrue(screen("rendering-screen").waitForExistence(timeout: 3))
         XCTAssertTrue(screen("film-ready-screen").waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Video not saved to Photos"].exists)
+        XCTAssertTrue(app.staticTexts["Share link not created"].exists)
+        XCTAssertTrue(screen("save-film").exists)
+        XCTAssertTrue(screen("share-link-button").exists)
     }
 
     func testAIConsentComesBeforeDirectionAndDeclineReturnsSafely() {

@@ -3,6 +3,7 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showsUnsavedExportWarning = false
 
     var body: some View {
         ZStack {
@@ -73,11 +74,11 @@ struct RootView: View {
                           value.startLocation.x <= 24,
                           value.translation.width >= 72,
                           abs(value.translation.height) < 54 else { return }
-                    model.navigateBack()
+                    navigateBackWithSaveReminder()
                 }
         )
         .accessibilityAction(.escape) {
-            if model.canNavigateBack { model.navigateBack() }
+            if model.canNavigateBack { navigateBackWithSaveReminder() }
         }
         .background(Color.black)
         .foregroundStyle(TR.cream)
@@ -85,7 +86,7 @@ struct RootView: View {
         .overlay(alignment: .topLeading) {
             if model.canNavigateBack {
                 Button {
-                    model.navigateBack()
+                    navigateBackWithSaveReminder()
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 14, weight: .bold))
@@ -118,6 +119,16 @@ struct RootView: View {
             }
         } message: {
             Text(model.libraryErrorMessage ?? "")
+        }
+        .confirmationDialog(
+            "Video not saved to Photos",
+            isPresented: $showsUnsavedExportWarning,
+            titleVisibility: .visible
+        ) {
+            Button("Go back without saving", role: .destructive) { model.navigateBack() }
+            Button("Keep this screen", role: .cancel) { }
+        } message: {
+            Text("This export is temporary. Save it to Photos if you want to keep it.")
         }
         .sheet(isPresented: $model.isCloudAnalysisConsentPresented) {
             CloudAnalysisConsentView(
@@ -163,5 +174,15 @@ struct RootView: View {
             }
         }
         .animation(reduceMotion ? .easeInOut(duration: 0.16) : TRMotion.overlay, value: model.isAnalyzingPhotos)
+    }
+
+    private func navigateBackWithSaveReminder() {
+        guard model.screen == .done,
+              model.exportedVideoURL != nil,
+              model.exportSaveMessage == nil else {
+            model.navigateBack()
+            return
+        }
+        showsUnsavedExportWarning = true
     }
 }

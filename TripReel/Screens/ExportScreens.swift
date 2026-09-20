@@ -1054,7 +1054,9 @@ struct FilmReadyScreen: View {
     @State private var sharePayload: MP4SharePayload?
     @State private var showsAccount = false
     @State private var shareLink: URL?
+    @State private var createdShareLink: URL?
     @State private var isCreatingLink = false
+    @State private var showsLeaveWithoutSaving = false
 
     var body: some View {
         ZStack {
@@ -1063,10 +1065,8 @@ struct FilmReadyScreen: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
                     MetadataText(
-                        text: model.exportSaveMessage == nil
-                            ? "MEMORY READY · NOT SAVED YET"
-                            : "SAVED TO PHOTOS",
-                        color: model.exportSaveMessage == nil ? TR.accent : TR.keep
+                        text: "MEMORY READY",
+                        color: TR.accent
                     )
                     .padding(.top, 16)
                     .accessibilityIdentifier("film-ready-save-status")
@@ -1084,6 +1084,8 @@ struct FilmReadyScreen: View {
                             .foregroundStyle(.white.opacity(0.48))
                             .multilineTextAlignment(.center)
                     }
+
+                    saveAndLinkStatus
 
                     Button {
                         saveToPhotos()
@@ -1113,7 +1115,10 @@ struct FilmReadyScreen: View {
                         } label: {
                             HStack(spacing: 7) {
                                 if isCreatingLink { ProgressView().controlSize(.small) }
-                                Label("Share link", systemImage: "link")
+                                Label(
+                                    createdShareLink == nil ? "Create share link" : "View share link",
+                                    systemImage: "link"
+                                )
                             }
                             .frame(maxWidth: .infinity)
                         }
@@ -1122,7 +1127,7 @@ struct FilmReadyScreen: View {
                         .accessibilityIdentifier("share-link-button")
                     }
 
-                    Text("Memories does not keep a permanent copy. Share links expire after 7 days, so save the video if you want to keep it.")
+                    Text("Share video sends the file; it does not create a link. Links expire after 7 days, so save to Photos to keep your film.")
                         .font(TR.ui(11))
                         .foregroundStyle(.white.opacity(0.44))
                         .multilineTextAlignment(.center)
@@ -1130,7 +1135,11 @@ struct FilmReadyScreen: View {
                         .padding(.horizontal, 8)
 
                     Button {
-                        model.restart()
+                        if model.exportedVideoURL != nil && model.exportSaveMessage == nil {
+                            showsLeaveWithoutSaving = true
+                        } else {
+                            model.restart()
+                        }
                     } label: {
                         HStack(spacing: 12) {
                             PhotoAssetView(source: .bundled("hoi-an-lanes"))
@@ -1200,7 +1209,40 @@ struct FilmReadyScreen: View {
         } message: {
             Text(model.exportErrorMessage ?? "Please try again.")
         }
+        .confirmationDialog(
+            "Video not saved to Photos",
+            isPresented: $showsLeaveWithoutSaving,
+            titleVisibility: .visible
+        ) {
+            Button("Save video to Photos") { saveToPhotos() }
+            Button("Leave without saving", role: .destructive) { model.restart() }
+            Button("Stay here", role: .cancel) { }
+        } message: {
+            Text("This export is temporary. A share link, if created, expires after 7 days.")
+        }
         .accessibilityIdentifier("film-ready-screen")
+    }
+
+    private var saveAndLinkStatus: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(
+                model.exportSaveMessage == nil ? "Video not saved to Photos" : "Video saved to Photos",
+                systemImage: model.exportSaveMessage == nil ? "exclamationmark.circle" : "checkmark.circle.fill"
+            )
+            .foregroundStyle(model.exportSaveMessage == nil ? TR.accent : TR.keep)
+            .accessibilityIdentifier("film-ready-video-status")
+
+            Label(
+                createdShareLink == nil ? "Share link not created" : "Share link created · expires in 7 days",
+                systemImage: createdShareLink == nil ? "link.badge.plus" : "checkmark.circle.fill"
+            )
+            .foregroundStyle(createdShareLink == nil ? .white.opacity(0.72) : TR.keep)
+            .accessibilityIdentifier("film-ready-link-status")
+        }
+        .font(TR.ui(12, weight: .medium))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(15)
+        .glassCard(cornerRadius: 17)
     }
 
     private var memoryCard: some View {
@@ -1239,6 +1281,10 @@ struct FilmReadyScreen: View {
     }
 
     private func createShareLink() {
+        if let createdShareLink {
+            shareLink = createdShareLink
+            return
+        }
         guard let videoURL = model.exportedVideoURL else { return }
         guard account.isSignedIn else {
             showsAccount = true
@@ -1253,6 +1299,7 @@ struct FilmReadyScreen: View {
                 isPaid: model.exportQuality == .hd
             )
             isCreatingLink = false
+            createdShareLink = url
             shareLink = url
         }
     }
