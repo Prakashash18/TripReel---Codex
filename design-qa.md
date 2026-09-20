@@ -49,3 +49,40 @@ Public memory links, accounts, view counts, and earned-pass referrals require ba
 ## Final result
 
 passed
+
+---
+
+# First Cut / AI Director design QA
+
+- Source visual truth: `/Users/prakash/.codex/generated_images/01a06f8e-3baf-7df1-9a63-285792e8cab1/exec-15465587-be5d-48f2-8a7c-acf74e8e2ca9.png`
+- Native implementation capture: `/tmp/memories-first-cut-option2.png`
+- State: First Cut decision, Da Nang demo memory, iPhone 16 Pro simulator on iOS 18.3.1.
+- Viewport: approximately 402 × 874 pt at 3×; native screenshot 1206 × 2622 px. Generated concept 853 × 1844 px, approximately the same aspect ratio. Compared app-owned content, allowing for iOS status and home areas in the native capture.
+- Full-view evidence: the selected concept and simulator capture were opened together in the same image comparison. Both use a full-bleed memory image, large serif First Cut title, filmstrip, one cream primary action, and a distinct lower AI invitation.
+- Focused-region evidence: the title, action labels, privacy copy, and bottom panel were legible in the full-size image views; a separate crop was not required.
+
+## Findings
+
+- No actionable P0/P1/P2 visual mismatch. The implementation retains the concept's local-first hierarchy and optional AI branch.
+- P3, expected content difference: the native screen uses the person's actual selected memory image, not the mockup's stock boat image. This is intentional and more truthful to the product.
+- P3, intentional product addition: “Edit this cut myself” is a quiet supporting action because manual editing already exists in this flow.
+
+## Fidelity checks
+
+- Fonts and typography: existing Memories serif display and sans/mono UI styles match the concept's editorial hierarchy. The on-device and optional-AI labels remain readable.
+- Spacing and layout: filmstrip, main action, and lower AI panel fit without clipping on the tested iPhone viewport. The native status/home areas account for the small vertical shift from the app-content-only mockup.
+- Colors and tokens: existing warm black, cream, gold, and restrained green status styles are preserved. AI is differentiated by copy and placement as well as color.
+- Imagery: the dynamic trip cover and first-cut thumbnails replace mock travel images while preserving the photographic emphasis.
+- Copy: the First Cut explicitly says it is made on the iPhone. AI is labeled optional, requires selected moments and a clue, and states that previews are sent only with permission.
+
+## Interaction checks
+
+- iPhone app build passed.
+- Focused UI tests passed for the First Cut options, AI consent, and the unsaved-video exit choices.
+- Live Supabase account re-download requires a signed-in TestFlight/device check with an active linked video; it was not exercised by the demo simulator.
+
+## Comparison history
+
+1. Initial source-versus-simulator comparison found no P0/P1/P2 visual issues. No visual iteration was needed.
+
+final result: passed

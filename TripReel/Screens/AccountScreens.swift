@@ -58,7 +58,7 @@ struct AccountCenterView: View {
                 .font(TR.display(39))
                 .tracking(-0.6)
             Text(account.isSignedIn
-                 ? "Links stay together here and expire automatically after seven days."
+                 ? "Share or save a linked video again before it expires in seven days."
                  : "Sign in to create a private share link for Messages or social media. Local saving never needs an account.")
                 .font(TR.ui(15))
                 .foregroundStyle(.white.opacity(0.62))
@@ -215,9 +215,28 @@ private struct SharedMemoryRow: View {
             }
 
             HStack(spacing: 16) {
+                Button {
+                    Task { await account.downloadToPhotos(memory) }
+                } label: {
+                    if account.downloadingMemoryID == memory.id {
+                        ProgressView()
+                            .tint(TR.cream)
+                            .accessibilityLabel("Downloading video")
+                    } else {
+                        Label(
+                            memory.savedToPhoneAt == nil ? "Save video" : "Download again",
+                            systemImage: "square.and.arrow.down"
+                        )
+                    }
+                }
+                .disabled(account.downloadingMemoryID != nil)
+                .accessibilityIdentifier("account-download-video-\(memory.id.uuidString)")
+
+                Spacer(minLength: 0)
+
                 if let url = memory.shareURL {
                     ShareLink(item: url) {
-                        Label("Share link", systemImage: "square.and.arrow.up")
+                        Label("Share", systemImage: "square.and.arrow.up")
                     }
                     Menu {
                         Button("Copy link", systemImage: "link") {
@@ -232,14 +251,13 @@ private struct SharedMemoryRow: View {
                             )
                             copyConfirmation = "Invitation copied"
                         }
+                        Divider()
+                        Button("Remove link", systemImage: "trash", role: .destructive) {
+                            Task { await account.revoke(memory) }
+                        }
                     } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
+                        Label("More", systemImage: "ellipsis.circle")
                     }
-                }
-                Button(role: .destructive) {
-                    Task { await account.revoke(memory) }
-                } label: {
-                    Label("Remove link", systemImage: "trash")
                 }
             }
             .font(TR.ui(12, weight: .semibold))

@@ -1050,13 +1050,14 @@ struct RenderingScreen: View {
 struct FilmReadyScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @EnvironmentObject private var account: MemoryAccountService
+    let createShareLinkRequest: Int
     @State private var readyFeedback = false
     @State private var sharePayload: MP4SharePayload?
     @State private var showsAccount = false
     @State private var shareLink: URL?
-    @State private var createdShareLink: URL?
     @State private var isCreatingLink = false
     @State private var showsLeaveWithoutSaving = false
+    @State private var wantsLinkAfterSignIn = false
 
     var body: some View {
         ZStack {
@@ -1116,7 +1117,7 @@ struct FilmReadyScreen: View {
                             HStack(spacing: 7) {
                                 if isCreatingLink { ProgressView().controlSize(.small) }
                                 Label(
-                                    createdShareLink == nil ? "Create share link" : "View share link",
+                                    model.exportShareLinkURL == nil ? "Create share link" : "View share link",
                                     systemImage: "link"
                                 )
                             }
@@ -1127,7 +1128,7 @@ struct FilmReadyScreen: View {
                         .accessibilityIdentifier("share-link-button")
                     }
 
-                    Text("Share video sends the file; it does not create a link. Links expire after 7 days, so save to Photos to keep your film.")
+                    Text("Share video sends the file but keeps no copy here. A link lasts 7 days; saving to Photos is permanent.")
                         .font(TR.ui(11))
                         .foregroundStyle(.white.opacity(0.44))
                         .multilineTextAlignment(.center)
@@ -1135,7 +1136,8 @@ struct FilmReadyScreen: View {
                         .padding(.horizontal, 8)
 
                     Button {
-                        if model.exportedVideoURL != nil && model.exportSaveMessage == nil {
+                        if model.exportSaveMessage == nil &&
+                            model.exportShareLinkURL == nil {
                             showsLeaveWithoutSaving = true
                         } else {
                             model.restart()
@@ -1168,6 +1170,9 @@ struct FilmReadyScreen: View {
         .onAppear {
             readyFeedback.toggle()
         }
+        .onChange(of: createShareLinkRequest) { _, _ in
+            createShareLink()
+        }
         .sensoryFeedback(.success, trigger: readyFeedback)
         .sheet(item: $sharePayload) { payload in
             MP4ShareController(payload: payload) {
@@ -1175,7 +1180,12 @@ struct FilmReadyScreen: View {
             }
             .ignoresSafeArea()
         }
-        .sheet(isPresented: $showsAccount) {
+        .sheet(isPresented: $showsAccount, onDismiss: {
+            if wantsLinkAfterSignIn && account.isSignedIn {
+                wantsLinkAfterSignIn = false
+                createShareLink()
+            }
+        }) {
             AccountCenterView(context: .sharing)
                 .environmentObject(account)
                 .presentationDetents([.large])
@@ -1210,21 +1220,30 @@ struct FilmReadyScreen: View {
             Text(model.exportErrorMessage ?? "Please try again.")
         }
         .confirmationDialog(
-            "Video not saved to Photos",
+            "Keep this video?",
             isPresented: $showsLeaveWithoutSaving,
             titleVisibility: .visible
         ) {
             Button("Save video to Photos") { saveToPhotos() }
-            Button("Leave without saving", role: .destructive) { model.restart() }
+            Button("Create 7-day link") { createShareLink() }
+            Button("Leave without keeping", role: .destructive) { model.restart() }
             Button("Stay here", role: .cancel) { }
         } message: {
-            Text("This export is temporary. A share link, if created, expires after 7 days.")
+            Text("This render is temporary. Save a permanent copy, or create a seven-day link in your account before leaving.")
         }
         .accessibilityIdentifier("film-ready-screen")
     }
 
     private var saveAndLinkStatus: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Text(
+                model.exportSaveMessage != nil ? "KEPT ON YOUR IPHONE" :
+                    model.exportShareLinkURL != nil ? "LINKED FOR SEVEN DAYS" : "NOT KEPT YET"
+            )
+            .font(TR.mono(10, weight: .semibold))
+            .tracking(1)
+            .foregroundStyle(model.exportSaveMessage != nil || model.exportShareLinkURL != nil ? TR.keep : TR.accent)
+
             Label(
                 model.exportSaveMessage == nil ? "Video not saved to Photos" : "Video saved to Photos",
                 systemImage: model.exportSaveMessage == nil ? "exclamationmark.circle" : "checkmark.circle.fill"
@@ -1233,10 +1252,10 @@ struct FilmReadyScreen: View {
             .accessibilityIdentifier("film-ready-video-status")
 
             Label(
-                createdShareLink == nil ? "Share link not created" : "Share link created · expires in 7 days",
-                systemImage: createdShareLink == nil ? "link.badge.plus" : "checkmark.circle.fill"
+                model.exportShareLinkURL == nil ? "Share link not created" : "In your account · available for 7 days",
+                systemImage: model.exportShareLinkURL == nil ? "link.badge.plus" : "checkmark.circle.fill"
             )
-            .foregroundStyle(createdShareLink == nil ? .white.opacity(0.72) : TR.keep)
+            .foregroundStyle(model.exportShareLinkURL == nil ? .white.opacity(0.72) : TR.keep)
             .accessibilityIdentifier("film-ready-link-status")
         }
         .font(TR.ui(12, weight: .medium))
@@ -1281,12 +1300,13 @@ struct FilmReadyScreen: View {
     }
 
     private func createShareLink() {
-        if let createdShareLink {
-            shareLink = createdShareLink
+        if let existingLink = model.exportShareLinkURL {
+            shareLink = existingLink
             return
         }
         guard let videoURL = model.exportedVideoURL else { return }
         guard account.isSignedIn else {
+            wantsLinkAfterSignIn = true
             showsAccount = true
             return
         }
@@ -1299,7 +1319,7 @@ struct FilmReadyScreen: View {
                 isPaid: model.exportQuality == .hd
             )
             isCreatingLink = false
-            createdShareLink = url
+            if let url { model.recordExportShareLink(url) }
             shareLink = url
         }
     }

@@ -74,6 +74,16 @@ private struct NewSharedMemory: Encodable {
     }
 }
 
+private struct DownloadableMemory: Decodable {
+    let storagePath: String
+    let expiresAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case storagePath = "storage_path"
+        case expiresAt = "expires_at"
+    }
+}
+
 @MainActor
 final class MemoryAccountService: ObservableObject {
     @Published private(set) var userID: UUID?
@@ -82,6 +92,7 @@ final class MemoryAccountService: ObservableObject {
     @Published private(set) var monthlyExportAllowance = MonthlyExportAllowance.unavailable
     @Published private(set) var isLoadingMonthlyAllowance = false
     @Published private(set) var isBusy = false
+    @Published private(set) var downloadingMemoryID: UUID?
     @Published var message: String?
 
     let isConfigured: Bool
@@ -321,17 +332,80 @@ final class MemoryAccountService: ObservableObject {
 
     func markSavedToPhone(memoryID: UUID) async {
         guard let client else { return }
-        struct SavedMarker: Encodable { let saved_at: Date }
+        struct SavedMarker: Encodable {
+            let savedToPhoneAt: Date
+
+            enum CodingKeys: String, CodingKey {
+                case savedToPhoneAt = "saved_to_phone_at"
+            }
+        }
         do {
             try await client
                 .from("memories")
-                .update(SavedMarker(saved_at: Date()))
+                .update(SavedMarker(savedToPhoneAt: Date()))
                 .eq("id", value: memoryID)
                 .execute()
             await refreshMemories()
         } catch {
             // Saving to Photos succeeded. A cloud status refresh is optional
             // and must never turn that local success into an error.
+        }
+    }
+
+    /// A link is the only opt-in upload path. Its owner may save that same
+    /// private MP4 back to Photos while the seven-day record is still active.
+    func downloadToPhotos(_ memory: SharedMemory) async {
+        guard let client, let ownerID = userID else {
+            message = "Sign in to download this shared story."
+            return
+        }
+        guard memory.expiresAt > Date() else {
+            message = "This story has expired and can no longer be downloaded."
+            await refreshMemories()
+            return
+        }
+        guard downloadingMemoryID == nil else { return }
+
+        downloadingMemoryID = memory.id
+        message = nil
+        defer { downloadingMemoryID = nil }
+
+        do {
+            let stored: DownloadableMemory = try await client
+                .from("memories")
+                .select("storage_path,expires_at")
+                .eq("id", value: memory.id)
+                .eq("owner_id", value: ownerID)
+                .single()
+                .execute()
+                .value
+
+            guard stored.expiresAt > Date() else {
+                message = "This story has expired and can no longer be downloaded."
+                await refreshMemories()
+                return
+            }
+
+            let signedURL = try await client.storage
+                .from("memory-exports")
+                .createSignedURL(path: stored.storagePath, expiresIn: 300)
+            let (temporaryURL, response) = try await URLSession.shared.download(from: signedURL)
+            guard let response = response as? HTTPURLResponse,
+                  response.statusCode == 200 else {
+                message = "The story couldn't be downloaded. Please try again."
+                return
+            }
+
+            let localURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("Memories-Download-\(UUID().uuidString).mp4")
+            try FileManager.default.moveItem(at: temporaryURL, to: localURL)
+            defer { try? FileManager.default.removeItem(at: localURL) }
+
+            try await TripReelVideoExporter().saveToPhotoLibrary(localURL)
+            await markSavedToPhone(memoryID: memory.id)
+            message = "Saved to Photos. This copy is yours to keep."
+        } catch {
+            message = "Couldn't save this story. Check your connection and Photos access, then try again."
         }
     }
 

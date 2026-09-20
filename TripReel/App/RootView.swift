@@ -4,6 +4,7 @@ struct RootView: View {
     @EnvironmentObject private var model: TripReelModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsUnsavedExportWarning = false
+    @State private var createShareLinkRequest = 0
 
     var body: some View {
         ZStack {
@@ -51,7 +52,7 @@ struct RootView: View {
             case .rendering:
                 RenderingScreen()
             case .done:
-                FilmReadyScreen()
+                FilmReadyScreen(createShareLinkRequest: createShareLinkRequest)
             case .cleanup:
                 CleanupScreen()
             }
@@ -121,14 +122,18 @@ struct RootView: View {
             Text(model.libraryErrorMessage ?? "")
         }
         .confirmationDialog(
-            "Video not saved to Photos",
+            "Keep this video?",
             isPresented: $showsUnsavedExportWarning,
             titleVisibility: .visible
         ) {
-            Button("Go back without saving", role: .destructive) { model.navigateBack() }
-            Button("Keep this screen", role: .cancel) { }
+            Button("Save to Photos") {
+                Task { _ = await model.saveExportToPhotos() }
+            }
+            Button("Create 7-day link") { createShareLinkRequest &+= 1 }
+            Button("Leave without keeping", role: .destructive) { model.navigateBack() }
+            Button("Stay here", role: .cancel) { }
         } message: {
-            Text("This export is temporary. Save it to Photos if you want to keep it.")
+            Text("This render is temporary. Save a permanent copy, or create a seven-day link in your account before leaving.")
         }
         .sheet(isPresented: $model.isCloudAnalysisConsentPresented) {
             CloudAnalysisConsentView(
@@ -178,8 +183,8 @@ struct RootView: View {
 
     private func navigateBackWithSaveReminder() {
         guard model.screen == .done,
-              model.exportedVideoURL != nil,
-              model.exportSaveMessage == nil else {
+              model.exportSaveMessage == nil,
+              model.exportShareLinkURL == nil else {
             model.navigateBack()
             return
         }

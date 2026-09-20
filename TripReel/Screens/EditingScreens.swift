@@ -255,8 +255,12 @@ struct FirstWatchScreen: View {
     }
 
     private var endOfFilmOffer: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
+                Label("FIRST CUT · ON THIS IPHONE", systemImage: "iphone")
+                    .font(TR.mono(10, weight: .semibold))
+                    .tracking(1)
+                    .foregroundStyle(TR.keep)
                 Text(model.firstCutFilmTitle)
                     .font(TR.display(36))
                     .tracking(-0.5)
@@ -282,6 +286,28 @@ struct FirstWatchScreen: View {
             .accessibilityIdentifier("first-watch-keep-button")
             .accessibilityHidden(model.isStoryPassPresented)
 
+            Button {
+                model.openAICutDirections()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(TR.accent)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Want a different story?")
+                            .font(TR.ui(13, weight: .semibold))
+                        Text("Try optional AI Director · your First Cut stays safe")
+                            .font(TR.ui(10))
+                            .foregroundStyle(.white.opacity(0.66))
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "arrow.right")
+                        .foregroundStyle(TR.accent)
+                }
+                .padding(14)
+                .background(TR.sheet.opacity(0.88), in: RoundedRectangle(cornerRadius: 15))
+            }
+            .accessibilityIdentifier("first-watch-another-take-button")
+
             HStack(spacing: 20) {
                 quietAction("Watch again", identifier: "first-watch-replay-button") {
                     playbackComplete = false
@@ -292,10 +318,7 @@ struct FirstWatchScreen: View {
                         restart: true
                     )
                 }
-                quietAction("Another take", identifier: "first-watch-another-take-button") {
-                    model.openAICutDirections()
-                }
-                quietAction("Change it", identifier: "first-watch-change-button") {
+                quietAction("Edit First Cut", identifier: "first-watch-change-button") {
                     model.continueFromFirstWatch()
                 }
             }
@@ -613,86 +636,163 @@ private struct StoryPassWithheldStrip: View {
 struct FirstCutOptionsScreen: View {
     @EnvironmentObject private var model: TripReelModel
 
+    private var firstCutPhotos: [ReelPhoto] {
+        model.firstCutSnapshot?.keptPhotos ?? model.keptPhotos
+    }
+
     var body: some View {
-        ZStack {
-            WarmBackground(variant: .export)
-
-            VStack(alignment: .leading, spacing: 0) {
-                ScreenHeading(
-                    eyebrow: "First Cut · created on-device",
-                    title: "Where to next?"
-                )
-                .padding(.leading, 48)
-                .trEntrance(0, distance: 8)
-                .accessibilityIdentifier("first-cut-options-screen")
-
-                Text("Your original First Cut stays safe whichever route you choose.")
-                    .font(TR.ui(14))
-                    .foregroundStyle(.white.opacity(0.62))
-                    .lineSpacing(4)
-                    .padding(.top, 14)
-                    .trEntrance(1, distance: 8)
-
-                Spacer()
-
-                VStack(spacing: 12) {
-                    Button {
-                        model.openAICutDirections()
-                    } label: {
-                        VStack(spacing: 3) {
-                            Label("Improve with AI", systemImage: "sparkles")
-                            Text("Let AI reconsider safe moments and direct another cut")
-                                .font(TR.ui(10))
-                                .foregroundStyle(TR.ink.opacity(0.58))
-                        }
-                    }
-                    .buttonStyle(CreamButtonStyle())
-                    .accessibilityHint("Choose a direction for an optional alternative cut")
-                    .accessibilityIdentifier("improve-with-ai-button")
-
-                    Button {
-                        model.editCut(
-                            model.selectedCutSource == .working ? .working : .firstCut
-                        )
-                    } label: {
-                        VStack(spacing: 3) {
-                            Text("Edit Myself")
-                            Text("Change moments, framing, titles, music and pace")
-                                .font(TR.ui(10))
-                                .foregroundStyle(.white.opacity(0.52))
-                        }
-                    }
-                    .buttonStyle(GlassButtonStyle())
-                    .accessibilityIdentifier("edit-film-button")
-
-                    Button {
-                        model.keepFirstCutForExport()
-                    } label: {
-                        Label("Export This", systemImage: "checkmark.circle.fill")
-                            .font(TR.ui(14, weight: .semibold))
-                            .foregroundStyle(TR.cream.opacity(0.84))
-                            .frame(maxWidth: .infinity)
-                            .frame(minHeight: 46)
-                            .background(.white.opacity(0.055))
-                            .overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 1))
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(TactileButtonStyle(pressedScale: 0.97))
-                    .accessibilityHint("Skips editing and opens export with the First Cut")
-                    .accessibilityIdentifier("export-first-cut-button")
+        GeometryReader { geometry in
+            ZStack {
+                if let cover = firstCutPhotos.first {
+                    PhotoAssetView(source: cover.source)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                        .ignoresSafeArea()
+                } else {
+                    WarmBackground(variant: .export)
                 }
-                .trEntrance(2, distance: 12)
 
-                Label("Created privately on your iPhone", systemImage: "checkmark.shield")
-                    .font(TR.ui(11, weight: .medium))
-                    .foregroundStyle(TR.keep.opacity(0.82))
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 18)
+                LinearGradient(
+                    colors: [.black.opacity(0.73), .black.opacity(0.10), .black.opacity(0.84), .black],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                MetadataText(text: model.tripPlace.uppercased(), color: TR.cream.opacity(0.86))
+                                Text(model.tripDates)
+                                    .font(TR.ui(11))
+                                    .foregroundStyle(TR.cream.opacity(0.65))
+                            }
+                            Spacer()
+                        }
+                        .padding(.leading, 48)
+                        .trEntrance(0, distance: 8)
+
+                        Text("Your\nFirst Cut")
+                            .font(TR.display(48))
+                            .tracking(-1.3)
+                            .lineSpacing(-6)
+                            .padding(.top, 22)
+                            .accessibilityIdentifier("first-cut-options-screen")
+
+                        Text("A story from your moments, made privately on your iPhone.")
+                            .font(TR.ui(14))
+                            .foregroundStyle(TR.cream.opacity(0.80))
+                            .padding(.top, 9)
+
+                        Spacer(minLength: 38)
+
+                        Button {
+                            model.navigateBack()
+                        } label: {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 19, weight: .semibold))
+                                .foregroundStyle(TR.cream)
+                                .frame(width: 60, height: 60)
+                                .background(.black.opacity(0.55), in: Circle())
+                                .overlay(Circle().stroke(TR.cream.opacity(0.67), lineWidth: 1))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .accessibilityLabel("Watch First Cut again")
+                        .accessibilityIdentifier("replay-first-cut-button")
+
+                        Spacer(minLength: 38)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 7) {
+                                ForEach(Array(firstCutPhotos.prefix(6))) { photo in
+                                    PhotoAssetView(source: photo.source)
+                                        .frame(width: 46, height: 58)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                            }
+                        }
+                        .accessibilityHidden(true)
+
+                        HStack {
+                            MetadataText(text: "FIRST CUT · ON THIS IPHONE", color: TR.cream.opacity(0.88))
+                            Spacer()
+                            Text(model.firstCutDurationText)
+                                .font(TR.mono(11))
+                                .foregroundStyle(TR.cream.opacity(0.72))
+                        }
+                        .padding(.top, 11)
+
+                        Button {
+                            model.keepFirstCutForExport()
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Text("Use this film")
+                                Spacer()
+                                Image(systemName: "arrow.right")
+                            }
+                        }
+                        .buttonStyle(CreamButtonStyle())
+                        .padding(.top, 20)
+                        .accessibilityHint("Continue to export the private First Cut")
+                        .accessibilityIdentifier("export-first-cut-button")
+
+                        Button {
+                            model.editCut(model.selectedCutSource == .working ? .working : .firstCut)
+                        } label: {
+                            Label("Edit this cut myself", systemImage: "slider.horizontal.3")
+                                .font(TR.ui(12, weight: .semibold))
+                                .foregroundStyle(TR.cream.opacity(0.82))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 13)
+                        }
+                        .accessibilityIdentifier("edit-film-button")
+
+                        aiInvitation
+                            .padding(.top, 8)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 10)
+                    .padding(.bottom, 24)
+                    .frame(minHeight: geometry.size.height, alignment: .top)
+                }
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 12)
-            .padding(.bottom, 28)
         }
+    }
+
+    private var aiInvitation: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Label("AI DIRECTOR · OPTIONAL", systemImage: "sparkles")
+                .font(TR.mono(10, weight: .semibold))
+                .tracking(1)
+                .foregroundStyle(TR.accent)
+
+            Text("Want a different story?")
+                .font(TR.display(25))
+                .foregroundStyle(TR.cream)
+
+            Text("Choose moments and give a clue. Only selected previews are sent, and only with your permission.")
+                .font(TR.ui(12))
+                .foregroundStyle(TR.cream.opacity(0.70))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                model.openAICutDirections()
+            } label: {
+                Label("Explore AI Director", systemImage: "arrow.right")
+                    .font(TR.ui(13, weight: .semibold))
+                    .foregroundStyle(TR.accent)
+                    .padding(.top, 4)
+            }
+            .accessibilityHint("Create an optional second cut; your First Cut stays unchanged")
+            .accessibilityIdentifier("improve-with-ai-button")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .background(TR.sheet.opacity(0.96), in: RoundedRectangle(cornerRadius: 22))
+        .overlay(RoundedRectangle(cornerRadius: 22).stroke(TR.accent.opacity(0.25), lineWidth: 1))
     }
 }
 

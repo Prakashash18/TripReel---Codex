@@ -2417,6 +2417,7 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var photoAnalysisFollowUp: PhotoAnalysisFollowUp?
     @Published var isSmartSelectionReviewPresented = false
     @Published private(set) var exportedVideoURL: URL?
+    @Published private(set) var exportShareLinkURL: URL?
     @Published private(set) var activeExportPhotos: [ReelPhoto] = []
     @Published private(set) var activeExportTitleCards: [MontageTitleCard] = []
     @Published private(set) var activeExportTextOverlays: [MontageTextOverlay] = []
@@ -5422,6 +5423,7 @@ final class TripReelModel: ObservableObject {
         exportHandoff = .normal
         pendingExportIntent = nil
         exportedVideoURL = nil
+        exportShareLinkURL = nil
         activeExportPhotos = []
         activeExportTitleCards = []
         activeExportTextOverlays = []
@@ -5749,6 +5751,7 @@ final class TripReelModel: ObservableObject {
         activeExportTextOverlays = content.textOverlays
         activeExportDurationSeconds = content.durationSeconds
         exportedVideoURL = nil
+        exportShareLinkURL = nil
         renderProgress = 0
         exportErrorMessage = nil
         exportErrorTitle = "Export couldn't finish"
@@ -5920,6 +5923,10 @@ final class TripReelModel: ObservableObject {
         exportErrorTitle = "Export couldn't finish"
         exportCanRetryPhotoDownload = false
         exportSaveMessage = nil
+    }
+
+    func recordExportShareLink(_ url: URL) {
+        exportShareLinkURL = url
     }
 
     func restart() {
@@ -6106,6 +6113,7 @@ final class TripReelModel: ObservableObject {
         activeExportTextOverlays = []
         activeExportDurationSeconds = 0
         exportedVideoURL = nil
+        exportShareLinkURL = nil
         libraryPreviewPhotos = []
         libraryPhotoCount = 0
         selectedPhotoCount = 0

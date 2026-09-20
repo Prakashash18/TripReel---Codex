@@ -216,7 +216,7 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("improve-with-ai-button").exists)
         XCTAssertTrue(screen("edit-film-button").exists)
         XCTAssertTrue(screen("export-first-cut-button").exists)
-        XCTAssertTrue(app.staticTexts["Created privately on your iPhone"].exists)
+        XCTAssertTrue(app.staticTexts["FIRST CUT · ON THIS IPHONE"].exists)
     }
 
     func testSatisfiedUserCanExportFirstCutDirectlyAndReturn() {
@@ -246,12 +246,19 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Share link not created"].exists)
         XCTAssertTrue(screen("save-film").exists)
         XCTAssertTrue(screen("share-link-button").exists)
+
+        screen("app-back-button").tap()
+        XCTAssertTrue(app.buttons["Create 7-day link"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["Leave without keeping"].exists)
+        attachScreenshot(named: "Unsaved video exit choices")
+        app.buttons["Stay here"].tap()
+        XCTAssertTrue(screen("film-ready-screen").exists)
     }
 
     func testAIConsentComesBeforeDirectionAndDeclineReturnsSafely() {
         launchApp(at: "firstCutOptions")
         XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
-        button(startingWith: "Improve with AI").tap()
+        screen("improve-with-ai-button").tap()
         XCTAssertTrue(screen("cloud-analysis-consent").waitForExistence(timeout: 3))
         XCTAssertFalse(screen("ai-direction-screen").exists)
         XCTAssertTrue(
@@ -269,7 +276,7 @@ final class TripReelFlowUITests: XCTestCase {
     func testAIConsentThenLetsUserChooseExactPhotos() {
         launchApp(at: "firstCutOptions")
         XCTAssertTrue(screen("first-cut-options-screen").waitForExistence(timeout: 3))
-        button(startingWith: "Improve with AI").tap()
+        screen("improve-with-ai-button").tap()
         XCTAssertTrue(screen("cloud-analysis-consent").waitForExistence(timeout: 3))
 
         button(startingWith: "Allow & continue").tap()
