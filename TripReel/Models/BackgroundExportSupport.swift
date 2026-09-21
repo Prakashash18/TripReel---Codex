@@ -93,12 +93,10 @@ final class BackgroundExportSupport {
                         subtitle: "Preparing your video"
                     )
                     request.strategy = .fail
-                    if BGTaskScheduler.supportedResources.contains(.gpu) {
-                        request.requiredResources = .gpu
-                        record("requesting-background-gpu")
-                    } else {
-                        record("background-gpu-unsupported")
-                    }
+                    // The renderer deliberately uses the default CPU/network resources here.
+                    // Requesting `.gpu` requires a distribution entitlement that isn't
+                    // available in the current App Store provisioning profile.
+                    record("requesting-default-resources")
                     do {
                         try BGTaskScheduler.shared.submit(request)
                         record("continued-task-submitted")
