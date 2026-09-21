@@ -370,6 +370,9 @@ private struct SharedMemoryRow: View {
                             .font(TR.mono(9, weight: .semibold))
                             .tracking(0.9)
                             .foregroundStyle(memory.isPaid ? TR.accent : TR.keep)
+                        Text("Created \(creationText)")
+                            .font(TR.ui(10))
+                            .foregroundStyle(.white.opacity(0.46))
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 8) {
@@ -449,6 +452,10 @@ private struct SharedMemoryRow: View {
     private var durationText: String {
         let seconds = max(0, Int(memory.durationSeconds.rounded()))
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private var creationText: String {
+        memory.createdAt.formatted(date: .abbreviated, time: .shortened)
     }
 }
 

@@ -2594,7 +2594,12 @@ final class TripReelModel: ObservableObject {
             }
         }
         if !demoMode {
-            if let receipt = LocalCompletedExport.load() {
+            // Completed renders belong to the app's real local account. Tests and
+            // previews commonly provide an isolated UserDefaults suite; allowing
+            // those models to read the process-wide receipt makes parallel tests
+            // race with the recovery test and can incorrectly route to `.done`.
+            if preferenceStore === UserDefaults.standard,
+               let receipt = LocalCompletedExport.load() {
                 exportedVideoURL = receipt.fileURL
                 activeExportDurationSeconds = receipt.durationSeconds
                 exportQuality = receipt.isHD ? .hd : .standard

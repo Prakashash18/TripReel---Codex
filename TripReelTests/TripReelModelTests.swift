@@ -11,6 +11,58 @@ final class TripReelModelTests: XCTestCase {
         TripReelModel(arguments: [], useDemoData: true)
     }
 
+    func testUnsavedMemorySchedulesReminderOneDayBeforeExpiry() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let memoryID = UUID(uuidString: "A1111111-1111-1111-1111-111111111111")!
+        let expiry = now.addingTimeInterval(7 * 24 * 60 * 60)
+        let memory = SharedMemory(
+            id: memoryID,
+            title: "A day together",
+            durationSeconds: 42,
+            exportTier: "story_pass",
+            shareToken: UUID(),
+            createdAt: now,
+            expiresAt: expiry,
+            savedToPhoneAt: nil
+        )
+
+        let reminder = try XCTUnwrap(
+            MemoryExpiryNotificationScheduler.reminders(for: [memory], now: now).first
+        )
+
+        XCTAssertEqual(reminder.memoryID, memoryID)
+        XCTAssertEqual(reminder.title, "A day together")
+        XCTAssertEqual(reminder.fireDate, expiry.addingTimeInterval(-24 * 60 * 60))
+        XCTAssertEqual(reminder.identifier, "memory-expiry.a1111111-1111-1111-1111-111111111111")
+    }
+
+    func testExpiryReminderSkipsSavedExpiredAndAlreadyDueMemories() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func memory(expiresAt: Date, savedAt: Date? = nil) -> SharedMemory {
+            SharedMemory(
+                id: UUID(),
+                title: "Private memory",
+                durationSeconds: 20,
+                exportTier: "free",
+                shareToken: UUID(),
+                createdAt: now.addingTimeInterval(-60),
+                expiresAt: expiresAt,
+                savedToPhoneAt: savedAt
+            )
+        }
+
+        let reminders = MemoryExpiryNotificationScheduler.reminders(
+            for: [
+                memory(expiresAt: now.addingTimeInterval(7 * 24 * 60 * 60), savedAt: now),
+                memory(expiresAt: now.addingTimeInterval(-60)),
+                memory(expiresAt: now.addingTimeInterval(12 * 60 * 60))
+            ],
+            now: now
+        )
+
+        XCTAssertTrue(reminders.isEmpty)
+    }
+
     func testCompletedRenderCanBeRecoveredAndDiscardedLocally() throws {
         LocalCompletedExport.discard()
         defer { LocalCompletedExport.discard() }

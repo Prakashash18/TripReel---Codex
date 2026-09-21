@@ -63,6 +63,7 @@ private struct NewSharedMemory: Encodable {
     let exportTier: String
     let storagePath: String
     let shareToken: UUID
+    let savedToPhoneAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case ownerID = "owner_id"
@@ -71,6 +72,7 @@ private struct NewSharedMemory: Encodable {
         case exportTier = "export_tier"
         case storagePath = "storage_path"
         case shareToken = "share_token"
+        case savedToPhoneAt = "saved_to_phone_at"
     }
 }
 
@@ -102,6 +104,22 @@ enum SharedMemoryPlaybackError: LocalizedError {
     }
 }
 
+enum ShareLinkCreationPhase: Equatable, Sendable {
+    case idle
+    case preparing
+    case uploading(Double)
+    case publishing
+
+    var statusText: String {
+        switch self {
+        case .idle: "Create share link"
+        case .preparing: "Preparing upload…"
+        case let .uploading(progress): "Uploading \(Int((progress * 100).rounded()))%"
+        case .publishing: "Creating link…"
+        }
+    }
+}
+
 @MainActor
 final class MemoryAccountService: ObservableObject {
     @Published private(set) var userID: UUID?
@@ -110,11 +128,14 @@ final class MemoryAccountService: ObservableObject {
     @Published private(set) var monthlyExportAllowance = MonthlyExportAllowance.unavailable
     @Published private(set) var isLoadingMonthlyAllowance = false
     @Published private(set) var isBusy = false
+    @Published private(set) var shareLinkCreationPhase: ShareLinkCreationPhase = .idle
     @Published private(set) var downloadingMemoryID: UUID?
     @Published var message: String?
 
     let isConfigured: Bool
     private let client: SupabaseClient?
+    private let projectURL: URL?
+    private let expiryNotificationScheduler = MemoryExpiryNotificationScheduler()
     private var authTask: Task<Void, Never>?
     private var memoryRefreshGeneration = 0
 
@@ -123,9 +144,11 @@ final class MemoryAccountService: ObservableObject {
         let key = Self.configurationValue(key: "SUPABASE_PUBLISHABLE_KEY", bundle: bundle)
         if let urlString, let url = URL(string: urlString), let key {
             client = SupabaseClient(supabaseURL: url, supabaseKey: key)
+            projectURL = url
             isConfigured = true
         } else {
             client = nil
+            projectURL = nil
             isConfigured = false
         }
 
@@ -193,6 +216,7 @@ final class MemoryAccountService: ObservableObject {
             userEmail = nil
             memories = []
             monthlyExportAllowance = .unavailable
+            await expiryNotificationScheduler.cancelAll()
         } catch {
             message = "Couldn’t sign out. Check your connection and try again."
         }
@@ -223,6 +247,7 @@ final class MemoryAccountService: ObservableObject {
             // clears the already-issued session from this iPhone immediately.
             try await client.auth.signOut()
             apply(session: nil)
+            await expiryNotificationScheduler.cancelAll()
             message = "Your account, videos, and share links were deleted."
             return true
         } catch {
@@ -301,7 +326,8 @@ final class MemoryAccountService: ObservableObject {
         do {
             let rows = try await fetchMemories(using: client)
             guard refreshGeneration == memoryRefreshGeneration else { return }
-            memories = rows.filter { $0.expiresAt > Date() }
+            memories = sortedActiveMemories(rows)
+            await expiryNotificationScheduler.synchronize(memories: memories)
             message = nil
         } catch {
             // A newly-created Supabase session can emit its signed-in event at
@@ -314,7 +340,8 @@ final class MemoryAccountService: ObservableObject {
             do {
                 let rows = try await fetchMemories(using: client)
                 guard refreshGeneration == memoryRefreshGeneration else { return }
-                memories = rows.filter { $0.expiresAt > Date() }
+                memories = sortedActiveMemories(rows)
+                await expiryNotificationScheduler.synchronize(memories: memories)
                 message = nil
             } catch {
                 guard refreshGeneration == memoryRefreshGeneration else { return }
@@ -327,34 +354,41 @@ final class MemoryAccountService: ObservableObject {
         videoURL: URL,
         title: String,
         durationSeconds: Double,
-        isPaid: Bool
+        isPaid: Bool,
+        wasSavedToPhone: Bool
     ) async -> URL? {
-        guard let client, let userID else {
+        guard let client, let projectURL, let userID else {
             message = "Create an account first to make a share link. Your video stays on this iPhone until then."
             return nil
         }
 
         isBusy = true
+        shareLinkCreationPhase = .preparing
         message = nil
-        defer { isBusy = false }
+        defer {
+            isBusy = false
+            shareLinkCreationPhase = .idle
+        }
 
         let memoryID = UUID()
         let shareToken = UUID()
         let storagePath = "\(userID.uuidString.lowercased())/\(memoryID.uuidString.lowercased()).mp4"
 
         do {
-            try await client.storage
-                .from("memory-exports")
-                .upload(
-                    storagePath,
-                    fileURL: videoURL,
-                    options: FileOptions(
-                        cacheControl: "3600",
-                        contentType: "video/mp4",
-                        upsert: false
-                    )
-                )
+            let session = try await client.auth.session
+            let uploader = try SupabaseResumableUploader(
+                projectURL: projectURL,
+                accessToken: session.accessToken
+            )
+            try await uploader.upload(
+                fileURL: videoURL,
+                bucket: "memory-exports",
+                objectPath: storagePath
+            ) { progress in
+                await self.updateShareLinkUploadProgress(progress)
+            }
 
+            shareLinkCreationPhase = .publishing
             let inserted: SharedMemory = try await client
                 .from("memories")
                 .insert(
@@ -364,7 +398,8 @@ final class MemoryAccountService: ObservableObject {
                         durationSeconds: max(0, durationSeconds),
                         exportTier: isPaid ? "story_pass" : "free",
                         storagePath: storagePath,
-                        shareToken: shareToken
+                        shareToken: shareToken,
+                        savedToPhoneAt: wasSavedToPhone ? Date() : nil
                     )
                 )
                 .select("id,title,duration_seconds,export_tier,share_token,created_at,expires_at,saved_to_phone_at")
@@ -372,17 +407,27 @@ final class MemoryAccountService: ObservableObject {
                 .execute()
                 .value
 
-            memories.insert(inserted, at: 0)
+            memories = sortedActiveMemories(memories + [inserted])
+            await expiryNotificationScheduler.synchronize(
+                memories: memories,
+                requestAuthorizationIfNeeded: true
+            )
             return inserted.shareURL
         } catch {
             _ = try? await client.storage.from("memory-exports").remove(paths: [storagePath])
-            message = "The share link couldn’t be created. Your video is still safe on this iPhone."
+            if let description = (error as? LocalizedError)?.errorDescription,
+               !description.isEmpty {
+                message = "\(description) Your video is still safe on this iPhone. Please try again."
+            } else {
+                message = "The share link couldn’t be created. Your video is still safe on this iPhone. Please try again."
+            }
             return nil
         }
     }
 
     func markSavedToPhone(memoryID: UUID) async {
         guard let client else { return }
+        expiryNotificationScheduler.cancel(memoryID: memoryID)
         struct SavedMarker: Encodable {
             let savedToPhoneAt: Date
 
@@ -401,6 +446,11 @@ final class MemoryAccountService: ObservableObject {
             // Saving to Photos succeeded. A cloud status refresh is optional
             // and must never turn that local success into an error.
         }
+    }
+
+    func markSavedToPhone(shareURL: URL) async {
+        guard let memory = memories.first(where: { $0.shareURL == shareURL }) else { return }
+        await markSavedToPhone(memoryID: memory.id)
     }
 
     /// A link is the only opt-in upload path. Its owner may save that same
@@ -499,6 +549,7 @@ final class MemoryAccountService: ObservableObject {
                 .eq("owner_id", value: ownerID)
                 .execute()
             memories.removeAll { $0.id == memory.id }
+            expiryNotificationScheduler.cancel(memoryID: memory.id)
         } catch {
             message = "That video and link couldn’t be deleted. Please try again."
         }
@@ -510,6 +561,7 @@ final class MemoryAccountService: ObservableObject {
         if session == nil {
             memories = []
             monthlyExportAllowance = .unavailable
+            Task { await expiryNotificationScheduler.cancelAll() }
         }
     }
 
@@ -523,6 +575,19 @@ final class MemoryAccountService: ObservableObject {
             .order("created_at", ascending: false)
             .execute()
             .value
+    }
+
+    private func sortedActiveMemories(_ rows: [SharedMemory]) -> [SharedMemory] {
+        rows
+            .filter { $0.expiresAt > Date() }
+            .sorted { lhs, rhs in
+                if lhs.createdAt == rhs.createdAt { return lhs.id.uuidString > rhs.id.uuidString }
+                return lhs.createdAt > rhs.createdAt
+            }
+    }
+
+    private func updateShareLinkUploadProgress(_ progress: Double) {
+        shareLinkCreationPhase = .uploading(progress)
     }
 
     private static func configurationValue(key: String, bundle: Bundle) -> String? {

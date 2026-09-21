@@ -100,12 +100,18 @@ final class TripReelFlowUITests: XCTestCase {
         screen("studio-edit-menu").swipeLeft()
         screen("studio-tool-style").tap()
         XCTAssertTrue(screen("film-style-sheet").waitForExistence(timeout: 3))
-        let stylePreview = screen("film-style-live-preview")
-        XCTAssertTrue(stylePreview.waitForExistence(timeout: 3))
-        app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Journal")).firstMatch.tap()
+        XCTAssertTrue(screen("film-style-live-preview").waitForExistence(timeout: 3))
+        let journalStyle = screen("film-look-journal")
+        XCTAssertTrue(journalStyle.waitForExistence(timeout: 3))
+        journalStyle.tap()
+        expectation(
+            for: NSPredicate(format: "value == %@", "Selected"),
+            evaluatedWith: journalStyle
+        )
+        waitForExpectations(timeout: 2)
         expectation(
             for: NSPredicate(format: "label CONTAINS[c] %@", "Journal"),
-            evaluatedWith: stylePreview
+            evaluatedWith: screen("film-style-live-preview")
         )
         waitForExpectations(timeout: 2)
         app.buttons["Done"].tap()

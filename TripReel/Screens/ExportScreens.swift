@@ -1076,6 +1076,7 @@ struct FilmReadyScreen: View {
     @State private var showsAccount = false
     @State private var shareLink: URL?
     @State private var isCreatingLink = false
+    @State private var shareLinkError: String?
     @State private var showsLeaveWithoutSaving = false
     @State private var wantsLinkAfterSignIn = false
 
@@ -1137,7 +1138,9 @@ struct FilmReadyScreen: View {
                             HStack(spacing: 7) {
                                 if isCreatingLink { ProgressView().controlSize(.small) }
                                 Label(
-                                    model.exportShareLinkURL == nil ? "Create share link" : "View share link",
+                                    model.exportShareLinkURL == nil
+                                        ? (isCreatingLink ? account.shareLinkCreationPhase.statusText : "Create share link")
+                                        : "View share link",
                                     systemImage: "link"
                                 )
                             }
@@ -1239,6 +1242,18 @@ struct FilmReadyScreen: View {
         } message: {
             Text(model.exportErrorMessage ?? "Please try again.")
         }
+        .alert(
+            "Share link not created",
+            isPresented: Binding(
+                get: { shareLinkError != nil },
+                set: { if !$0 { shareLinkError = nil } }
+            )
+        ) {
+            Button("Try again") { createShareLink() }
+            Button("Not now", role: .cancel) { }
+        } message: {
+            Text(shareLinkError ?? "Please check your connection and try again.")
+        }
         .confirmationDialog(
             "Keep this video?",
             isPresented: $showsLeaveWithoutSaving,
@@ -1316,7 +1331,12 @@ struct FilmReadyScreen: View {
     }
 
     private func saveToPhotos() {
-        Task { _ = await model.saveExportToPhotos() }
+        Task {
+            let saved = await model.saveExportToPhotos()
+            if saved, let shareURL = model.exportShareLinkURL {
+                await account.markSavedToPhone(shareURL: shareURL)
+            }
+        }
     }
 
     private func createShareLink() {
@@ -1331,15 +1351,22 @@ struct FilmReadyScreen: View {
             return
         }
         isCreatingLink = true
+        shareLinkError = nil
         Task {
             let url = await account.createShareLink(
                 videoURL: videoURL,
                 title: model.titleDraft(for: .opening).title,
                 durationSeconds: model.activeExportDurationSeconds,
-                isPaid: model.exportQuality == .hd
+                isPaid: model.exportQuality == .hd,
+                wasSavedToPhone: model.exportSaveMessage != nil
             )
             isCreatingLink = false
-            if let url { model.recordExportShareLink(url) }
+            if let url {
+                model.recordExportShareLink(url)
+            } else {
+                shareLinkError = account.message
+                    ?? "The link couldn't be created. Your video is still safe on this iPhone."
+            }
             shareLink = url
         }
     }
