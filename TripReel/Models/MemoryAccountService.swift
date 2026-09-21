@@ -84,6 +84,24 @@ private struct DownloadableMemory: Decodable {
     }
 }
 
+private struct AccountDeletionResponse: Decodable {
+    let deleted: Bool
+}
+
+enum SharedMemoryPlaybackError: LocalizedError {
+    case signedOut
+    case expired
+
+    var errorDescription: String? {
+        switch self {
+        case .signedOut:
+            return "Sign in to watch this shared story."
+        case .expired:
+            return "This story has expired and is no longer available."
+        }
+    }
+}
+
 @MainActor
 final class MemoryAccountService: ObservableObject {
     @Published private(set) var userID: UUID?
@@ -177,6 +195,39 @@ final class MemoryAccountService: ObservableObject {
             monthlyExportAllowance = .unavailable
         } catch {
             message = "Couldn’t sign out. Check your connection and try again."
+        }
+    }
+
+    /// Permanently removes every cloud video and share link before deleting
+    /// the authenticated account. The privileged deletion itself lives in an
+    /// authenticated Edge Function; the service-role key never reaches iOS.
+    func deleteAccount() async -> Bool {
+        guard let client, userID != nil else {
+            message = "Sign in before deleting your account."
+            return false
+        }
+
+        isBusy = true
+        message = nil
+        defer { isBusy = false }
+
+        do {
+            let response: AccountDeletionResponse = try await client.functions
+                .invoke("delete-account")
+            guard response.deleted else {
+                message = "Your account wasn’t deleted. Please try again."
+                return false
+            }
+
+            // deleteUser invalidates refresh tokens server-side. signOut also
+            // clears the already-issued session from this iPhone immediately.
+            try await client.auth.signOut()
+            apply(session: nil)
+            message = "Your account, videos, and share links were deleted."
+            return true
+        } catch {
+            message = "Your account couldn’t be deleted. Nothing else was removed. Please try again."
+            return false
         }
     }
 
@@ -355,7 +406,7 @@ final class MemoryAccountService: ObservableObject {
     /// A link is the only opt-in upload path. Its owner may save that same
     /// private MP4 back to Photos while the seven-day record is still active.
     func downloadToPhotos(_ memory: SharedMemory) async {
-        guard let client, let ownerID = userID else {
+        guard userID != nil else {
             message = "Sign in to download this shared story."
             return
         }
@@ -371,24 +422,7 @@ final class MemoryAccountService: ObservableObject {
         defer { downloadingMemoryID = nil }
 
         do {
-            let stored: DownloadableMemory = try await client
-                .from("memories")
-                .select("storage_path,expires_at")
-                .eq("id", value: memory.id)
-                .eq("owner_id", value: ownerID)
-                .single()
-                .execute()
-                .value
-
-            guard stored.expiresAt > Date() else {
-                message = "This story has expired and can no longer be downloaded."
-                await refreshMemories()
-                return
-            }
-
-            let signedURL = try await client.storage
-                .from("memory-exports")
-                .createSignedURL(path: stored.storagePath, expiresIn: 300)
+            let signedURL = try await playbackURL(for: memory, expiresIn: 300)
             let (temporaryURL, response) = try await URLSession.shared.download(from: signedURL)
             guard let response = response as? HTTPURLResponse,
                   response.statusCode == 200 else {
@@ -409,15 +443,64 @@ final class MemoryAccountService: ObservableObject {
         }
     }
 
+    /// Returns a short-lived URL for the signed-in owner to stream a linked
+    /// story. The storage object remains private and the URL expires quickly.
+    func playbackURL(for memory: SharedMemory, expiresIn: Int = 3_600) async throws -> URL {
+        guard let client, let ownerID = userID else {
+            throw SharedMemoryPlaybackError.signedOut
+        }
+        guard memory.expiresAt > Date() else {
+            throw SharedMemoryPlaybackError.expired
+        }
+
+        let stored: DownloadableMemory = try await client
+            .from("memories")
+            .select("storage_path,expires_at")
+            .eq("id", value: memory.id)
+            .eq("owner_id", value: ownerID)
+            .single()
+            .execute()
+            .value
+
+        guard stored.expiresAt > Date() else {
+            throw SharedMemoryPlaybackError.expired
+        }
+
+        return try await client.storage
+            .from("memory-exports")
+            .createSignedURL(path: stored.storagePath, expiresIn: expiresIn)
+    }
+
     func revoke(_ memory: SharedMemory) async {
-        guard let client else { return }
+        guard let client, let ownerID = userID else {
+            message = "Sign in to delete this shared story."
+            return
+        }
         isBusy = true
+        message = nil
         defer { isBusy = false }
         do {
-            try await client.from("memories").delete().eq("id", value: memory.id).execute()
+            let stored: DownloadableMemory = try await client
+                .from("memories")
+                .select("storage_path,expires_at")
+                .eq("id", value: memory.id)
+                .eq("owner_id", value: ownerID)
+                .single()
+                .execute()
+                .value
+
+            try await client.storage
+                .from("memory-exports")
+                .remove(paths: [stored.storagePath])
+            try await client
+                .from("memories")
+                .delete()
+                .eq("id", value: memory.id)
+                .eq("owner_id", value: ownerID)
+                .execute()
             memories.removeAll { $0.id == memory.id }
         } catch {
-            message = "That link couldn’t be removed. Please try again."
+            message = "That video and link couldn’t be deleted. Please try again."
         }
     }
 
