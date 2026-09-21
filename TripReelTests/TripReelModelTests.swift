@@ -169,6 +169,7 @@ final class TripReelModelTests: XCTestCase {
     }
 
     func testExportMotionUsesSmoothBoundedProgress() {
+        XCTAssertEqual(TripReelVideoExporter.defaultFrameRate, 24)
         XCTAssertEqual(TripReelVideoExporter.easedMotionPhase(-1), 0, accuracy: 0.0001)
         XCTAssertEqual(TripReelVideoExporter.easedMotionPhase(0.25), 0.15625, accuracy: 0.0001)
         XCTAssertEqual(TripReelVideoExporter.easedMotionPhase(0.5), 0.5, accuracy: 0.0001)
@@ -183,6 +184,25 @@ final class TripReelModelTests: XCTestCase {
             1,
             accuracy: 0.0001
         )
+    }
+
+    func testSequentialVideoGeometryKeepsRotatedClipsUprightAndInsideBounds() {
+        let sourceSize = CGSize(width: 1920, height: 1080)
+        let rotation = CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: 0, ty: 0)
+        let geometry = TripReelVideoExporter.sourceVideoGeometry(
+            naturalSize: sourceSize,
+            preferredTransform: rotation,
+            maximumSize: CGSize(width: 1080, height: 1920)
+        )
+        let displayedBounds = CGRect(origin: .zero, size: sourceSize)
+            .applying(geometry.transform)
+
+        XCTAssertEqual(geometry.renderSize.width, 1080, accuracy: 0.001)
+        XCTAssertEqual(geometry.renderSize.height, 1920, accuracy: 0.001)
+        XCTAssertEqual(displayedBounds.minX, 0, accuracy: 0.001)
+        XCTAssertEqual(displayedBounds.minY, 0, accuracy: 0.001)
+        XCTAssertEqual(displayedBounds.width, geometry.renderSize.width, accuracy: 0.001)
+        XCTAssertEqual(displayedBounds.height, geometry.renderSize.height, accuracy: 0.001)
     }
 
     func testNavigationTracksForwardBackwardAndReplacementMotion() {

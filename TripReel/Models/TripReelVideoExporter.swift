@@ -6,6 +6,7 @@ import Photos
 import QuartzCore
 import UIKit
 import UniformTypeIdentifiers
+import VideoToolbox
 
 struct TripReelVideoExportRequest: Sendable {
     let photos: [ReelPhoto]
@@ -93,10 +94,88 @@ private struct PreparedReelMedia: @unchecked Sendable {
     let videoAsset: AVAsset?
 }
 
+/// Reads a clip in presentation order. `AVAssetImageGenerator` is excellent
+/// for occasional thumbnails, but seeking it once per output frame makes even
+/// short stories disproportionately slow. Video composition output keeps the
+/// decoder moving forward and applies the source track's orientation once.
+private final class SequentialVideoFrameReader {
+    private let reader: AVAssetReader
+    private let output: AVAssetReaderVideoCompositionOutput
+
+    init(
+        asset: AVAsset,
+        track: AVAssetTrack,
+        timeRange: CMTimeRange,
+        naturalSize: CGSize,
+        preferredTransform: CGAffineTransform,
+        maximumSize: CGSize,
+        frameRate: Int32
+    ) throws {
+        reader = try AVAssetReader(asset: asset)
+
+        let geometry = TripReelVideoExporter.sourceVideoGeometry(
+            naturalSize: naturalSize,
+            preferredTransform: preferredTransform,
+            maximumSize: maximumSize
+        )
+
+        let composition = AVMutableVideoComposition()
+        composition.renderSize = geometry.renderSize
+        composition.frameDuration = CMTime(value: 1, timescale: frameRate)
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = timeRange
+        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
+        layerInstruction.setTransform(geometry.transform, at: timeRange.start)
+        instruction.layerInstructions = [layerInstruction]
+        composition.instructions = [instruction]
+
+        output = AVAssetReaderVideoCompositionOutput(
+            videoTracks: [track],
+            videoSettings: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+            ]
+        )
+        output.alwaysCopiesSampleData = false
+        output.videoComposition = composition
+        guard reader.canAdd(output) else {
+            throw TripReelVideoExportError.cannotCreateFrame
+        }
+        reader.add(output)
+        reader.timeRange = timeRange
+        guard reader.startReading() else {
+            throw TripReelVideoExportError.encodingFailed(
+                reader.error?.localizedDescription ?? "A source clip could not be decoded"
+            )
+        }
+    }
+
+    func nextImage() throws -> CGImage? {
+        guard let sample = output.copyNextSampleBuffer() else {
+            if reader.status == .failed {
+                throw TripReelVideoExportError.encodingFailed(
+                    reader.error?.localizedDescription ?? "A source clip stopped decoding"
+                )
+            }
+            return nil
+        }
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sample) else {
+            throw TripReelVideoExportError.cannotCreateFrame
+        }
+        var image: CGImage?
+        let status = VTCreateCGImageFromCVPixelBuffer(pixelBuffer, options: nil, imageOut: &image)
+        guard status == noErr, let image else {
+            throw TripReelVideoExportError.cannotCreateFrame
+        }
+        return image
+    }
+
+}
+
 /// Renders the same mixed photo, video, and title timeline used by the SwiftUI
 /// preview into a vertical H.264 movie. Full-resolution sources are prepared
 /// one at a time so a large memory does not stay resident in memory.
 final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
+    static let defaultFrameRate: Int32 = 24
     private static let preparationProgressWeight = 0.28
     private static let renderingProgressWeight = 0.62
     private let imageManager: PHImageManager
@@ -104,7 +183,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
 
     init(
         imageManager: PHImageManager = PHCachingImageManager(),
-        frameRate: Int32 = 30
+        frameRate: Int32 = TripReelVideoExporter.defaultFrameRate
     ) {
         self.imageManager = imageManager
         self.frameRate = max(8, frameRate)
@@ -430,7 +509,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             let duration = item.duration(defaultPhotoDuration: request.secondsPerPhoto)
             let frameCount = max(1, Int(ceil(duration * Double(frameRate))))
             var photoImage: CGImage?
-            var videoGenerator: AVAssetImageGenerator?
+            var videoReader: SequentialVideoFrameReader?
             var videoPhoto: ReelPhoto?
             let itemPhotoIndex: Int
             switch item {
@@ -439,21 +518,13 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                     guard let videoAsset = preparedMedia[photo.id]?.videoAsset else {
                         throw TripReelVideoExportError.photoUnavailable(photo.label)
                     }
-                    let generator = AVAssetImageGenerator(asset: videoAsset)
-                    generator.appliesPreferredTrackTransform = true
-                    generator.maximumSize = outputSize
-                    // Keep video sampling within half of a 30 fps frame. The old
-                    // one-output-frame tolerance could repeat nearby source
-                    // frames and made motion in the saved reel appear uneven.
-                    let tolerance = CMTime(value: 1, timescale: 60)
-                    generator.requestedTimeToleranceBefore = tolerance
-                    generator.requestedTimeToleranceAfter = tolerance
-                    videoGenerator = generator
-                    videoPhoto = photo
-                    photoImage = try await videoFrame(
-                        generator: generator,
-                        sourceSeconds: photo.videoStartSeconds
+                    videoReader = try await makeVideoFrameReader(
+                        asset: videoAsset,
+                        sourceStartSeconds: photo.videoStartSeconds,
+                        durationSeconds: duration,
+                        maximumSize: outputSize
                     )
+                    videoPhoto = photo
                 } else {
                     photoImage = try await loadImage(
                         for: photo,
@@ -480,15 +551,13 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 let pixelBuffer = try Self.makePixelBuffer(from: pool)
 
                 let phase = frameCount <= 1 ? 1 : Double(localFrame) / Double(frameCount - 1)
-                if let videoGenerator, let videoPhoto {
-                    let frameOffset = min(
-                        max(0, duration - (1 / Double(frameRate))),
-                        Double(localFrame) / Double(frameRate)
-                    )
-                    photoImage = try await videoFrame(
-                        generator: videoGenerator,
-                        sourceSeconds: videoPhoto.videoStartSeconds + frameOffset
-                    )
+                if let videoReader, let videoPhoto {
+                    if let decodedFrame = try videoReader.nextImage() {
+                        photoImage = decodedFrame
+                    }
+                    guard photoImage != nil else {
+                        throw TripReelVideoExportError.photoUnavailable(videoPhoto.label)
+                    }
                     lastPhotoImage = photoImage
                 }
                 let transitionFrames = previousItem == nil
@@ -930,21 +999,41 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         return image
     }
 
-    private func videoFrame(
-        generator: AVAssetImageGenerator,
-        sourceSeconds: Double
-    ) async throws -> CGImage {
-        let time = CMTime(
-            seconds: max(0, sourceSeconds),
-            preferredTimescale: max(600, frameRate * 10)
-        )
-        do {
-            return try await generator.image(at: time).image
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
+    private func makeVideoFrameReader(
+        asset: AVAsset,
+        sourceStartSeconds: Double,
+        durationSeconds: Double,
+        maximumSize: CGSize
+    ) async throws -> SequentialVideoFrameReader {
+        guard let track = try await asset.loadTracks(withMediaType: .video).first else {
             throw TripReelVideoExportError.cannotCreateFrame
         }
+        let naturalSize = try await track.load(.naturalSize)
+        let preferredTransform = try await track.load(.preferredTransform)
+        let trackRange = try await track.load(.timeRange)
+        let requestedStart = CMTime(
+            seconds: max(0, sourceStartSeconds),
+            preferredTimescale: 600
+        )
+        let start = CMTimeMaximum(trackRange.start, requestedStart)
+        let availableDuration = CMTimeSubtract(CMTimeRangeGetEnd(trackRange), start)
+        let requestedDuration = CMTime(
+            seconds: max(1 / Double(frameRate), durationSeconds),
+            preferredTimescale: 600
+        )
+        let duration = CMTimeMinimum(availableDuration, requestedDuration)
+        guard duration > .zero else {
+            throw TripReelVideoExportError.cannotCreateFrame
+        }
+        return try SequentialVideoFrameReader(
+            asset: asset,
+            track: track,
+            timeRange: CMTimeRange(start: start, duration: duration),
+            naturalSize: naturalSize,
+            preferredTransform: preferredTransform,
+            maximumSize: maximumSize,
+            frameRate: frameRate
+        )
     }
 
     private static func outputSize(for quality: ExportQuality) -> CGSize {
@@ -985,20 +1074,10 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             throw TripReelVideoExportError.soundtrackFailed
         }
 
-        let composition = AVMutableComposition()
-        guard let videoTrack = composition.addMutableTrack(
-            withMediaType: .video,
-            preferredTrackID: kCMPersistentTrackID_Invalid
-        ) else {
-            throw TripReelVideoExportError.soundtrackFailed
-        }
-        try videoTrack.insertTimeRange(
-            CMTimeRange(start: .zero, duration: videoDuration),
-            of: sourceVideoTrack,
-            at: .zero
-        )
+        let audioComposition = AVMutableComposition()
 
         var mixParameters: [AVAudioMixInputParameters] = []
+        var hasMixedAudio = false
         var soundtrackParameters: AVMutableAudioMixInputParameters?
         if let soundtrackURL {
             let audioAsset = AVURLAsset(url: soundtrackURL)
@@ -1006,7 +1085,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             let audioTracks = try await audioAsset.loadTracks(withMediaType: .audio)
             guard let sourceAudioTrack = audioTracks.first,
                   audioDuration > .zero,
-                  let audioTrack = composition.addMutableTrack(
+                  let audioTrack = audioComposition.addMutableTrack(
                     withMediaType: .audio,
                     preferredTrackID: kCMPersistentTrackID_Invalid
                   ) else {
@@ -1028,14 +1107,16 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             parameters.setVolume(0.68, at: .zero)
             soundtrackParameters = parameters
             mixParameters.append(parameters)
+            hasMixedAudio = true
         }
 
-        if let sourceTrack = composition.addMutableTrack(
+        if let sourceTrack = audioComposition.addMutableTrack(
             withMediaType: .audio,
             preferredTrackID: kCMPersistentTrackID_Invalid
         ) {
             let sourceParameters = AVMutableAudioMixInputParameters(track: sourceTrack)
             sourceParameters.setVolume(0, at: .zero)
+            var hasSourceAudio = false
             var cursor = CMTime.zero
             for item in MontageTimelineBuilder.make(
                 photos: request.photos,
@@ -1072,6 +1153,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 } catch {
                     continue
                 }
+                hasSourceAudio = true
 
                 let fadeDuration = CMTimeMinimum(
                     CMTime(seconds: 0.12, preferredTimescale: 600),
@@ -1093,7 +1175,10 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                     soundtrackParameters.setVolume(0.68, at: CMTimeAdd(cursor, clipDuration))
                 }
             }
-            mixParameters.append(sourceParameters)
+            if hasSourceAudio {
+                mixParameters.append(sourceParameters)
+                hasMixedAudio = true
+            }
         }
 
         if let soundtrackParameters {
@@ -1111,25 +1196,83 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             }
         }
 
-        guard let exportSession = AVAssetExportSession(
-            asset: composition,
-            presetName: AVAssetExportPresetHighestQuality
+        guard hasMixedAudio else {
+            try FileManager.default.copyItem(at: videoURL, to: outputURL)
+            return
+        }
+
+        let mixedAudioURL = outputURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("mixed-audio-\(UUID().uuidString).m4a")
+        defer { try? FileManager.default.removeItem(at: mixedAudioURL) }
+        guard let audioExportSession = AVAssetExportSession(
+            asset: audioComposition,
+            presetName: AVAssetExportPresetAppleM4A
         ) else {
             throw TripReelVideoExportError.soundtrackFailed
         }
-        exportSession.outputURL = outputURL
-        exportSession.outputFileType = .mp4
-        exportSession.shouldOptimizeForNetworkUse = true
-        if !mixParameters.isEmpty {
-            let audioMix = AVMutableAudioMix()
-            audioMix.inputParameters = mixParameters
-            exportSession.audioMix = audioMix
-        }
+        audioExportSession.outputURL = mixedAudioURL
+        audioExportSession.outputFileType = .m4a
+        let audioMix = AVMutableAudioMix()
+        audioMix.inputParameters = mixParameters
+        audioExportSession.audioMix = audioMix
         await withCheckedContinuation { continuation in
-            exportSession.exportAsynchronously { continuation.resume() }
+            audioExportSession.exportAsynchronously { continuation.resume() }
         }
-        guard exportSession.status == .completed else {
-            if exportSession.status == .cancelled || Task.isCancelled {
+        guard audioExportSession.status == .completed else {
+            if audioExportSession.status == .cancelled || Task.isCancelled {
+                throw CancellationError()
+            }
+            throw TripReelVideoExportError.soundtrackFailed
+        }
+
+        try Task.checkCancellation()
+        let mixedAudioAsset = AVURLAsset(url: mixedAudioURL)
+        guard let mixedAudioTrack = try await mixedAudioAsset
+            .loadTracks(withMediaType: .audio)
+            .first
+        else {
+            throw TripReelVideoExportError.soundtrackFailed
+        }
+        let finalComposition = AVMutableComposition()
+        guard let finalVideoTrack = finalComposition.addMutableTrack(
+            withMediaType: .video,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ), let finalAudioTrack = finalComposition.addMutableTrack(
+            withMediaType: .audio,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            throw TripReelVideoExportError.soundtrackFailed
+        }
+        try finalVideoTrack.insertTimeRange(
+            CMTimeRange(start: .zero, duration: videoDuration),
+            of: sourceVideoTrack,
+            at: .zero
+        )
+        let mixedAudioDuration = try await mixedAudioAsset.load(.duration)
+        try finalAudioTrack.insertTimeRange(
+            CMTimeRange(
+                start: .zero,
+                duration: CMTimeMinimum(videoDuration, mixedAudioDuration)
+            ),
+            of: mixedAudioTrack,
+            at: .zero
+        )
+
+        guard let muxSession = AVAssetExportSession(
+            asset: finalComposition,
+            presetName: AVAssetExportPresetPassthrough
+        ) else {
+            throw TripReelVideoExportError.soundtrackFailed
+        }
+        muxSession.outputURL = outputURL
+        muxSession.outputFileType = .mp4
+        muxSession.shouldOptimizeForNetworkUse = true
+        await withCheckedContinuation { continuation in
+            muxSession.exportAsynchronously { continuation.resume() }
+        }
+        guard muxSession.status == .completed else {
+            if muxSession.status == .cancelled || Task.isCancelled {
                 throw CancellationError()
             }
             throw TripReelVideoExportError.soundtrackFailed
@@ -1290,6 +1433,45 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
     static func transitionProgress(frame: Int, transitionFrames: Int) -> Double {
         guard transitionFrames > 0 else { return 1 }
         return easedMotionPhase(Double(max(0, frame)) / Double(transitionFrames))
+    }
+
+    static func sourceVideoGeometry(
+        naturalSize: CGSize,
+        preferredTransform: CGAffineTransform,
+        maximumSize: CGSize
+    ) -> (transform: CGAffineTransform, renderSize: CGSize) {
+        let transformedBounds = CGRect(origin: .zero, size: naturalSize)
+            .applying(preferredTransform)
+        let orientedSize = CGSize(
+            width: abs(transformedBounds.width),
+            height: abs(transformedBounds.height)
+        )
+        let scale = min(
+            1,
+            min(
+                maximumSize.width / max(1, orientedSize.width),
+                maximumSize.height / max(1, orientedSize.height)
+            )
+        )
+        let renderSize = CGSize(
+            width: evenDimension(orientedSize.width * scale),
+            height: evenDimension(orientedSize.height * scale)
+        )
+        var transform = preferredTransform.concatenating(
+            CGAffineTransform(
+                translationX: -transformedBounds.minX,
+                y: -transformedBounds.minY
+            )
+        )
+        transform = transform.concatenating(
+            CGAffineTransform(scaleX: scale, y: scale)
+        )
+        return (transform, renderSize)
+    }
+
+    private static func evenDimension(_ value: CGFloat) -> CGFloat {
+        let rounded = max(2, Int(value.rounded()))
+        return CGFloat(rounded.isMultiple(of: 2) ? rounded : rounded - 1)
     }
 
     /// Copies an already top-to-bottom UIKit image into the equally oriented
