@@ -169,7 +169,7 @@ final class TripReelModelTests: XCTestCase {
     }
 
     func testExportMotionUsesSmoothBoundedProgress() {
-        XCTAssertEqual(TripReelVideoExporter.defaultFrameRate, 24)
+        XCTAssertEqual(TripReelVideoExporter.defaultFrameRate, 30)
         XCTAssertEqual(TripReelVideoExporter.easedMotionPhase(-1), 0, accuracy: 0.0001)
         XCTAssertEqual(TripReelVideoExporter.easedMotionPhase(0.25), 0.15625, accuracy: 0.0001)
         XCTAssertEqual(TripReelVideoExporter.easedMotionPhase(0.5), 0.5, accuracy: 0.0001)

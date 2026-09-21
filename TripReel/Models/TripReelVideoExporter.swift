@@ -175,7 +175,7 @@ private final class SequentialVideoFrameReader {
 /// preview into a vertical H.264 movie. Full-resolution sources are prepared
 /// one at a time so a large memory does not stay resident in memory.
 final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
-    static let defaultFrameRate: Int32 = 24
+    static let defaultFrameRate: Int32 = 30
     private static let preparationProgressWeight = 0.28
     private static let renderingProgressWeight = 0.62
     private let imageManager: PHImageManager

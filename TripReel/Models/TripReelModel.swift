@@ -5841,7 +5841,7 @@ final class TripReelModel: ObservableObject {
             }
         )
         let exporter = videoExporter
-        workTask = Task { [weak self] in
+        workTask = Task(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             let background = BackgroundExportSupport.shared
             self.exportCanFinishInBackground = await background.begin { [weak self] in
@@ -5857,13 +5857,23 @@ final class TripReelModel: ObservableObject {
                 return
             }
             do {
-                let url = try await exporter.export(request) { [weak self] progress in
-                    Task { @MainActor [weak self] in
-                        guard let self, self.exportGeneration == generation else { return }
-                        self.renderProgress = max(self.renderProgress, progress.fraction)
-                        self.exportProgressPhase = progress.phase
-                        background.updateProgress(progress.fraction)
+                // Keep frame decoding, drawing, and encoding off the main actor.
+                // Explicit user-initiated priority also prevents the work from
+                // inheriting a lower scheduling priority as the app backgrounds.
+                let renderTask = Task.detached(priority: .userInitiated) {
+                    try await exporter.export(request) { [weak self] progress in
+                        Task { @MainActor [weak self] in
+                            guard let self, self.exportGeneration == generation else { return }
+                            self.renderProgress = max(self.renderProgress, progress.fraction)
+                            self.exportProgressPhase = progress.phase
+                            background.updateProgress(progress.fraction)
+                        }
                     }
+                }
+                let url = try await withTaskCancellationHandler {
+                    try await renderTask.value
+                } onCancel: {
+                    renderTask.cancel()
                 }
                 guard !Task.isCancelled, self.exportGeneration == generation else {
                     background.finish(success: false)
