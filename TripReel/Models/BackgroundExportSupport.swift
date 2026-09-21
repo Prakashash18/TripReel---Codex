@@ -1,5 +1,6 @@
 import BackgroundTasks
 import Foundation
+import OSLog
 import UIKit
 import UserNotifications
 
@@ -11,83 +12,129 @@ final class BackgroundExportSupport {
     static let shared = BackgroundExportSupport()
 
     private static let taskPrefix = "com.prakashash18.tripreel.video-export"
-    private var isRegistered = false
+    private static let diagnosticKey = "memories.background-export-diagnostic.v1"
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.prakashash18.tripreel",
+        category: "BackgroundExport"
+    )
     private var pendingLaunch: ((AnyObject) -> Void)?
     private var pendingContinuation: CheckedContinuation<Bool, Never>?
     private var activeTask: AnyObject?
     private var activeRequestID: String?
     private var graceTask: UIBackgroundTaskIdentifier = .invalid
     private var expirationAction: (() -> Void)?
+    private var lastReportedPercent = -1
+    private(set) var interruptionMessage = "iOS stopped the background render. Open this story and try exporting again."
 
     private init() {}
-
-    func register() {
-        guard #available(iOS 26.0, *), !isRegistered else { return }
-        isRegistered = BGTaskScheduler.shared.register(
-            forTaskWithIdentifier: Self.taskPrefix + ".*",
-            using: nil
-        ) { [weak self] task in
-            guard let task = task as? BGContinuedProcessingTask else { return }
-            Task { @MainActor in
-                guard let self, let launch = self.pendingLaunch else {
-                    task.setTaskCompleted(success: false)
-                    return
-                }
-                self.pendingLaunch = nil
-                self.activeTask = task
-                launch(task)
-            }
-        }
-    }
 
     /// Call immediately after an explicit Export tap, before accessing media.
     /// Returns true only when the system accepted continuous processing.
     func begin(onExpiration: @escaping () -> Void) async -> Bool {
+        UserDefaults.standard.removeObject(forKey: Self.diagnosticKey)
+        record("begin ios=\(UIDevice.current.systemVersion)")
         expirationAction = onExpiration
-        if #available(iOS 26.0, *), isRegistered {
+        interruptionMessage = "iOS stopped the background render. Open this story and try exporting again."
+        if #available(iOS 26.0, *) {
             let identifier = Self.taskPrefix + "." + UUID().uuidString
             activeRequestID = identifier
-            let accepted = await withCheckedContinuation { continuation in
-                pendingContinuation = continuation
-                pendingLaunch = { [weak self] launchedTask in
-                    guard let task = launchedTask as? BGContinuedProcessingTask else {
-                        self?.pendingContinuation?.resume(returning: false)
-                        self?.pendingContinuation = nil
+            let registered = BGTaskScheduler.shared.register(
+                forTaskWithIdentifier: identifier,
+                using: nil
+            ) { [weak self] launchedTask in
+                Task { @MainActor in
+                    guard let self else {
+                        launchedTask.setTaskCompleted(success: false)
                         return
                     }
-                    task.progress.totalUnitCount = 100
-                    task.expirationHandler = { [weak self] in
-                        Task { @MainActor in self?.expirationAction?() }
+                    guard let task = launchedTask as? BGContinuedProcessingTask else {
+                        self.record("launch-type-mismatch")
+                        self.resumePendingLaunch(accepted: false)
+                        launchedTask.setTaskCompleted(success: false)
+                        return
                     }
-                    self?.pendingContinuation?.resume(returning: true)
-                    self?.pendingContinuation = nil
-                }
-                let request = BGContinuedProcessingTaskRequest(
-                    identifier: identifier,
-                    title: "Rendering your memory",
-                    subtitle: "Preparing your video"
-                )
-                request.strategy = .fail
-                do {
-                    try BGTaskScheduler.shared.submit(request)
-                } catch {
-                    pendingLaunch = nil
-                    activeRequestID = nil
-                    pendingContinuation?.resume(returning: false)
-                    pendingContinuation = nil
+                    guard let launch = self.pendingLaunch else {
+                        self.record("launch-without-pending-export")
+                        task.setTaskCompleted(success: false)
+                        return
+                    }
+                    self.pendingLaunch = nil
+                    self.activeTask = task
+                    launch(task)
                 }
             }
-            if accepted { return true }
+
+            if registered {
+                record("registration-succeeded")
+                let accepted = await withCheckedContinuation { continuation in
+                    pendingContinuation = continuation
+                    pendingLaunch = { [weak self] launchedTask in
+                        guard let self,
+                              let task = launchedTask as? BGContinuedProcessingTask else {
+                            self?.resumePendingLaunch(accepted: false)
+                            return
+                        }
+                        task.progress.totalUnitCount = 100
+                        task.progress.completedUnitCount = 1
+                        task.expirationHandler = { [weak self] in
+                            Task { @MainActor in
+                                guard let self else { return }
+                                self.interruptionMessage = "iOS ended an active background export because the phone needed its resources. Open this story and try exporting again. Diagnostic: continued-task-expired."
+                                self.record("continued-task-expired")
+                                self.expirationAction?()
+                            }
+                        }
+                        self.record("continued-task-started")
+                        self.resumePendingLaunch(accepted: true)
+                    }
+                    let request = BGContinuedProcessingTaskRequest(
+                        identifier: identifier,
+                        title: "Rendering your memory",
+                        subtitle: "Preparing your video"
+                    )
+                    request.strategy = .fail
+                    if BGTaskScheduler.supportedResources.contains(.gpu) {
+                        request.requiredResources = .gpu
+                        record("requesting-background-gpu")
+                    } else {
+                        record("background-gpu-unsupported")
+                    }
+                    do {
+                        try BGTaskScheduler.shared.submit(request)
+                        record("continued-task-submitted")
+                    } catch {
+                        let nsError = error as NSError
+                        record(
+                            "submission-failed domain=\(nsError.domain) code=\(nsError.code) "
+                                + nsError.localizedDescription
+                        )
+                        interruptionMessage = Self.submissionFailureMessage(for: nsError)
+                        pendingLaunch = nil
+                        activeRequestID = nil
+                        resumePendingLaunch(accepted: false)
+                    }
+                }
+                if accepted { return true }
+            } else {
+                record("registration-failed")
+                interruptionMessage = "Background export could not start because iOS rejected its task registration. Keep Memories open while exporting. Diagnostic: registration-failed."
+            }
+        } else {
+            record("continued-task-unavailable ios=\(UIDevice.current.systemVersion)")
+            interruptionMessage = "This iOS version only gives the export a short background grace period. Keep Memories open while exporting. Diagnostic: continued-task-unavailable."
         }
 
         guard !Task.isCancelled else { return false }
 
         graceTask = UIApplication.shared.beginBackgroundTask(withName: "Finish memory export") { [weak self] in
             Task { @MainActor in
-                self?.expirationAction?()
-                self?.endGraceTask()
+                guard let self else { return }
+                self.record("grace-period-expired")
+                self.expirationAction?()
+                self.endGraceTask()
             }
         }
+        record("using-grace-period reason=\(interruptionMessage)")
         return false
     }
 
@@ -97,6 +144,10 @@ final class BackgroundExportSupport {
         let percent = Int(max(0, min(1, fraction)) * 100)
         activeTask.progress.completedUnitCount = Int64(percent)
         activeTask.updateTitle("Rendering your memory", subtitle: "\(percent)% complete")
+        if percent != lastReportedPercent, percent.isMultiple(of: 10) {
+            lastReportedPercent = percent
+            record("continued-task-progress \(percent)")
+        }
     }
 
     func finish(success: Bool) {
@@ -111,7 +162,45 @@ final class BackgroundExportSupport {
         pendingContinuation = nil
         activeRequestID = nil
         expirationAction = nil
+        lastReportedPercent = -1
         endGraceTask()
+        record("finished success=\(success)")
+    }
+
+    private func resumePendingLaunch(accepted: Bool) {
+        pendingContinuation?.resume(returning: accepted)
+        pendingContinuation = nil
+    }
+
+    private static func submissionFailureMessage(for error: NSError) -> String {
+        let diagnostic = "Diagnostic: submit-\(error.code)."
+        switch BGTaskScheduler.Error.Code(rawValue: error.code) {
+        case .notPermitted:
+            return "Background export is disabled or not permitted on this phone. Keep Memories open while exporting. \(diagnostic)"
+        case .immediateRunIneligible:
+            return "The phone was too busy to start a long background export. Keep Memories open while exporting, then try again later. \(diagnostic)"
+        case .tooManyPendingTaskRequests:
+            return "Another background export was still pending. Keep Memories open while exporting and try again. \(diagnostic)"
+        case .unavailable:
+            return "Long background export is unavailable on this phone right now. Keep Memories open while exporting. \(diagnostic)"
+        case .none:
+            return "Long background export could not start. Keep Memories open while exporting. \(diagnostic)"
+        @unknown default:
+            return "Long background export could not start. Keep Memories open while exporting. \(diagnostic)"
+        }
+    }
+
+    private func record(_ event: String) {
+        logger.info("\(event, privacy: .public)")
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let entry = "\(stamp) | \(event)"
+        let defaults = UserDefaults.standard
+        let prior = defaults.stringArray(forKey: Self.diagnosticKey) ?? []
+        defaults.set(Array((prior + [entry]).suffix(20)), forKey: Self.diagnosticKey)
+    }
+
+    var latestDiagnosticSummary: String? {
+        UserDefaults.standard.stringArray(forKey: Self.diagnosticKey)?.last
     }
 
     private func endGraceTask() {

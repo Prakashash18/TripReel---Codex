@@ -1236,7 +1236,7 @@ struct FilmReadyScreen: View {
             Button("Save video to Photos") { saveToPhotos() }
             Button("Create 7-day link") { createShareLink() }
             Button("Leave without keeping", role: .destructive) { model.restart() }
-            Button("Stay here", role: .cancel) { }
+            Button("Stay here") { }
         } message: {
             Text("This render is temporary. Save a permanent copy, or create a seven-day link in your account before leaving.")
         }

@@ -124,7 +124,7 @@ struct RootView: View {
         .alert("Export interrupted", isPresented: $model.interruptedExportNotice) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text("An earlier render didn't finish. Your photos are unchanged; choose the story and export it again.")
+            Text(model.interruptedExportMessage)
         }
         .confirmationDialog(
             "Keep this video?",
@@ -136,7 +136,7 @@ struct RootView: View {
             }
             Button("Create 7-day link") { createShareLinkRequest &+= 1 }
             Button("Leave without keeping", role: .destructive) { model.navigateBack() }
-            Button("Stay here", role: .cancel) { }
+            Button("Stay here") { }
         } message: {
             Text("This render is temporary. Save a permanent copy, or create a seven-day link in your account before leaving.")
         }

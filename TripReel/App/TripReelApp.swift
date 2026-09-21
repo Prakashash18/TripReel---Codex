@@ -7,10 +7,6 @@ struct TripReelApp: App {
     @StateObject private var account = MemoryAccountService()
     @Environment(\.scenePhase) private var scenePhase
 
-    init() {
-        BackgroundExportSupport.shared.register()
-    }
-
     var body: some Scene {
         WindowGroup {
             RootView()

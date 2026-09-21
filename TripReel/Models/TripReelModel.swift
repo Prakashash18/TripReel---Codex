@@ -2420,6 +2420,7 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var exportShareLinkURL: URL?
     @Published private(set) var exportCanFinishInBackground = false
     @Published var interruptedExportNotice = false
+    @Published private(set) var interruptedExportMessage = "An earlier render didn't finish. Your photos are unchanged; choose the story and export it again."
     @Published private(set) var restoredExportOnly = false
     @Published private(set) var activeExportPhotos: [ReelPhoto] = []
     @Published private(set) var activeExportTitleCards: [MontageTitleCard] = []
@@ -2606,6 +2607,9 @@ final class TripReelModel: ObservableObject {
                 screen = .done
                 preferenceStore.removeObject(forKey: LocalCompletedExport.interruptedKey)
             } else if preferenceStore.bool(forKey: LocalCompletedExport.interruptedKey) {
+                if let diagnostic = BackgroundExportSupport.shared.latestDiagnosticSummary {
+                    interruptedExportMessage += "\n\n\(diagnostic)"
+                }
                 interruptedExportNotice = true
                 preferenceStore.removeObject(forKey: LocalCompletedExport.interruptedKey)
             }
@@ -5842,7 +5846,7 @@ final class TripReelModel: ObservableObject {
                 guard let self, self.exportGeneration == generation else { return }
                 self.workTask?.cancel()
                 self.exportErrorTitle = "Export was interrupted"
-                self.exportErrorMessage = "iOS stopped the background render. Open this story and try exporting again."
+                self.exportErrorMessage = background.interruptionMessage
                 self.preferenceStore.removeObject(forKey: LocalCompletedExport.interruptedKey)
                 self.go(.export)
             }

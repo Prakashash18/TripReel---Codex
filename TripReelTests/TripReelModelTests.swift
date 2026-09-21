@@ -2183,8 +2183,10 @@ private actor RecordingVideoExporter: TripReelVideoExporting {
                 phase: .finalizing
             )
         )
-        return FileManager.default.temporaryDirectory
-            .appendingPathComponent("TripReel-test.mp4")
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TripReel-test-\(UUID().uuidString).mp4")
+        try Data([0, 1, 2, 3]).write(to: url, options: .atomic)
+        return url
     }
 
     func saveToPhotoLibrary(_ url: URL) async throws {
@@ -2220,8 +2222,10 @@ private actor FailOnceVideoExporter: TripReelVideoExporting {
                 phase: .finalizing
             )
         )
-        return FileManager.default.temporaryDirectory
-            .appendingPathComponent("TripReel-retry-test.mp4")
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TripReel-retry-test-\(UUID().uuidString).mp4")
+        try Data([0, 1, 2, 3]).write(to: url, options: .atomic)
+        return url
     }
 
     func saveToPhotoLibrary(_ url: URL) async throws {}
