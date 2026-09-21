@@ -11,6 +11,29 @@ final class TripReelModelTests: XCTestCase {
         TripReelModel(arguments: [], useDemoData: true)
     }
 
+    func testCompletedRenderCanBeRecoveredAndDiscardedLocally() throws {
+        LocalCompletedExport.discard()
+        defer { LocalCompletedExport.discard() }
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("export-recovery-test-\(UUID().uuidString).mp4")
+        try Data([0, 1, 2, 3]).write(to: source)
+
+        let saved = try LocalCompletedExport.keep(
+            source,
+            title: "A day together",
+            durationSeconds: 42,
+            isHD: true
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+        XCTAssertEqual(LocalCompletedExport.load()?.title, "A day together")
+        XCTAssertEqual(LocalCompletedExport.load()?.durationSeconds, 42)
+        XCTAssertTrue(saved.isHD)
+
+        LocalCompletedExport.discard()
+        XCTAssertNil(LocalCompletedExport.load())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: saved.fileURL.path))
+    }
+
     func testShareItemSourceHandsOffAFileURLAsAnExplicitMP4Movie() {
         let videoURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("share-provider-test.mp4")

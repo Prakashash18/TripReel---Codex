@@ -12,6 +12,7 @@
 		03685A570E3F6167F4875D7E /* SharedViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F526A17B9CB876B87F47972A /* SharedViews.swift */; };
 		08F1A48D4B535D401B68FA98 /* RevenueCatPurchaseService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76C5668C5272505DD3B61078 /* RevenueCatPurchaseService.swift */; };
 		D001A0010000000000000001 /* MemoryAccountService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D001B0010000000000000001 /* MemoryAccountService.swift */; };
+		D002A0010000000000000001 /* BackgroundExportSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D002B0010000000000000001 /* BackgroundExportSupport.swift */; };
 		D001A0020000000000000002 /* AccountScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = D001B0020000000000000002 /* AccountScreens.swift */; };
 		D001A0030000000000000003 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = D001D0010000000000000001 /* Supabase */; };
 		0A4F7E98489685E12080D9A3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6E06F6111F0C8AD43B9C48E2 /* Assets.xcassets */; };
@@ -101,6 +102,7 @@
 		7261FAE6F1429F10FCF6B0FB /* TripGroupingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TripGroupingTests.swift; sourceTree = "<group>"; };
 		76C5668C5272505DD3B61078 /* RevenueCatPurchaseService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RevenueCatPurchaseService.swift; path = Models/RevenueCatPurchaseService.swift; sourceTree = "<group>"; };
 		D001B0010000000000000001 /* MemoryAccountService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MemoryAccountService.swift; path = Models/MemoryAccountService.swift; sourceTree = "<group>"; };
+		D002B0010000000000000001 /* BackgroundExportSupport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = BackgroundExportSupport.swift; path = Models/BackgroundExportSupport.swift; sourceTree = "<group>"; };
 		D001B0020000000000000002 /* AccountScreens.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AccountScreens.swift; path = Screens/AccountScreens.swift; sourceTree = "<group>"; };
 		7B4CEA6A7E939EDB475F36B9 /* TripReelModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelModel.swift; path = Models/TripReelModel.swift; sourceTree = "<group>"; };
 		7D36F5DCECE1CE1B1A95D046 /* TripReelTheme.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TripReelTheme.swift; path = DesignSystem/TripReelTheme.swift; sourceTree = "<group>"; };
@@ -223,6 +225,7 @@
 				27CAF64BD055FC38101DD307 /* PhotoLibraryService.swift */,
 				76C5668C5272505DD3B61078 /* RevenueCatPurchaseService.swift */,
 				D001B0010000000000000001 /* MemoryAccountService.swift */,
+				D002B0010000000000000001 /* BackgroundExportSupport.swift */,
 				15DD6BE9BDEF8E825B997C3E /* SmartPhotoSelection.swift */,
 				CCF0A0C89D6083462203E304 /* TripGrouping.swift */,
 				7B4CEA6A7E939EDB475F36B9 /* TripReelModel.swift */,
@@ -410,6 +413,7 @@
 				90621E500B9836F2FFD23AAD /* PhotoLibraryService.swift in Sources */,
 				08F1A48D4B535D401B68FA98 /* RevenueCatPurchaseService.swift in Sources */,
 				D001A0010000000000000001 /* MemoryAccountService.swift in Sources */,
+				D002A0010000000000000001 /* BackgroundExportSupport.swift in Sources */,
 				9AFB23DDC4626709D361EC58 /* SmartPhotoSelection.swift in Sources */,
 				23AD737AE0ABFCB3D7D6FF6E /* TripGrouping.swift in Sources */,
 				FB8FB1D1717158D9392252F2 /* TripReelModel.swift in Sources */,

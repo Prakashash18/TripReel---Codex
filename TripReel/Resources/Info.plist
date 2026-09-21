@@ -24,6 +24,14 @@
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.prakashash18.tripreel.video-export.*</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>processing</string>
+	</array>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Memories saves the films you create to your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

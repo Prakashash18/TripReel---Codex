@@ -1021,6 +1021,15 @@ struct RenderingScreen: View {
                 .padding(.top, 22)
                 .animation(reduceMotion ? nil : TRMotion.progress, value: model.renderProgress)
 
+                Text(model.exportCanFinishInBackground
+                     ? "You can leave Memories while this finishes. We'll notify you when it's ready."
+                     : "Keep Memories open while this video finishes.")
+                    .font(TR.ui(11))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 48)
+                    .padding(.top, 18)
+
                 Button("Cancel") {
                     model.cancelRender()
                 }
@@ -1128,7 +1137,7 @@ struct FilmReadyScreen: View {
                         .accessibilityIdentifier("share-link-button")
                     }
 
-                    Text("Share video sends the file but keeps no copy here. A link lasts 7 days; saving to Photos is permanent.")
+                    Text("This on-device render expires after 24 hours. A link lasts 7 days; saving to Photos is permanent.")
                         .font(TR.ui(11))
                         .foregroundStyle(.white.opacity(0.44))
                         .multilineTextAlignment(.center)

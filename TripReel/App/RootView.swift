@@ -121,6 +121,11 @@ struct RootView: View {
         } message: {
             Text(model.libraryErrorMessage ?? "")
         }
+        .alert("Export interrupted", isPresented: $model.interruptedExportNotice) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("An earlier render didn't finish. Your photos are unchanged; choose the story and export it again.")
+        }
         .confirmationDialog(
             "Keep this video?",
             isPresented: $showsUnsavedExportWarning,

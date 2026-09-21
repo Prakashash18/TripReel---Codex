@@ -2418,6 +2418,9 @@ final class TripReelModel: ObservableObject {
     @Published var isSmartSelectionReviewPresented = false
     @Published private(set) var exportedVideoURL: URL?
     @Published private(set) var exportShareLinkURL: URL?
+    @Published private(set) var exportCanFinishInBackground = false
+    @Published var interruptedExportNotice = false
+    @Published private(set) var restoredExportOnly = false
     @Published private(set) var activeExportPhotos: [ReelPhoto] = []
     @Published private(set) var activeExportTitleCards: [MontageTitleCard] = []
     @Published private(set) var activeExportTextOverlays: [MontageTextOverlay] = []
@@ -2586,6 +2589,25 @@ final class TripReelModel: ObservableObject {
                 aiCutConsentGranted = true
                 selectedAICutDirection = recommendedAICutDirection
                 resetAICutPhotoSelection()
+            }
+        }
+        if !demoMode {
+            if let receipt = LocalCompletedExport.load() {
+                exportedVideoURL = receipt.fileURL
+                activeExportDurationSeconds = receipt.durationSeconds
+                exportQuality = receipt.isHD ? .hd : .standard
+                titleDrafts[.opening] = TitleCardDraft(
+                    title: receipt.title,
+                    subtitle: "",
+                    style: .editorial,
+                    duration: TitleCardKind.opening.defaultDuration
+                )
+                restoredExportOnly = true
+                screen = .done
+                preferenceStore.removeObject(forKey: LocalCompletedExport.interruptedKey)
+            } else if preferenceStore.bool(forKey: LocalCompletedExport.interruptedKey) {
+                interruptedExportNotice = true
+                preferenceStore.removeObject(forKey: LocalCompletedExport.interruptedKey)
             }
         }
     }
@@ -2775,6 +2797,7 @@ final class TripReelModel: ObservableObject {
     }
 
     var activeExportMediaSummary: String {
+        if restoredExportOnly { return "video ready" }
         let videoCount = activeExportPhotos.filter(\.isVideo).count
         return Trip.mediaCountText(
             photoCount: max(0, activeExportPhotos.count - videoCount),
@@ -3229,7 +3252,11 @@ final class TripReelModel: ObservableObject {
             pendingExportIntent = nil
             go(.export, direction: .backward)
         case .done:
-            go(.export, direction: .backward)
+            if restoredExportOnly {
+                restart()
+            } else {
+                go(.export, direction: .backward)
+            }
         case .welcome, .trips, .empty, .building, .aiProcessing, .aiVideoGenerating,
              .cut, .rendering, .cleanup:
             break
@@ -5741,6 +5768,7 @@ final class TripReelModel: ObservableObject {
 
     private func startRender(quality: ExportQuality, handoff: ExportHandoff) {
         workTask?.cancel()
+        BackgroundExportSupport.shared.finish(success: false)
         let generation = UUID()
         exportGeneration = generation
         exportQuality = quality
@@ -5752,6 +5780,7 @@ final class TripReelModel: ObservableObject {
         activeExportDurationSeconds = content.durationSeconds
         exportedVideoURL = nil
         exportShareLinkURL = nil
+        exportCanFinishInBackground = false
         renderProgress = 0
         exportErrorMessage = nil
         exportErrorTitle = "Export couldn't finish"
@@ -5787,6 +5816,12 @@ final class TripReelModel: ObservableObject {
             return
         }
 
+        // A new explicit export replaces the previous temporary local render.
+        LocalCompletedExport.discard()
+        restoredExportOnly = false
+        preferenceStore.set(true, forKey: LocalCompletedExport.interruptedKey)
+        BackgroundExportSupport.shared.requestReadyNotificationPermission()
+
         let request = TripReelVideoExportRequest(
             photos: content.photos,
             titleCards: content.titleCards,
@@ -5802,22 +5837,52 @@ final class TripReelModel: ObservableObject {
         let exporter = videoExporter
         workTask = Task { [weak self] in
             guard let self else { return }
+            let background = BackgroundExportSupport.shared
+            self.exportCanFinishInBackground = await background.begin { [weak self] in
+                guard let self, self.exportGeneration == generation else { return }
+                self.workTask?.cancel()
+                self.exportErrorTitle = "Export was interrupted"
+                self.exportErrorMessage = "iOS stopped the background render. Open this story and try exporting again."
+                self.preferenceStore.removeObject(forKey: LocalCompletedExport.interruptedKey)
+                self.go(.export)
+            }
+            guard !Task.isCancelled, self.exportGeneration == generation else {
+                background.finish(success: false)
+                return
+            }
             do {
                 let url = try await exporter.export(request) { [weak self] progress in
                     Task { @MainActor [weak self] in
                         guard let self, self.exportGeneration == generation else { return }
                         self.renderProgress = max(self.renderProgress, progress.fraction)
                         self.exportProgressPhase = progress.phase
+                        background.updateProgress(progress.fraction)
                     }
                 }
-                guard !Task.isCancelled, self.exportGeneration == generation else { return }
-                self.exportedVideoURL = url
+                guard !Task.isCancelled, self.exportGeneration == generation else {
+                    background.finish(success: false)
+                    return
+                }
+                let receipt = try LocalCompletedExport.keep(
+                    url,
+                    title: self.titleDraft(for: .opening).title,
+                    durationSeconds: self.activeExportDurationSeconds,
+                    isHD: quality == .hd
+                )
+                self.exportedVideoURL = receipt.fileURL
                 self.renderProgress = 1
+                self.preferenceStore.removeObject(forKey: LocalCompletedExport.interruptedKey)
+                background.updateProgress(1)
+                await background.notifyIfBackgrounded()
+                background.finish(success: true)
                 self.go(.done)
             } catch is CancellationError {
+                background.finish(success: false)
                 return
             } catch {
+                background.finish(success: false)
                 guard self.exportGeneration == generation else { return }
+                self.preferenceStore.removeObject(forKey: LocalCompletedExport.interruptedKey)
                 if let exportError = error as? TripReelVideoExportError,
                    case .photoUnavailable = exportError {
                     self.exportErrorTitle = "A moment needs a little longer"
@@ -5889,6 +5954,8 @@ final class TripReelModel: ObservableObject {
         exportGeneration = UUID()
         workTask?.cancel()
         workTask = nil
+        BackgroundExportSupport.shared.finish(success: false)
+        preferenceStore.removeObject(forKey: LocalCompletedExport.interruptedKey)
         renderProgress = 0
         go(.export, direction: .backward)
     }
@@ -5930,6 +5997,8 @@ final class TripReelModel: ObservableObject {
     }
 
     func restart() {
+        LocalCompletedExport.discard()
+        restoredExportOnly = false
         cleanupSelection = []
         cleanupShowsGrid = false
         cleanupDeletionErrorMessage = nil
