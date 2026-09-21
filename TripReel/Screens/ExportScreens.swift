@@ -139,6 +139,10 @@ struct ExportScreen: View {
     @EnvironmentObject private var model: TripReelModel
     @EnvironmentObject private var purchases: RevenueCatPurchaseService
 
+    private var isFullStoryUnlocked: Bool {
+        purchases.hasFullExportAccess(for: model.exportStoryID)
+    }
+
     var body: some View {
         ZStack {
             WarmBackground(variant: .export)
@@ -173,17 +177,21 @@ struct ExportScreen: View {
                     ExportOptionCard(
                         source: model.fullStoryHighlightPhotos.first?.source
                             ?? model.previewSource(at: 2),
-                        title: "Full story",
-                        subtitle: "\(model.filmDurationText) · complete video",
-                        badge: "PAID · 1080P · NO WATERMARK",
-                        badgeColor: TR.accent,
+                        title: isFullStoryUnlocked ? "Full story · Unlocked" : "Full story",
+                        subtitle: isFullStoryUnlocked
+                            ? "Create your complete video again"
+                            : "\(model.filmDurationText) · complete video",
+                        badge: isFullStoryUnlocked
+                            ? "YOUR STORY PASS · 1080P · NO WATERMARK"
+                            : "PAID · 1080P · NO WATERMARK",
+                        badgeColor: isFullStoryUnlocked ? TR.keep : TR.accent,
                         highlighted: true,
                         showsChevron: true,
                         accessibilityID: "export-hd"
                     ) {
                         model.requestExport(
                             .highDefinition,
-                            isUnlocked: purchases.hasFullExportAccess(for: model.exportStoryID)
+                            isUnlocked: isFullStoryUnlocked
                         )
                     }
 
@@ -208,6 +216,9 @@ struct ExportScreen: View {
         ) {
             if model.exportCanRetryPhotoDownload {
                 Button("Retry download") { model.retryExportPhotoDownload() }
+                Button("Not now", role: .cancel) { model.dismissExportMessage() }
+            } else if model.exportCanRetryRender {
+                Button("Try export again") { model.retryExportAfterFrameFailure() }
                 Button("Not now", role: .cancel) { model.dismissExportMessage() }
             } else {
                 Button("OK", role: .cancel) { model.dismissExportMessage() }

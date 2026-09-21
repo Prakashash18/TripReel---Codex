@@ -2429,6 +2429,7 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var exportErrorMessage: String?
     @Published private(set) var exportErrorTitle = "Export couldn't finish"
     @Published private(set) var exportCanRetryPhotoDownload = false
+    @Published private(set) var exportCanRetryRender = false
     @Published private(set) var exportProgressPhase: TripReelVideoExportPhase = .preparingPhotos(
         ready: 0,
         total: 0,
@@ -5789,6 +5790,7 @@ final class TripReelModel: ObservableObject {
         exportErrorMessage = nil
         exportErrorTitle = "Export couldn't finish"
         exportCanRetryPhotoDownload = false
+        exportCanRetryRender = false
         exportProgressPhase = .preparingPhotos(
             ready: 0,
             total: content.photos.count,
@@ -5891,9 +5893,16 @@ final class TripReelModel: ObservableObject {
                    case .photoUnavailable = exportError {
                     self.exportErrorTitle = "A moment needs a little longer"
                     self.exportCanRetryPhotoDownload = true
+                    self.exportCanRetryRender = false
+                } else if let exportError = error as? TripReelVideoExportError,
+                          case .cannotCreateFrame = exportError {
+                    self.exportErrorTitle = "Export paused"
+                    self.exportCanRetryPhotoDownload = false
+                    self.exportCanRetryRender = true
                 } else {
                     self.exportErrorTitle = "Export couldn't finish"
                     self.exportCanRetryPhotoDownload = false
+                    self.exportCanRetryRender = false
                 }
                 self.exportErrorMessage = (error as? LocalizedError)?.errorDescription
                     ?? "Memories couldn't finish this export. Please try again."
@@ -5966,6 +5975,15 @@ final class TripReelModel: ObservableObject {
 
     func retryExportPhotoDownload() {
         guard exportCanRetryPhotoDownload else { return }
+        retryCurrentExport()
+    }
+
+    func retryExportAfterFrameFailure() {
+        guard exportCanRetryRender else { return }
+        retryCurrentExport()
+    }
+
+    private func retryCurrentExport() {
         let quality = exportQuality
         let handoff = exportHandoff
         dismissExportMessage()
@@ -5993,6 +6011,7 @@ final class TripReelModel: ObservableObject {
         exportErrorMessage = nil
         exportErrorTitle = "Export couldn't finish"
         exportCanRetryPhotoDownload = false
+        exportCanRetryRender = false
         exportSaveMessage = nil
     }
 

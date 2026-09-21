@@ -130,6 +130,44 @@ final class TripReelModelTests: XCTestCase {
         )
     }
 
+    func testDirectVideoFrameDrawingKeepsUIKitArtworkUpright() throws {
+        var optionalBuffer: CVPixelBuffer?
+        let status = CVPixelBufferCreate(
+            nil,
+            2,
+            2,
+            kCVPixelFormatType_32BGRA,
+            [
+                kCVPixelBufferCGImageCompatibilityKey as String: true,
+                kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
+            ] as CFDictionary,
+            &optionalBuffer
+        )
+        XCTAssertEqual(status, kCVReturnSuccess)
+        let buffer = try XCTUnwrap(optionalBuffer)
+
+        try TripReelVideoExporter.drawDirectly(
+            into: buffer,
+            outputSize: CGSize(width: 2, height: 2)
+        ) { bounds in
+            UIColor.red.setFill()
+            UIRectFill(CGRect(x: 0, y: 0, width: bounds.width, height: 1))
+            UIColor.blue.setFill()
+            UIRectFill(CGRect(x: 0, y: 1, width: bounds.width, height: 1))
+        }
+
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        let baseAddress = try XCTUnwrap(CVPixelBufferGetBaseAddress(buffer))
+            .assumingMemoryBound(to: UInt8.self)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
+        XCTAssertEqual(Array(UnsafeBufferPointer(start: baseAddress, count: 4)), [0, 0, 255, 255])
+        XCTAssertEqual(
+            Array(UnsafeBufferPointer(start: baseAddress + bytesPerRow, count: 4)),
+            [255, 0, 0, 255]
+        )
+    }
+
     func testExportMotionUsesSmoothBoundedProgress() {
         XCTAssertEqual(TripReelVideoExporter.easedMotionPhase(-1), 0, accuracy: 0.0001)
         XCTAssertEqual(TripReelVideoExporter.easedMotionPhase(0.25), 0.15625, accuracy: 0.0001)
@@ -1334,6 +1372,52 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(qualities, [.hd, .hd])
     }
 
+    func testFramePressureOffersOneTapRetryWithoutLosingHD() async throws {
+        let exporter = FailOnceVideoExporter(firstError: .cannotCreateFrame)
+        let model = TripReelModel(
+            arguments: [],
+            useDemoData: false,
+            videoExporter: exporter
+        )
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let asset = TripAsset(
+            id: "frame-pressure-video",
+            source: .bundled("my-khe-beach"),
+            creationDate: date,
+            filename: "VIDEO_0007.MOV",
+            pixelWidth: 1_024,
+            pixelHeight: 1_536
+        )
+        model.startBuild(trip: Trip(
+            id: "frame-pressure-trip",
+            place: "Test trip",
+            dates: "Today",
+            startDate: date,
+            endDate: date,
+            assets: [asset],
+            coverID: asset.id
+        ))
+        model.startRender(hd: true)
+
+        for _ in 0..<100 where model.exportErrorMessage == nil {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertEqual(model.screen, .export)
+        XCTAssertEqual(model.exportErrorTitle, "Export paused")
+        XCTAssertTrue(model.exportCanRetryRender)
+        XCTAssertFalse(model.exportCanRetryPhotoDownload)
+
+        model.retryExportAfterFrameFailure()
+        for _ in 0..<100 where model.screen != .done {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertEqual(model.screen, .done)
+        let qualities = await exporter.recordedQualities()
+        XCTAssertEqual(qualities, [.hd, .hd])
+    }
+
     func testPhotoFixtureIsDeterministic() {
         let model = makeModel()
 
@@ -2196,6 +2280,11 @@ private actor RecordingVideoExporter: TripReelVideoExporting {
 
 private actor FailOnceVideoExporter: TripReelVideoExporting {
     private var qualities: [ExportQuality] = []
+    private let firstError: TripReelVideoExportError
+
+    init(firstError: TripReelVideoExportError = .photoUnavailable("PHOTO_0006")) {
+        self.firstError = firstError
+    }
 
     func export(
         _ request: TripReelVideoExportRequest,
@@ -2214,7 +2303,7 @@ private actor FailOnceVideoExporter: TripReelVideoExporting {
                     )
                 )
             )
-            throw TripReelVideoExportError.photoUnavailable("PHOTO_0006")
+            throw firstError
         }
         progress(
             TripReelVideoExportProgress(

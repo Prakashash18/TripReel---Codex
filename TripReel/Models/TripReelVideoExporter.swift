@@ -477,11 +477,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 guard let pool = adaptor.pixelBufferPool else {
                     throw TripReelVideoExportError.cannotCreateFrame
                 }
-                var optionalBuffer: CVPixelBuffer?
-                guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &optionalBuffer) == kCVReturnSuccess,
-                      let pixelBuffer = optionalBuffer else {
-                    throw TripReelVideoExportError.cannotCreateFrame
-                }
+                let pixelBuffer = try Self.makePixelBuffer(from: pool)
 
                 let phase = frameCount <= 1 ? 1 : Double(localFrame) / Double(frameCount - 1)
                 if let videoGenerator, let videoPhoto {
@@ -1153,14 +1149,9 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         transitionProgress: Double,
         request: TripReelVideoExportRequest
     ) throws {
-        let rendererFormat = UIGraphicsImageRendererFormat()
-        rendererFormat.scale = 1
-        rendererFormat.opaque = true
-        let renderer = UIGraphicsImageRenderer(size: outputSize, format: rendererFormat)
-        let rendered = renderer.image { rendererContext in
-            let bounds = CGRect(origin: .zero, size: outputSize)
+        try drawDirectly(into: pixelBuffer, outputSize: outputSize) { bounds in
             UIColor(red: 0.035, green: 0.025, blue: 0.020, alpha: 1).setFill()
-            rendererContext.fill(bounds)
+            UIRectFill(bounds)
 
             if let previousItem, transitionProgress < 1 {
                 drawContent(
@@ -1188,11 +1179,66 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 drawWatermark(in: bounds)
             }
         }
-        guard let cgImage = rendered.cgImage else {
+    }
+
+    /// Draws UIKit artwork straight into a top-to-bottom video frame without
+    /// allocating a second full-resolution image.
+    static func drawDirectly(
+        into pixelBuffer: CVPixelBuffer,
+        outputSize: CGSize,
+        drawing: (CGRect) -> Void
+    ) throws {
+        CVPixelBufferLockBaseAddress(pixelBuffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer),
+              let context = CGContext(
+                data: baseAddress,
+                width: Int(outputSize.width),
+                height: Int(outputSize.height),
+                bitsPerComponent: 8,
+                bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer),
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue
+                    | CGImageAlphaInfo.premultipliedFirst.rawValue
+              ) else {
             throw TripReelVideoExportError.cannotCreateFrame
         }
 
-        try copyRenderedFrame(cgImage, into: pixelBuffer, outputSize: outputSize)
+        // Draw directly into AVAssetWriter's buffer. The previous path first
+        // created a second 1080p UIKit image for every frame and then copied it,
+        // briefly doubling frame memory. That spike was enough for iOS to deny
+        // a new pixel buffer when an HD export continued in the background.
+        context.translateBy(x: 0, y: outputSize.height)
+        context.scaleBy(x: 1, y: -1)
+        UIGraphicsPushContext(context)
+        defer { UIGraphicsPopContext() }
+
+        autoreleasepool {
+            let bounds = CGRect(origin: .zero, size: outputSize)
+            drawing(bounds)
+        }
+    }
+
+    /// AVAssetWriter can still own the most recently appended buffers after
+    /// its input reports ready. Give that short-lived pressure time to clear
+    /// instead of failing an otherwise healthy export on the first allocation.
+    private static func makePixelBuffer(from pool: CVPixelBufferPool) throws -> CVPixelBuffer {
+        var lastStatus = kCVReturnError
+        for attempt in 0..<8 {
+            var optionalBuffer: CVPixelBuffer?
+            lastStatus = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &optionalBuffer)
+            if lastStatus == kCVReturnSuccess, let optionalBuffer {
+                return optionalBuffer
+            }
+
+            guard lastStatus == kCVReturnAllocationFailed
+                    || lastStatus == kCVReturnWouldExceedAllocationThreshold else {
+                break
+            }
+            CVPixelBufferPoolFlush(pool, .excessBuffers)
+            Thread.sleep(forTimeInterval: 0.004 * Double(attempt + 1))
+        }
+        throw TripReelVideoExportError.cannotCreateFrame
     }
 
     private static func drawContent(

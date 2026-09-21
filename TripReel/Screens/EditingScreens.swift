@@ -60,7 +60,8 @@ struct FirstWatchScreen: View {
     }
 
     private var keepTitle: String {
-        guard !isAlreadyUnlocked, let storyPassPrice else { return "Keep this one" }
+        if isAlreadyUnlocked { return "Create full video · Unlocked" }
+        guard let storyPassPrice else { return "Keep this one" }
         return "Keep this one · \(storyPassPrice)"
     }
 
