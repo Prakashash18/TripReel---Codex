@@ -1,0 +1,51 @@
+MEMORIES — MEMORY ATMOSPHERE CREDITS
+
+All environmental recordings in this folder are licensed under the Mixkit
+Sound Effects Free License. They are incorporated into finished Memories films
+and are not offered as standalone downloads.
+
+License: https://mixkit.co/license/#sfxFree
+Curated and downloaded: 22 September 2026
+
+city-day.m4a
+Title: City traffic background ambience
+Source: https://mixkit.co/free-sound-effects/city/
+Original asset: https://assets.mixkit.co/active_storage/sfx/2930/2930-preview.mp3
+
+city-night.m4a
+Title: Urban city ambience at night
+Source: https://mixkit.co/free-sound-effects/city/
+Original asset: https://assets.mixkit.co/active_storage/sfx/2678/2678-preview.mp3
+
+coast.m4a
+Title: Sea waves with birds loop
+Source: https://mixkit.co/free-sound-effects/beach/
+Original asset: https://assets.mixkit.co/active_storage/sfx/1185/1185-preview.mp3
+
+forest.m4a
+Title: Forest birds ambience
+Source: https://mixkit.co/free-sound-effects/forest/
+Original asset: https://assets.mixkit.co/active_storage/sfx/1210/1210-preview.mp3
+
+river.m4a
+Title: River water flowing
+Source: https://mixkit.co/free-sound-effects/rivers/
+Original asset: https://assets.mixkit.co/active_storage/sfx/2454/2454-preview.mp3
+
+rain.m4a
+Title: Light rain loop
+Source: https://mixkit.co/free-sound-effects/nature/
+Original asset: https://assets.mixkit.co/active_storage/sfx/2393/2393-preview.mp3
+
+gathering.m4a
+Title: Restaurant crowd talking ambience
+Source: https://mixkit.co/free-sound-effects/crowd/
+Original asset: https://assets.mixkit.co/active_storage/sfx/444/444-preview.mp3
+
+airport.m4a
+Title: Airport departures hall
+Source: https://mixkit.co/free-sound-effects/airport/
+Original asset: https://assets.mixkit.co/active_storage/sfx/357/357-preview.mp3
+
+App processing: each source was limited to 60 seconds, converted to mono AAC
+at 44.1 kHz, and is looped and mixed quietly beneath the finished film.

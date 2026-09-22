@@ -743,6 +743,63 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(model.selectedTrackID, "wanderlust")
     }
 
+    func testMemoryAtmospheresHaveBundledAudioAndAuditableSources() {
+        XCTAssertEqual(MemoryAtmosphereCatalog.all.count, 8)
+        XCTAssertTrue(MemoryAtmosphereCatalog.all.allSatisfy { atmosphere in
+            atmosphere.bundledURL != nil
+                && atmosphere.sourcePageURL.hasPrefix("https://mixkit.co/")
+                && atmosphere.sourceAssetURL.hasPrefix("https://assets.mixkit.co/")
+        })
+        XCTAssertTrue(MemoryAtmosphereCatalog.licenseURL.hasPrefix("https://mixkit.co/"))
+    }
+
+    func testMemoryAtmosphereUsesMemoryLocationForCoast() {
+        let result = MemoryAtmosphereCatalog.recommended(
+            place: "My Khe Beach, Da Nang",
+            insights: [],
+            captureDates: []
+        )
+
+        XCTAssertEqual(result.id, "coast")
+    }
+
+    func testMemoryAtmosphereUsesOnDeviceImageryWhenPlaceIsGeneric() {
+        let insight = MontagePhotoInsight(
+            contentKind: .scenery,
+            classifications: [
+                NativePhotoClassification(identifier: "airport terminal", confidence: 0.91)
+            ]
+        )
+        let result = MemoryAtmosphereCatalog.recommended(
+            place: "Selected moments",
+            insights: [insight],
+            captureDates: []
+        )
+
+        XCTAssertEqual(result.id, "airport")
+    }
+
+    func testMemoryAtmosphereUsesCaptureTimeForUrbanNight() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Asia/Singapore"))
+        let date = try XCTUnwrap(
+            calendar.date(from: DateComponents(year: 2026, month: 9, day: 22, hour: 21))
+        )
+        let insight = MontagePhotoInsight(
+            classifications: [
+                NativePhotoClassification(identifier: "urban street", confidence: 0.8)
+            ]
+        )
+        let result = MemoryAtmosphereCatalog.recommended(
+            place: "Singapore",
+            insights: [insight],
+            captureDates: [date],
+            calendar: calendar
+        )
+
+        XCTAssertEqual(result.id, "city-night")
+    }
+
     func testBundledSoundtrackStartsRealAudioPlayback() throws {
         let model = makeModel()
         let track = try XCTUnwrap(model.selectedTrack)

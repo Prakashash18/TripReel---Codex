@@ -54,6 +54,16 @@
 		E97038C3F926C35A8BBD102D /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4EB0F34B3CF71F2806BAAB30 /* Foundation.framework */; };
 		F2A82F10265542743CBC6976 /* TripReelTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D36F5DCECE1CE1B1A95D046 /* TripReelTheme.swift */; };
 		FB8FB1D1717158D9392252F2 /* TripReelModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B4CEA6A7E939EDB475F36B9 /* TripReelModel.swift */; };
+		A10000000000000000000001 /* MemoryAtmosphere.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* MemoryAtmosphere.swift */; };
+		A10000000000000000000002 /* ATMOSPHERE-CREDITS.txt in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* ATMOSPHERE-CREDITS.txt */; };
+		A10000000000000000000003 /* city-day.m4a in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* city-day.m4a */; };
+		A10000000000000000000004 /* city-night.m4a in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* city-night.m4a */; };
+		A10000000000000000000005 /* coast.m4a in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* coast.m4a */; };
+		A10000000000000000000006 /* forest.m4a in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* forest.m4a */; };
+		A10000000000000000000007 /* river.m4a in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* river.m4a */; };
+		A10000000000000000000008 /* rain.m4a in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* rain.m4a */; };
+		A10000000000000000000009 /* gathering.m4a in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* gathering.m4a */; };
+		A1000000000000000000000A /* airport.m4a in Resources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A /* airport.m4a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -123,6 +133,16 @@
 		F425231C9A13610395A5BB50 /* SmartPhotoSelectionViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SmartPhotoSelectionViews.swift; path = Screens/SmartPhotoSelectionViews.swift; sourceTree = "<group>"; };
 		F4E142A91FFE69ADCC2046A2 /* PhotoAnalysisThumbnailService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PhotoAnalysisThumbnailService.swift; path = Models/PhotoAnalysisThumbnailService.swift; sourceTree = "<group>"; };
 		F526A17B9CB876B87F47972A /* SharedViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SharedViews.swift; path = Components/SharedViews.swift; sourceTree = "<group>"; };
+		A20000000000000000000001 /* MemoryAtmosphere.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MemoryAtmosphere.swift; path = Models/MemoryAtmosphere.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 /* ATMOSPHERE-CREDITS.txt */ = {isa = PBXFileReference; includeInIndex = 1; name = "ATMOSPHERE-CREDITS.txt"; path = "Resources/Atmospheres/ATMOSPHERE-CREDITS.txt"; sourceTree = "<group>"; };
+		A20000000000000000000003 /* city-day.m4a */ = {isa = PBXFileReference; includeInIndex = 1; name = "city-day.m4a"; path = "Resources/Atmospheres/city-day.m4a"; sourceTree = "<group>"; };
+		A20000000000000000000004 /* city-night.m4a */ = {isa = PBXFileReference; includeInIndex = 1; name = "city-night.m4a"; path = "Resources/Atmospheres/city-night.m4a"; sourceTree = "<group>"; };
+		A20000000000000000000005 /* coast.m4a */ = {isa = PBXFileReference; includeInIndex = 1; name = "coast.m4a"; path = "Resources/Atmospheres/coast.m4a"; sourceTree = "<group>"; };
+		A20000000000000000000006 /* forest.m4a */ = {isa = PBXFileReference; includeInIndex = 1; name = "forest.m4a"; path = "Resources/Atmospheres/forest.m4a"; sourceTree = "<group>"; };
+		A20000000000000000000007 /* river.m4a */ = {isa = PBXFileReference; includeInIndex = 1; name = "river.m4a"; path = "Resources/Atmospheres/river.m4a"; sourceTree = "<group>"; };
+		A20000000000000000000008 /* rain.m4a */ = {isa = PBXFileReference; includeInIndex = 1; name = "rain.m4a"; path = "Resources/Atmospheres/rain.m4a"; sourceTree = "<group>"; };
+		A20000000000000000000009 /* gathering.m4a */ = {isa = PBXFileReference; includeInIndex = 1; name = "gathering.m4a"; path = "Resources/Atmospheres/gathering.m4a"; sourceTree = "<group>"; };
+		A2000000000000000000000A /* airport.m4a */ = {isa = PBXFileReference; includeInIndex = 1; name = "airport.m4a"; path = "Resources/Atmospheres/airport.m4a"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -235,6 +255,7 @@
 				15DD6BE9BDEF8E825B997C3E /* SmartPhotoSelection.swift */,
 				CCF0A0C89D6083462203E304 /* TripGrouping.swift */,
 				7B4CEA6A7E939EDB475F36B9 /* TripReelModel.swift */,
+				A20000000000000000000001 /* MemoryAtmosphere.swift */,
 				EAF530D141430C09137C32C7 /* TripReelVideoExporter.swift */,
 				2E31473A3CB33C5D5CB4D6EA /* CloudAnalysisConsentView.swift */,
 				4AFF49FDB74E5D692B22CD8E /* EditingScreens.swift */,
@@ -253,6 +274,15 @@
 				D45ECD6526E214F3BDFCC42D /* simplicity.m4a */,
 				4B8DCE7DB532068210A25145 /* the-long-way-home.m4a */,
 				059FE7E4866A8AF9CF013B9E /* wanderlust.m4a */,
+				A20000000000000000000002 /* ATMOSPHERE-CREDITS.txt */,
+				A20000000000000000000003 /* city-day.m4a */,
+				A20000000000000000000004 /* city-night.m4a */,
+				A20000000000000000000005 /* coast.m4a */,
+				A20000000000000000000006 /* forest.m4a */,
+				A20000000000000000000007 /* river.m4a */,
+				A20000000000000000000008 /* rain.m4a */,
+				A20000000000000000000009 /* gathering.m4a */,
+				A2000000000000000000000A /* airport.m4a */,
 				15E226F655A7BA982EC4E231 /* Info.plist */,
 				63CBE16D649EB6FFA3FDBC6D /* TripReel.entitlements */,
 				8A2040FAA5B9327ABA708A6D /* OFL-InstrumentSerif.txt */,
@@ -383,6 +413,15 @@
 				92ADF9179B86A26013A97E9B /* simplicity.m4a in Resources */,
 				C8958BE9458C5EE1BA661721 /* the-long-way-home.m4a in Resources */,
 				C2C204742856C5D771777530 /* wanderlust.m4a in Resources */,
+				A10000000000000000000002 /* ATMOSPHERE-CREDITS.txt in Resources */,
+				A10000000000000000000003 /* city-day.m4a in Resources */,
+				A10000000000000000000004 /* city-night.m4a in Resources */,
+				A10000000000000000000005 /* coast.m4a in Resources */,
+				A10000000000000000000006 /* forest.m4a in Resources */,
+				A10000000000000000000007 /* river.m4a in Resources */,
+				A10000000000000000000008 /* rain.m4a in Resources */,
+				A10000000000000000000009 /* gathering.m4a in Resources */,
+				A1000000000000000000000A /* airport.m4a in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -425,6 +464,7 @@
 				9AFB23DDC4626709D361EC58 /* SmartPhotoSelection.swift in Sources */,
 				23AD737AE0ABFCB3D7D6FF6E /* TripGrouping.swift in Sources */,
 				FB8FB1D1717158D9392252F2 /* TripReelModel.swift in Sources */,
+				A10000000000000000000001 /* MemoryAtmosphere.swift in Sources */,
 				35E883DB509955329DED8640 /* TripReelVideoExporter.swift in Sources */,
 				02F83D5C53011524AE1398C8 /* CloudAnalysisConsentView.swift in Sources */,
 				B78502530C9BEFDEDF8FD390 /* EditingScreens.swift in Sources */,

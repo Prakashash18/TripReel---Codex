@@ -2154,10 +2154,40 @@ final class LocalSoundtrackPlayer: ObservableObject {
             stop()
             return
         }
+        play(
+            resourceName: resourceName,
+            identifier: "music-\(track.id)",
+            volume: volume,
+            restart: restart,
+            missingMessage: "This music preview is missing from the app."
+        )
+    }
+
+    func play(atmosphere: MemoryAtmosphere?, volume: Float = 0.22, restart: Bool = false) {
+        guard let atmosphere else {
+            stop()
+            return
+        }
+        play(
+            resourceName: atmosphere.resourceName,
+            identifier: "atmosphere-\(atmosphere.id)",
+            volume: volume,
+            restart: restart,
+            missingMessage: "This atmosphere preview is missing from the app."
+        )
+    }
+
+    private func play(
+        resourceName: String,
+        identifier: String,
+        volume: Float,
+        restart: Bool,
+        missingMessage: String
+    ) {
         finishTask?.cancel()
         finishTask = nil
         let safeVolume = min(1, max(0, volume))
-        if activeTrackID == track.id, isPlaying, !restart {
+        if activeTrackID == identifier, isPlaying, !restart {
             player?.volume = safeVolume
             return
         }
@@ -2165,8 +2195,9 @@ final class LocalSoundtrackPlayer: ObservableObject {
         stop(deactivateSession: false)
         errorMessage = nil
         guard let url = Bundle.main.url(forResource: resourceName, withExtension: "m4a")
-                ?? Bundle.main.url(forResource: resourceName, withExtension: "m4a", subdirectory: "Music") else {
-            errorMessage = "This music preview is missing from the app."
+                ?? Bundle.main.url(forResource: resourceName, withExtension: "m4a", subdirectory: "Music")
+                ?? Bundle.main.url(forResource: resourceName, withExtension: "m4a", subdirectory: "Atmospheres") else {
+            errorMessage = missingMessage
             return
         }
 
@@ -2180,7 +2211,7 @@ final class LocalSoundtrackPlayer: ObservableObject {
             player.prepareToPlay()
             guard player.play() else { throw SoundtrackError.couldNotStart }
             self.player = player
-            activeTrackID = track.id
+            activeTrackID = identifier
             isPlaying = player.isPlaying
         } catch {
             errorMessage = "Audio preview is unavailable on the current output."

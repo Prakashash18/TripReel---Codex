@@ -4715,6 +4715,7 @@ private struct MusicSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectionFeedback = 0
+    @StateObject private var atmospherePreview = LocalSoundtrackPlayer()
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -4743,6 +4744,8 @@ private struct MusicSheet: View {
                     .foregroundStyle(.white.opacity(0.38))
                     .lineSpacing(3)
 
+                atmosphereSection
+
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Cut to the beat")
@@ -4767,6 +4770,7 @@ private struct MusicSheet: View {
             .padding(.bottom, 38)
         }
         .sensoryFeedback(.selection, trigger: selectionFeedback)
+        .onDisappear { atmospherePreview.stop() }
     }
 
     private var beatNote: String {
@@ -4821,6 +4825,121 @@ private struct MusicSheet: View {
         }
         .buttonStyle(TactileButtonStyle())
         .accessibilityValue(active ? "Selected" : "Not selected")
+    }
+
+    private var atmosphereSection: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                .padding(.vertical, 5)
+
+            MetadataText(text: "MEMORY ATMOSPHERE", color: TR.accent)
+            Text("A quiet environmental layer matched on this iPhone from the memory’s place and imagery. Original clip audio always stays in front.")
+                .font(TR.ui(12))
+                .foregroundStyle(.white.opacity(0.56))
+                .lineSpacing(4)
+
+            Button {
+                model.useRecommendedAtmosphere()
+                atmospherePreview.play(atmosphere: model.selectedAtmosphere, restart: true)
+                selectionFeedback += 1
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "wand.and.stars")
+                        .frame(width: 34, height: 34)
+                        .background(TR.accent.opacity(0.16))
+                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Director’s choice")
+                            .font(TR.ui(14, weight: .semibold))
+                        Text(model.recommendedAtmosphere?.name ?? "Matched on this iPhone")
+                            .font(TR.ui(11))
+                            .foregroundStyle(.white.opacity(0.54))
+                    }
+                    Spacer()
+                    if model.usesAutomaticAtmosphere {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(TR.accent)
+                    }
+                }
+                .foregroundStyle(TR.cream)
+                .padding(13)
+                .background(model.usesAutomaticAtmosphere ? TR.accent.opacity(0.10) : .white.opacity(0.04))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(model.usesAutomaticAtmosphere ? TR.accent.opacity(0.46) : .white.opacity(0.10)))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(TactileButtonStyle())
+
+            ForEach(model.atmospheres) { atmosphere in
+                atmosphereRow(atmosphere)
+            }
+
+            Button {
+                model.disableAtmosphere()
+                atmospherePreview.stop()
+                selectionFeedback += 1
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "speaker.slash")
+                        .frame(width: 34, height: 34)
+                        .background(.white.opacity(0.07))
+                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    Text("No atmosphere")
+                        .font(TR.ui(14, weight: .semibold))
+                    Spacer()
+                    if !model.usesAutomaticAtmosphere && model.selectedAtmosphere == nil {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(TR.accent)
+                    }
+                }
+                .foregroundStyle(TR.cream)
+                .padding(13)
+                .background(.white.opacity(0.04))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.10)))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(TactileButtonStyle())
+
+            Link(destination: URL(string: MemoryAtmosphereCatalog.licenseURL)!) {
+                Label("Environmental recordings from Mixkit · Free commercial licence", systemImage: "checkmark.seal")
+                    .font(TR.ui(10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.45))
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func atmosphereRow(_ atmosphere: MemoryAtmosphere) -> some View {
+        let active = !model.usesAutomaticAtmosphere && model.selectedAtmosphereID == atmosphere.id
+        return Button {
+            model.selectAtmosphere(atmosphere)
+            atmospherePreview.play(atmosphere: atmosphere, restart: true)
+            selectionFeedback += 1
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: atmosphere.symbol)
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 34, height: 34)
+                    .background(TR.keep.opacity(0.14))
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(atmosphere.name)
+                        .font(TR.ui(14, weight: .semibold))
+                    Text(atmosphere.detail)
+                        .font(TR.ui(11))
+                        .foregroundStyle(.white.opacity(0.54))
+                }
+                Spacer()
+                Image(systemName: active ? "checkmark.circle.fill" : "play.circle")
+                    .foregroundStyle(active ? TR.accent : .white.opacity(0.42))
+            }
+            .foregroundStyle(TR.cream)
+            .padding(13)
+            .background(active ? TR.accent.opacity(0.10) : .white.opacity(0.04))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(active ? TR.accent.opacity(0.46) : .white.opacity(0.10)))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(TactileButtonStyle())
+        .accessibilityLabel("\(atmosphere.name), \(atmosphere.detail)")
+        .accessibilityValue(active ? "Selected" : "Not selected")
+        .accessibilityHint("Selects and previews this atmosphere")
     }
 }
 

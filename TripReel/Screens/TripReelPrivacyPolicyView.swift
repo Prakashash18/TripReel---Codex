@@ -148,7 +148,7 @@ struct MemoriesTermsOfUseView: View {
                         )
                         termsSection(
                             "Music and app assets",
-                            "Music, fonts, graphics, and other assets supplied by Memories remain owned by their respective licensors. You may use them only as incorporated into stories created and exported through Memories. When sharing an export that includes bundled music, preserve or provide the attribution shown in Music Credits."
+                            "Music, environmental recordings, fonts, graphics, and other assets supplied by Memories remain owned by their respective licensors. You may use them only as incorporated into stories created and exported through Memories. Memory Atmosphere is selected on-device from broad place text, capture time, and image classifications; this matching does not send location or imagery to an audio provider. When sharing an export that includes bundled music, preserve or provide the attribution shown in Music Credits."
                         )
                         termsSection(
                             "Purchases",

@@ -17,6 +17,7 @@ struct TripReelVideoExportRequest: Sendable {
     let motionIntensity: MontageMotionIntensity
     let quality: ExportQuality
     let soundtrackURL: URL?
+    let atmosphereURL: URL?
 }
 
 enum TripReelVideoExportPhase: Equatable, Sendable {
@@ -228,7 +229,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             let containsSourceAudio = request.photos.contains {
                 $0.isVideo && $0.hasOriginalAudio
             }
-            if request.soundtrackURL != nil || containsSourceAudio {
+            if request.soundtrackURL != nil || request.atmosphereURL != nil || containsSourceAudio {
                 progress(
                     TripReelVideoExportProgress(
                         fraction: 0.91,
@@ -1110,6 +1111,38 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             hasMixedAudio = true
         }
 
+        var atmosphereParameters: AVMutableAudioMixInputParameters?
+        if let atmosphereURL = request.atmosphereURL {
+            let atmosphereAsset = AVURLAsset(url: atmosphereURL)
+            let atmosphereDuration = try await atmosphereAsset.load(.duration)
+            let atmosphereTracks = try await atmosphereAsset.loadTracks(withMediaType: .audio)
+            guard let sourceAtmosphereTrack = atmosphereTracks.first,
+                  atmosphereDuration > .zero,
+                  let atmosphereTrack = audioComposition.addMutableTrack(
+                    withMediaType: .audio,
+                    preferredTrackID: kCMPersistentTrackID_Invalid
+                  ) else {
+                throw TripReelVideoExportError.soundtrackFailed
+            }
+            var cursor = CMTime.zero
+            while cursor < videoDuration {
+                try Task.checkCancellation()
+                let remaining = CMTimeSubtract(videoDuration, cursor)
+                let segmentDuration = CMTimeMinimum(atmosphereDuration, remaining)
+                try atmosphereTrack.insertTimeRange(
+                    CMTimeRange(start: .zero, duration: segmentDuration),
+                    of: sourceAtmosphereTrack,
+                    at: cursor
+                )
+                cursor = CMTimeAdd(cursor, segmentDuration)
+            }
+            let parameters = AVMutableAudioMixInputParameters(track: atmosphereTrack)
+            parameters.setVolume(0.12, at: .zero)
+            atmosphereParameters = parameters
+            mixParameters.append(parameters)
+            hasMixedAudio = true
+        }
+
         if let sourceTrack = audioComposition.addMutableTrack(
             withMediaType: .audio,
             preferredTrackID: kCMPersistentTrackID_Invalid
@@ -1174,6 +1207,10 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                     soundtrackParameters.setVolume(0.24, at: cursor)
                     soundtrackParameters.setVolume(0.68, at: CMTimeAdd(cursor, clipDuration))
                 }
+                if let atmosphereParameters {
+                    atmosphereParameters.setVolume(0.04, at: cursor)
+                    atmosphereParameters.setVolume(0.12, at: CMTimeAdd(cursor, clipDuration))
+                }
             }
             if hasSourceAudio {
                 mixParameters.append(sourceParameters)
@@ -1190,6 +1227,21 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 let fadeStart = CMTimeSubtract(videoDuration, fadeDuration)
                 soundtrackParameters.setVolumeRamp(
                     fromStartVolume: 0.68,
+                    toEndVolume: 0,
+                    timeRange: CMTimeRange(start: fadeStart, duration: fadeDuration)
+                )
+            }
+        }
+
+        if let atmosphereParameters {
+            let fadeDuration = CMTimeMinimum(
+                CMTime(seconds: 1.1, preferredTimescale: 600),
+                CMTimeMultiplyByFloat64(videoDuration, multiplier: 0.18)
+            )
+            if fadeDuration > .zero {
+                let fadeStart = CMTimeSubtract(videoDuration, fadeDuration)
+                atmosphereParameters.setVolumeRamp(
+                    fromStartVolume: 0.12,
                     toEndVolume: 0,
                     timeRange: CMTimeRange(start: fadeStart, duration: fadeDuration)
                 )

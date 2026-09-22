@@ -2354,6 +2354,9 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var titleDrafts: [TitleCardKind: TitleCardDraft] = [:]
     @Published private(set) var textOverlays: [MontageTextOverlay] = []
     @Published var selectedTrackID: String? = "wanderlust"
+    @Published private(set) var recommendedAtmosphereID: String?
+    @Published private(set) var selectedAtmosphereID: String?
+    @Published private(set) var usesAutomaticAtmosphere = true
     @Published var cutToBeat = true
     @Published var selectedFormatID = "sequence"
     @Published var cleanupSelection: Set<String> = []
@@ -3058,6 +3061,16 @@ final class TripReelModel: ObservableObject {
 
     var selectedTrack: MusicTrack? {
         tracks.first { $0.id == selectedTrackID }
+    }
+
+    var atmospheres: [MemoryAtmosphere] { MemoryAtmosphereCatalog.all }
+
+    var selectedAtmosphere: MemoryAtmosphere? {
+        MemoryAtmosphereCatalog.atmosphere(withID: selectedAtmosphereID)
+    }
+
+    var recommendedAtmosphere: MemoryAtmosphere? {
+        MemoryAtmosphereCatalog.atmosphere(withID: recommendedAtmosphereID)
     }
 
     func musicTrack(withID id: String?) -> MusicTrack? {
@@ -5436,6 +5449,14 @@ final class TripReelModel: ObservableObject {
         guard !trip.assets.isEmpty else { return }
         let isNearbyTrip = nearbyEvents.contains(where: { $0.id == trip.id })
         selectedTrip = trip
+        let atmosphere = MemoryAtmosphereCatalog.recommended(
+            place: trip.place,
+            insights: trip.assets.compactMap { activePhotoInsights[$0.id] },
+            captureDates: trip.assets.compactMap(\.creationDate)
+        )
+        recommendedAtmosphereID = atmosphere.id
+        selectedAtmosphereID = atmosphere.id
+        usesAutomaticAtmosphere = true
         photoEditOverrides = [:]
         photos = Self.makeReelPhotos(
             from: trip,
@@ -5635,6 +5656,21 @@ final class TripReelModel: ObservableObject {
         } else {
             selectedTrackID = track.id
         }
+    }
+
+    func useRecommendedAtmosphere() {
+        usesAutomaticAtmosphere = true
+        selectedAtmosphereID = recommendedAtmosphereID
+    }
+
+    func selectAtmosphere(_ atmosphere: MemoryAtmosphere) {
+        usesAutomaticAtmosphere = false
+        selectedAtmosphereID = atmosphere.id
+    }
+
+    func disableAtmosphere() {
+        usesAutomaticAtmosphere = false
+        selectedAtmosphereID = nil
     }
 
     func setFrameStyle(_ frameStyle: MontageFrameStyle, forPhotoID id: String) {
@@ -5843,7 +5879,8 @@ final class TripReelModel: ObservableObject {
             quality: exportQuality,
             soundtrackURL: selectedTrack?.resourceName.flatMap {
                 Bundle.main.url(forResource: $0, withExtension: "m4a")
-            }
+            },
+            atmosphereURL: selectedAtmosphere?.bundledURL
         )
         let exporter = videoExporter
         workTask = Task(priority: .userInitiated) { [weak self] in
