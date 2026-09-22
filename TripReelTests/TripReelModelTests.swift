@@ -1306,9 +1306,7 @@ final class TripReelModelTests: XCTestCase {
         model.titleCards = [.opening, .ending]
         model.startRender(hd: true)
 
-        for _ in 0..<50 where model.screen != .done {
-            await Task.yield()
-        }
+        await waitForDone(model)
 
         XCTAssertEqual(model.screen, .done)
         XCTAssertNotNil(model.exportedVideoURL)
@@ -1361,9 +1359,7 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertFalse(model.fullStoryHighlightPhotos.isEmpty)
 
         model.requestExport(.standard, isUnlocked: false)
-        for _ in 0..<100 where model.screen != .done {
-            await Task.yield()
-        }
+        await waitForDone(model)
 
         XCTAssertEqual(model.screen, .done)
         let recordedRequest = await exporter.lastRequest
@@ -1413,9 +1409,7 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(model.screen, .paywall)
 
         model.exportFreeVersionInsteadOfUpgrading()
-        for _ in 0..<250 where model.screen != .done {
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
+        await waitForDone(model)
 
         XCTAssertEqual(model.screen, .done)
         XCTAssertNil(model.pendingExportIntent)
@@ -1463,9 +1457,7 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertTrue(model.exportErrorMessage?.contains("kept every edit safe") == true)
 
         model.retryExportPhotoDownload()
-        for _ in 0..<100 where model.screen != .done {
-            try await Task.sleep(nanoseconds: 10_000_000)
-        }
+        await waitForDone(model)
 
         XCTAssertEqual(model.screen, .done)
         let qualities = await exporter.recordedQualities()
@@ -1509,9 +1501,7 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertFalse(model.exportCanRetryPhotoDownload)
 
         model.retryExportAfterFrameFailure()
-        for _ in 0..<100 where model.screen != .done {
-            try await Task.sleep(nanoseconds: 10_000_000)
-        }
+        await waitForDone(model)
 
         XCTAssertEqual(model.screen, .done)
         let qualities = await exporter.recordedQualities()

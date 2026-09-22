@@ -88,12 +88,18 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject {
         self.defaults = defaults
         #if DEBUG
         let grantsQAFullExportAccess = ProcessInfo.processInfo.arguments.contains("-qaPremium")
+        let isRunningAutomatedTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || NSClassFromString("XCTestCase") != nil
         #else
         let grantsQAFullExportAccess = false
+        let isRunningAutomatedTests = false
         #endif
         self.grantsQAFullExportAccess = grantsQAFullExportAccess
 
-        if grantsQAFullExportAccess {
+        // Unit tests host the real app process. Never let that process configure
+        // RevenueCat or contact its production backend; purchase UI tests opt in
+        // through `-qaPremium` and use the deterministic local unlock instead.
+        if grantsQAFullExportAccess || isRunningAutomatedTests {
             apiKey = nil
             storyPassPackageIdentifier = Self.defaultStoryPassPackageIdentifier
             super.init()
