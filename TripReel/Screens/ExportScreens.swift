@@ -878,7 +878,7 @@ struct PaywallScreen: View {
                         .background(TR.keep.opacity(0.13), in: Circle())
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("3 free exports return (resetDate.formatted(.dateTime.day().month(.wide)))")
+                        Text("3 free exports return \(resetDate.formatted(.dateTime.day().month(.wide)))")
                             .font(TR.ui(14, weight: .semibold))
                         Text("Come back next month for three more full 1080p exports.")
                             .font(TR.ui(12))

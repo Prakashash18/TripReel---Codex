@@ -138,6 +138,11 @@ struct MonthlyExportResetNotificationScheduler {
         await center.pendingNotificationRequests().contains { $0.identifier == Self.identifier }
     }
 
+    func cancel() {
+        center.removePendingNotificationRequests(withIdentifiers: [Self.identifier])
+        center.removeDeliveredNotifications(withIdentifiers: [Self.identifier])
+    }
+
     func schedule(for resetDate: Date) async -> Bool {
         var settings = await center.notificationSettings()
         if settings.authorizationStatus == .notDetermined {

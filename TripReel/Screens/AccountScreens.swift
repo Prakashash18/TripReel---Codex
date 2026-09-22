@@ -14,6 +14,8 @@ struct AccountCenterView: View {
     let context: AccountPresentationContext
     @State private var nonce: String?
     @State private var showsAccountDeletion = false
+    @State private var freeExportReminderSet = false
+    @State private var freeExportReminderMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -36,7 +38,13 @@ struct AccountCenterView: View {
             }
             .toolbarBackground(.hidden, for: .navigationBar)
         }
-        .task { await account.restoreSession() }
+        .task {
+            await account.restoreSession()
+            if account.isSignedIn {
+                await account.refreshMonthlyExportAllowance()
+            }
+            freeExportReminderSet = await MonthlyExportResetNotificationScheduler().isScheduled()
+        }
         .alert(
             "Memories account",
             isPresented: Binding(
@@ -128,20 +136,52 @@ struct AccountCenterView: View {
             .padding(16)
             .glassCard(cornerRadius: 18)
 
-            HStack(spacing: 13) {
-                Image(systemName: "gift.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(TR.keep)
-                    .frame(width: 38, height: 38)
-                    .background(TR.keep.opacity(0.12), in: Circle())
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Monthly full exports")
-                        .font(TR.ui(14, weight: .semibold))
-                    Text("\(account.monthlyExportAllowance.remaining) of 3 remaining")
-                        .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.52))
+            VStack(alignment: .leading, spacing: 13) {
+                HStack(spacing: 13) {
+                    Image(systemName: "gift.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(TR.keep)
+                        .frame(width: 38, height: 38)
+                        .background(TR.keep.opacity(0.12), in: Circle())
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Monthly full exports")
+                            .font(TR.ui(14, weight: .semibold))
+                        Text("\(account.monthlyExportAllowance.remaining) of 3 remaining")
+                            .font(TR.ui(11))
+                            .foregroundStyle(.white.opacity(0.52))
+                        if let resetDate = MonthlyExportResetNotificationScheduler.nextResetDate() {
+                            Text("Resets \(resetDate.formatted(.dateTime.day().month(.wide)))")
+                                .font(TR.ui(11, weight: .medium))
+                                .foregroundStyle(TR.keep.opacity(0.86))
+                        }
+                    }
+                    Spacer()
                 }
-                Spacer()
+
+                if let resetDate = MonthlyExportResetNotificationScheduler.nextResetDate() {
+                    Divider().overlay(.white.opacity(0.09))
+
+                    Button {
+                        updateFreeExportReminder(for: resetDate)
+                    } label: {
+                        Label(
+                            freeExportReminderSet ? "Reset reminder on" : "Notify me when exports reset",
+                            systemImage: freeExportReminderSet ? "bell.badge.fill" : "bell"
+                        )
+                        .font(TR.ui(12, weight: .semibold))
+                        .foregroundStyle(freeExportReminderSet ? TR.keep : TR.cream)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("account-monthly-export-reset-reminder")
+
+                    if let freeExportReminderMessage {
+                        Text(freeExportReminderMessage)
+                            .font(TR.ui(10, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.52))
+                    }
+                }
             }
             .padding(16)
             .glassCard(cornerRadius: 18, highlighted: account.monthlyExportAllowance.remaining > 0)
@@ -209,6 +249,24 @@ struct AccountCenterView: View {
             .foregroundStyle(TR.cream)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 16)
+    }
+
+    private func updateFreeExportReminder(for resetDate: Date) {
+        let scheduler = MonthlyExportResetNotificationScheduler()
+        if freeExportReminderSet {
+            scheduler.cancel()
+            freeExportReminderSet = false
+            freeExportReminderMessage = "Reset reminder turned off."
+            return
+        }
+
+        Task {
+            let scheduled = await scheduler.schedule(for: resetDate)
+            freeExportReminderSet = scheduled
+            freeExportReminderMessage = scheduled
+                ? "We’ll remind you on \(resetDate.formatted(.dateTime.day().month(.wide)))."
+                : "Turn on notifications in iPhone Settings to receive this reminder."
+        }
     }
 
     private func handleAppleResult(_ result: Result<ASAuthorization, Error>) {
