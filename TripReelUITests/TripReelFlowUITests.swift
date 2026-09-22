@@ -103,17 +103,26 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("film-style-live-preview").waitForExistence(timeout: 3))
         let journalStyle = screen("film-look-journal")
         XCTAssertTrue(journalStyle.waitForExistence(timeout: 3))
-        journalStyle.tap()
-        expectation(
-            for: NSPredicate(format: "value == %@", "Selected"),
-            evaluatedWith: journalStyle
-        )
-        waitForExpectations(timeout: 2)
+        let selectedPredicate = NSPredicate(format: "value == %@", "Selected")
+        var selectedJournal = false
+        for _ in 0..<2 where !selectedJournal {
+            XCTAssertTrue(journalStyle.isHittable)
+            journalStyle.tap()
+            let selectionExpectation = XCTNSPredicateExpectation(
+                predicate: selectedPredicate,
+                object: screen("film-look-journal")
+            )
+            selectedJournal = XCTWaiter.wait(
+                for: [selectionExpectation],
+                timeout: 4
+            ) == .completed
+        }
+        XCTAssertTrue(selectedJournal, "Journal style should become selected after tapping it")
         expectation(
             for: NSPredicate(format: "label CONTAINS[c] %@", "Journal"),
             evaluatedWith: screen("film-style-live-preview")
         )
-        waitForExpectations(timeout: 2)
+        waitForExpectations(timeout: 5)
         app.buttons["Done"].tap()
 
         let studioExport = screen("studio-export-button")

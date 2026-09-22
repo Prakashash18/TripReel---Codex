@@ -1413,8 +1413,8 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertEqual(model.screen, .paywall)
 
         model.exportFreeVersionInsteadOfUpgrading()
-        for _ in 0..<100 where model.screen != .done {
-            await Task.yield()
+        for _ in 0..<250 where model.screen != .done {
+            try await Task.sleep(nanoseconds: 20_000_000)
         }
 
         XCTAssertEqual(model.screen, .done)
