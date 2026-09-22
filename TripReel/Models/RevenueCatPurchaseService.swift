@@ -173,8 +173,13 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject {
 
     /// RevenueCat's StoreProduct is backed by StoreKit and already contains
     /// Apple's localized storefront price, including TestFlight's sandbox.
+    ///
+    /// RevenueCat Test Store products can carry a dashboard-authored placeholder
+    /// such as "$0.99". Only expose a price that came from the StoreKit product
+    /// attached to this package, so the app cannot present that placeholder as
+    /// the customer's real App Store price.
     func displayPrice(for package: Package) -> String? {
-        return package.localizedPriceString
+        package.storeProduct.sk2Product?.displayPrice
     }
 
     func hasFullExportAccess(for storyID: String) -> Bool {
