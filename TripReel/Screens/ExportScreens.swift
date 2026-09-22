@@ -716,6 +716,8 @@ struct PaywallScreen: View {
     @State private var didResumeExport = false
     @State private var celebration: ExportUnlockCelebration?
     @State private var showsAccount = false
+    @State private var freeExportReminderSet = false
+    @State private var freeExportReminderMessage: String?
 
     var body: some View {
         ZStack {
@@ -753,6 +755,8 @@ struct PaywallScreen: View {
                     }
 
                     monthlyExportOption
+
+                    freeExportResetOption
 
                     if purchases.isConfigured {
                         if purchases.isLoading && purchases.packages.isEmpty {
@@ -820,7 +824,12 @@ struct PaywallScreen: View {
             }
         }
         .task {
-            await purchases.refresh()
+            async let purchaseRefresh: Void = purchases.refresh()
+            if account.isSignedIn {
+                await account.refreshMonthlyExportAllowance()
+            }
+            await purchaseRefresh
+            freeExportReminderSet = await MonthlyExportResetNotificationScheduler().isScheduled()
         }
         .sheet(isPresented: $showsPrivacyPolicy) {
             TripReelPrivacyPolicyView()
@@ -855,6 +864,58 @@ struct PaywallScreen: View {
     }
 
     @ViewBuilder
+    private var freeExportResetOption: some View {
+        if account.isSignedIn,
+           account.hasLoadedMonthlyExportAllowance,
+           account.monthlyExportAllowance.remaining == 0,
+           let resetDate = MonthlyExportResetNotificationScheduler.nextResetDate() {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "calendar.badge.clock")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(TR.keep)
+                        .frame(width: 40, height: 40)
+                        .background(TR.keep.opacity(0.13), in: Circle())
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("3 free exports return (resetDate.formatted(.dateTime.day().month(.wide)))")
+                            .font(TR.ui(14, weight: .semibold))
+                        Text("Come back next month for three more full 1080p exports.")
+                            .font(TR.ui(12))
+                            .foregroundStyle(.white.opacity(0.58))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Button {
+                    scheduleFreeExportReminder(for: resetDate)
+                } label: {
+                    Label(
+                        freeExportReminderSet ? "Reminder set" : "Remind me when they’re back",
+                        systemImage: freeExportReminderSet ? "checkmark.circle.fill" : "bell"
+                    )
+                    .font(TR.ui(13, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(.white.opacity(0.08), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(freeExportReminderSet)
+                .accessibilityIdentifier("monthly-export-reset-reminder")
+
+                if let freeExportReminderMessage {
+                    Text(freeExportReminderMessage)
+                        .font(TR.ui(11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+            }
+            .padding(17)
+            .glassCard(cornerRadius: 22)
+        }
+    }
+
+    @ViewBuilder
     private var monthlyExportOption: some View {
         if account.isSignedIn, account.monthlyExportAllowance.remaining > 0 {
             Button {
@@ -866,6 +927,11 @@ struct PaywallScreen: View {
                     Text("\(account.monthlyExportAllowance.remaining) of 3 left this month")
                         .font(TR.ui(11, weight: .medium))
                         .opacity(0.7)
+                    if let resetDate = MonthlyExportResetNotificationScheduler.nextResetDate() {
+                        Text("Resets \(resetDate.formatted(.dateTime.day().month(.wide)))")
+                            .font(TR.ui(10, weight: .medium))
+                            .opacity(0.56)
+                    }
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -887,29 +953,61 @@ struct PaywallScreen: View {
     @ViewBuilder
     private var purchaseOption: some View {
         if let storyPass = purchases.storyPassPackage {
-            Button {
-                buySelectedPackage(storyPass)
-            } label: {
-                VStack(spacing: 4) {
+            let price = purchases.displayPrice(for: storyPass)
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Keep every moment—not just the trailer.")
+                        .font(TR.ui(17, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Unlock this complete film in 1080p, without a watermark.")
+                        .font(TR.ui(13))
+                        .foregroundStyle(.white.opacity(0.64))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("STORY PASS")
+                            .font(TR.mono(10, weight: .semibold))
+                            .tracking(1.5)
+                            .foregroundStyle(TR.accent)
+                        Text("One-time · No subscription")
+                            .font(TR.ui(11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.52))
+                    }
+                    Spacer(minLength: 12)
+                    Text(price ?? "Apple price")
+                        .font(TR.ui(23, weight: .bold))
+                        .foregroundStyle(TR.accent)
+                        .minimumScaleFactor(0.72)
+                        .lineLimit(1)
+                }
+
+                Text("Apple’s localized price for your App Store region.")
+                    .font(TR.ui(11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.5))
+
+                Button {
+                    buySelectedPackage(storyPass)
+                } label: {
                     HStack(spacing: 8) {
                         if purchases.isPurchasing {
-                            ProgressView().controlSize(.small).tint(TR.cream)
+                            ProgressView().controlSize(.small).tint(.black)
                         }
-                        Text(purchases.isPurchasing ? "Connecting to App Store…" : "Buy Story Pass")
-                        if let price = purchases.displayPrice(for: storyPass), !purchases.isPurchasing {
-                            Text("· \(price)")
-                        }
+                        Text(
+                            purchases.isPurchasing
+                                ? "Connecting to App Store…"
+                                : price.map { "Buy full story · \($0)" } ?? "Buy full story"
+                        )
                     }
-                    .font(TR.ui(16, weight: .semibold))
-                    Text("One-time for this story · Apple confirms the price")
-                        .font(TR.ui(11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.62))
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity)
+                .buttonStyle(CreamButtonStyle())
+                .disabled(purchases.isPurchasing)
+                .accessibilityIdentifier("purchase-full-story")
             }
-            .buttonStyle(GlassButtonStyle())
-            .disabled(purchases.isPurchasing)
-            .accessibilityIdentifier("purchase-full-story")
+            .padding(18)
+            .glassCard(cornerRadius: 24, highlighted: true)
         }
     }
 
@@ -933,6 +1031,16 @@ struct PaywallScreen: View {
         Task {
             guard await account.claimMonthlyExport(storyID: model.exportStoryID) else { return }
             celebration = .monthlyGift
+        }
+    }
+
+    private func scheduleFreeExportReminder(for resetDate: Date) {
+        Task {
+            let scheduled = await MonthlyExportResetNotificationScheduler().schedule(for: resetDate)
+            freeExportReminderSet = scheduled
+            freeExportReminderMessage = scheduled
+                ? "We’ll remind you on \(resetDate.formatted(.dateTime.day().month(.wide)))."
+                : "Allow notifications in Settings to receive this reminder."
         }
     }
 

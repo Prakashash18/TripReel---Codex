@@ -127,6 +127,7 @@ final class MemoryAccountService: ObservableObject {
     @Published private(set) var memories: [SharedMemory] = []
     @Published private(set) var monthlyExportAllowance = MonthlyExportAllowance.unavailable
     @Published private(set) var isLoadingMonthlyAllowance = false
+    @Published private(set) var hasLoadedMonthlyExportAllowance = false
     @Published private(set) var isBusy = false
     @Published private(set) var shareLinkCreationPhase: ShareLinkCreationPhase = .idle
     @Published private(set) var downloadingMemoryID: UUID?
@@ -216,6 +217,7 @@ final class MemoryAccountService: ObservableObject {
             userEmail = nil
             memories = []
             monthlyExportAllowance = .unavailable
+            hasLoadedMonthlyExportAllowance = false
             await expiryNotificationScheduler.cancelAll()
         } catch {
             message = "Couldn’t sign out. Check your connection and try again."
@@ -259,6 +261,7 @@ final class MemoryAccountService: ObservableObject {
     func refreshMonthlyExportAllowance() async {
         guard let client, userID != nil else {
             monthlyExportAllowance = .unavailable
+            hasLoadedMonthlyExportAllowance = false
             return
         }
 
@@ -271,11 +274,13 @@ final class MemoryAccountService: ObservableObject {
                 .value
             if let allowance = rows.first {
                 monthlyExportAllowance = allowance
+                hasLoadedMonthlyExportAllowance = true
             }
         } catch {
             // Older builds can run before the allowance migration is applied.
             // Keep Story Pass available and avoid presenting an unusable free claim.
             monthlyExportAllowance = .unavailable
+            hasLoadedMonthlyExportAllowance = false
         }
     }
 
@@ -561,6 +566,7 @@ final class MemoryAccountService: ObservableObject {
         if session == nil {
             memories = []
             monthlyExportAllowance = .unavailable
+            hasLoadedMonthlyExportAllowance = false
             Task { await expiryNotificationScheduler.cancelAll() }
         }
     }

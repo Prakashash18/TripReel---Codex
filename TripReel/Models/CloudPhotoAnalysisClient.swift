@@ -781,6 +781,8 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
     static let maximumBatchSize = 36
     static let maximumThumbnailBytes = 128 * 1_024
     static let maximumStoryContextCharacters = 160
+    static let requestTimeout: TimeInterval = 75
+    static let resourceTimeout: TimeInterval = 90
     static let endpointInfoPlistKey = "TRIPREEL_PHOTO_ANALYSIS_ENDPOINT"
 
     let isConfigured: Bool
@@ -788,6 +790,7 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
     private let endpoint: URL?
     private let session: URLSession
     private let authorizer: any CloudPhotoAnalysisAuthorizing
+    private let sleep: @Sendable (Duration) async throws -> Void
 
     convenience init(bundle: Bundle = .main) {
         var rawValue = bundle.object(forInfoDictionaryKey: Self.endpointInfoPlistKey) as? String
@@ -801,8 +804,8 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
         configuration.urlCache = nil
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
-        configuration.timeoutIntervalForRequest = 35
-        configuration.timeoutIntervalForResource = 45
+        configuration.timeoutIntervalForRequest = Self.requestTimeout
+        configuration.timeoutIntervalForResource = Self.resourceTimeout
         let session = URLSession(configuration: configuration)
         let authorizer: any CloudPhotoAnalysisAuthorizing
 #if DEBUG
@@ -835,11 +838,15 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
     init(
         endpoint: URL?,
         session: URLSession,
-        authorizer: any CloudPhotoAnalysisAuthorizing
+        authorizer: any CloudPhotoAnalysisAuthorizing,
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { duration in
+            try await Task.sleep(for: duration)
+        }
     ) {
         self.endpoint = endpoint
         self.session = session
         self.authorizer = authorizer
+        self.sleep = sleep
         isConfigured = (endpoint.map { Self.isValidHTTPSURL($0) } ?? false) && authorizer.isReady
     }
 
@@ -906,7 +913,7 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
             for attempt in 0..<2 {
                 var request = URLRequest(url: endpoint)
                 request.httpMethod = "POST"
-                request.timeoutInterval = 35
+                request.timeoutInterval = Self.requestTimeout
                 request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -929,7 +936,19 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
                 request.httpBody = encodedBody
 
                 // Never log the request, response body, image data, or asset identifiers.
-                let (data, response) = try await session.data(for: request)
+                let data: Data
+                let response: URLResponse
+                do {
+                    (data, response) = try await session.data(for: request)
+                } catch {
+                    if attempt == 0,
+                       let urlError = error as? URLError,
+                       Self.isRetryableTransportError(urlError) {
+                        try await sleep(.milliseconds(800))
+                        continue
+                    }
+                    throw error
+                }
                 guard let httpResponse = response as? HTTPURLResponse else {
                     throw CloudPhotoAnalysisError.invalidResponse
                 }
@@ -948,6 +967,14 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
                        afterStatusCode: httpResponse.statusCode,
                        responseBody: data
                    ) {
+                    continue
+                }
+                if attempt == 0,
+                   Self.isRetryableServerFailure(
+                       statusCode: httpResponse.statusCode,
+                       code: serverCode
+                   ) {
+                    try await sleep(.milliseconds(800))
                     continue
                 }
                 throw CloudPhotoAnalysisError.server(
@@ -978,6 +1005,26 @@ final class CloudPhotoAnalysisClient: CloudPhotoAnalysisServing, @unchecked Send
             )
         } catch {
             throw CloudPhotoAnalysisError.invalidResponse
+        }
+    }
+
+    private static func isRetryableTransportError(_ error: URLError) -> Bool {
+        switch error.code {
+        case .timedOut, .networkConnectionLost, .cannotConnectToHost,
+             .cannotFindHost, .dnsLookupFailed:
+            true
+        default:
+            false
+        }
+    }
+
+    private static func isRetryableServerFailure(statusCode: Int, code: String?) -> Bool {
+        switch code {
+        case "upstream_timeout", "upstream_unavailable", "upstream_error",
+             "invalid_upstream_response", "request_timeout":
+            true
+        default:
+            statusCode >= 500 && statusCode != 501
         }
     }
 

@@ -16,9 +16,12 @@ export const LIMITS = Object.freeze({
   maxSceneLabels: 3,
   maxSceneLabelCharacters: 48,
   bodyReadTimeoutMs: 15_000,
-  defaultOpenAITimeoutMs: 30_000,
+  // The iOS client uploads a multi-image request before this timer begins.
+  // Give the model enough room to finish on normal mobile-network latency,
+  // while retaining a firm upper bound for privacy and cost control.
+  defaultOpenAITimeoutMs: 45_000,
   minOpenAITimeoutMs: 5_000,
-  maxOpenAITimeoutMs: 45_000,
+  maxOpenAITimeoutMs: 60_000,
   maxOpenAIResponseBytes: 128 * 1024,
 });
 

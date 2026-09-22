@@ -11,6 +11,34 @@ final class TripReelModelTests: XCTestCase {
         TripReelModel(arguments: [], useDemoData: true)
     }
 
+    func testAIDirectorAllowsEnoughTimeForUploadAndServerAnalysis() {
+        XCTAssertEqual(CloudPhotoAnalysisClient.requestTimeout, 75)
+        XCTAssertEqual(CloudPhotoAnalysisClient.resourceTimeout, 90)
+        XCTAssertGreaterThan(
+            CloudPhotoAnalysisClient.resourceTimeout,
+            CloudPhotoAnalysisClient.requestTimeout
+        )
+    }
+
+    func testMonthlyExportReminderUsesFirstDayOfNextMonthAtNine() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Asia/Singapore"))
+        let now = try XCTUnwrap(
+            calendar.date(from: DateComponents(year: 2026, month: 9, day: 21, hour: 22))
+        )
+        let reset = try XCTUnwrap(
+            MonthlyExportResetNotificationScheduler.nextResetDate(
+                after: now,
+                calendar: calendar
+            )
+        )
+
+        XCTAssertEqual(
+            calendar.dateComponents([.year, .month, .day, .hour, .minute], from: reset),
+            DateComponents(year: 2026, month: 10, day: 1, hour: 9, minute: 0)
+        )
+    }
+
     func testUnsavedMemorySchedulesReminderOneDayBeforeExpiry() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let memoryID = UUID(uuidString: "A1111111-1111-1111-1111-111111111111")!

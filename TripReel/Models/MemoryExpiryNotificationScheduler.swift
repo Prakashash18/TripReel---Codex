@@ -108,3 +108,67 @@ struct MemoryExpiryNotificationScheduler {
         identifierPrefix + memoryID.uuidString.lowercased()
     }
 }
+
+struct MonthlyExportResetNotificationScheduler {
+    static let identifier = "monthly-export-reset"
+
+    private let center: UNUserNotificationCenter
+    private let calendar: Calendar
+
+    init(
+        center: UNUserNotificationCenter = .current(),
+        calendar: Calendar = .autoupdatingCurrent
+    ) {
+        self.center = center
+        self.calendar = calendar
+    }
+
+    static func nextResetDate(
+        after date: Date = Date(),
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> Date? {
+        guard let monthStart = calendar.dateInterval(of: .month, for: date)?.start,
+              let nextMonth = calendar.date(byAdding: .month, value: 1, to: monthStart) else {
+            return nil
+        }
+        return calendar.date(bySettingHour: 9, minute: 0, second: 0, of: nextMonth)
+    }
+
+    func isScheduled() async -> Bool {
+        await center.pendingNotificationRequests().contains { $0.identifier == Self.identifier }
+    }
+
+    func schedule(for resetDate: Date) async -> Bool {
+        var settings = await center.notificationSettings()
+        if settings.authorizationStatus == .notDetermined {
+            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+            settings = await center.notificationSettings()
+        }
+        guard settings.authorizationStatus == .authorized ||
+                settings.authorizationStatus == .provisional else { return false }
+
+        center.removePendingNotificationRequests(withIdentifiers: [Self.identifier])
+        center.removeDeliveredNotifications(withIdentifiers: [Self.identifier])
+
+        let content = UNMutableNotificationContent()
+        content.title = "Your free exports are back"
+        content.body = "You have 3 free full-story exports ready in Memories."
+        content.sound = .default
+
+        let components = calendar.dateComponents(
+            [.calendar, .timeZone, .year, .month, .day, .hour, .minute],
+            from: resetDate
+        )
+        let request = UNNotificationRequest(
+            identifier: Self.identifier,
+            content: content,
+            trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        )
+        do {
+            try await center.add(request)
+            return true
+        } catch {
+            return false
+        }
+    }
+}

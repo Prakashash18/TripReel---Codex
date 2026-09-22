@@ -171,17 +171,9 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject {
         packages.first(where: isStoryPass)
     }
 
-    /// Sandbox product metadata may disagree with Apple's final payment sheet.
-    /// Never show a number when its storefront currency cannot be verified.
+    /// RevenueCat's StoreProduct is backed by StoreKit and already contains
+    /// Apple's localized storefront price, including TestFlight's sandbox.
     func displayPrice(for package: Package) -> String? {
-        if Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt" {
-            return nil
-        }
-        guard let storefrontCurrencyCode,
-              let productCurrencyCode = package.storeProduct.currencyCode,
-              storefrontCurrencyCode.caseInsensitiveCompare(productCurrencyCode) == .orderedSame else {
-            return nil
-        }
         return package.localizedPriceString
     }
 

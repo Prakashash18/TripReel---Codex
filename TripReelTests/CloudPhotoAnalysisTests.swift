@@ -326,6 +326,60 @@ final class CloudPhotoAnalysisTests: XCTestCase {
         XCTAssertEqual(result.treatment.look, .story)
     }
 
+    func testClientRetriesOneTransientUpstreamTimeoutThenUsesTheSuccessfulPlan() async throws {
+        let requests = LockedRequestList()
+        URLProtocolStub.handler = { request in
+            requests.append(request)
+            let attempt = requests.values().count
+            let statusCode = attempt == 1 ? 504 : 200
+            let data: Data
+            if attempt == 1 {
+                data = Data(#"{"error":{"code":"upstream_timeout","message":"Timed out"}}"#.utf8)
+            } else {
+                data = Data("""
+                {
+                  "model":"gpt-5.6-luna",
+                  "plan":{
+                    "version":2,"direction":"better_story","summary":"Open wide and finish warmly.",
+                    "story":{"title":"A day together","arc":"Move from place to people."},
+                    "hook":{"title":"Here we were","subtitle":"","style":"editorial","durationSeconds":2.0},
+                    "ending":{"enabled":true,"title":"Keep this one","subtitle":"","style":"clean","durationSeconds":2.0},
+                    "soundtrack":{"trackId":"simplicity","reason":"A warm rhythm supports the memory."},
+                    "treatment":{"look":"story","motionIntensity":"gentle","reason":"Natural movement keeps it personal."},
+                    "sequence":[{"photoId":"p0","order":0,"durationSeconds":2.4,"role":"opening","emphasis":"highlight","motion":"zoom_in"}]
+                  },
+                  "retention":{"proxyStored":false,"openAIStore":false,"abuseMonitoring":"up_to_30_days_unless_zdr"}
+                }
+                """.utf8)
+            }
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: request.url!,
+                statusCode: statusCode,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            ))
+            return (response, data)
+        }
+
+        let client = CloudPhotoAnalysisClient(
+            endpoint: URL(string: "https://analysis.example.test/v1/photo-analysis"),
+            session: makeSession(),
+            authorizer: TestCloudAuthorizer(),
+            sleep: { _ in }
+        )
+        let plan = try await client.createEditPlan(
+            direction: .betterStory,
+            photos: [.init(
+                id: "p0",
+                jpegData: Data([0xFF, 0xD8, 0xFF]),
+                localSelection: .firstCut
+            )]
+        )
+
+        XCTAssertEqual(requests.values().count, 2)
+        XCTAssertEqual(plan.hook.title, "Here we were")
+    }
+
     func testClientSendsComparativeDirectorContextAndDecodesMeasuredChanges() async throws {
         let response = """
         {
