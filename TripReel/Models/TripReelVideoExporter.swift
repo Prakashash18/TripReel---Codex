@@ -2,6 +2,7 @@ import AVFoundation
 import CoreGraphics
 import CoreVideo
 import ImageIO
+import OSLog
 import Photos
 import QuartzCore
 import UIKit
@@ -60,6 +61,7 @@ enum TripReelVideoExportError: LocalizedError, Sendable {
     case photoUnavailable(String)
     case cannotCreateWriter
     case cannotCreateFrame
+    case stalled
     case encodingFailed(String)
     case soundtrackFailed
     case generatedClipFinishingFailed
@@ -76,6 +78,8 @@ enum TripReelVideoExportError: LocalizedError, Sendable {
             "Memories couldn't start the video encoder on this device."
         case .cannotCreateFrame:
             "Memories ran out of room while drawing a video frame."
+        case .stalled:
+            "Export stopped making progress. Your originals and edits are safe. Keep Memories open and try exporting again."
         case let .encodingFailed(message):
             "The video encoder stopped: \(message)"
         case .soundtrackFailed:
@@ -90,16 +94,105 @@ enum TripReelVideoExportError: LocalizedError, Sendable {
     }
 }
 
+/// A separate queue requests AVFoundation cancellation even when a synchronous
+/// decoder read blocks the task. The deadline measures inactivity, not film length.
+final class ExportProgressWatchdog: @unchecked Sendable {
+    private let lock = NSLock()
+    private let timeout: TimeInterval
+    private var lastProgress = ProcessInfo.processInfo.systemUptime
+    private var interruption: TripReelVideoExportError?
+    private var cancelled = false
+    private var abort: (@Sendable () -> Void)?
+    private var stage = "starting"
+    private var timer: DispatchSourceTimer?
+    static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Memories", category: "VideoExport")
+
+    init(timeout: TimeInterval = 45, startTimer: Bool = true) {
+        self.timeout = timeout
+        if startTimer {
+            let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "memories.export-watchdog"))
+            timer.schedule(deadline: .now() + 1, repeating: 1)
+            timer.setEventHandler { [weak self] in self?.checkDeadline() }
+            self.timer = timer
+            timer.resume()
+        }
+    }
+
+    deinit { timer?.cancel() }
+
+    func checkpoint(_ stage: String, abort: @escaping @Sendable () -> Void) throws {
+        lock.lock()
+        let shouldAbort = cancelled || interruption != nil
+        if !shouldAbort {
+            self.stage = stage
+            self.abort = abort
+            lastProgress = ProcessInfo.processInfo.systemUptime
+        }
+        lock.unlock()
+        if shouldAbort { abort() }
+        try check()
+    }
+
+    func check() throws {
+        lock.lock()
+        let error = interruption
+        let wasCancelled = cancelled
+        lock.unlock()
+        if wasCancelled { throw CancellationError() }
+        if let error { throw error }
+        try Task.checkCancellation()
+    }
+
+    func checkDeadline(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        lock.lock()
+        guard !cancelled, interruption == nil, let abort, now - lastProgress >= timeout else {
+            lock.unlock()
+            return
+        }
+        interruption = .stalled
+        let stalledStage = stage
+        lock.unlock()
+        Self.logger.error("Export stalled: \(stalledStage, privacy: .public)")
+        abort()
+    }
+
+    func cancel() {
+        lock.lock()
+        guard !cancelled else { lock.unlock(); return }
+        cancelled = true
+        let abort = abort
+        lock.unlock()
+        // Task cancellation can be requested from the UI. Never make that
+        // thread wait for AVFoundation to tear down a decoder or encoder.
+        if let abort { DispatchQueue.global(qos: .userInitiated).async(execute: abort) }
+    }
+
+    func stop() {
+        timer?.cancel()
+        lock.lock()
+        abort = nil
+        lock.unlock()
+    }
+}
+
 private struct PreparedReelMedia: @unchecked Sendable {
     let stillImageURL: URL?
     let videoAsset: AVAsset?
+}
+
+/// Only cancellation crosses the rendering task boundary. All writer setup,
+/// frame appends and finalization remain owned by the single rendering task.
+private final class VideoWriterCancellation: @unchecked Sendable {
+    private let writer: AVAssetWriter
+    init(_ writer: AVAssetWriter) { self.writer = writer }
+    func cancel() { writer.cancelWriting() }
 }
 
 /// Reads a clip in presentation order. `AVAssetImageGenerator` is excellent
 /// for occasional thumbnails, but seeking it once per output frame makes even
 /// short stories disproportionately slow. Video composition output keeps the
 /// decoder moving forward and applies the source track's orientation once.
-private final class SequentialVideoFrameReader {
+private final class SequentialVideoFrameReader: @unchecked Sendable {
     private let reader: AVAssetReader
     private let output: AVAssetReaderVideoCompositionOutput
 
@@ -170,6 +263,8 @@ private final class SequentialVideoFrameReader {
         return image
     }
 
+    func cancel() { reader.cancelReading() }
+    deinit { reader.cancelReading() }
 }
 
 /// Renders the same mixed photo, video, and title timeline used by the SwiftUI
@@ -219,12 +314,23 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 in: stagingDirectory,
                 progress: progress
             )
-            try await renderSilentVideo(
-                request,
-                preparedMedia: preparedMedia,
-                to: silentURL,
-                progress: progress
-            )
+            let watchdog = ExportProgressWatchdog()
+            do {
+                defer { watchdog.stop() }
+                try await withTaskCancellationHandler {
+                    do {
+                        try await renderSilentVideo(
+                            request, preparedMedia: preparedMedia, to: silentURL,
+                            watchdog: watchdog, progress: progress
+                        )
+                    } catch {
+                        // Prefer the actionable timeout/cancellation over the
+                        // downstream encoder error caused by cancelWriting.
+                        try watchdog.check()
+                        throw error
+                    }
+                } onCancel: { watchdog.cancel() }
+            }
             try Task.checkCancellation()
             let containsSourceAudio = request.photos.contains {
                 $0.isVideo && $0.hasOriginalAudio
@@ -440,6 +546,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         _ request: TripReelVideoExportRequest,
         preparedMedia: [String: PreparedReelMedia],
         to outputURL: URL,
+        watchdog: ExportProgressWatchdog,
         progress: @escaping @Sendable (TripReelVideoExportProgress) -> Void
     ) async throws {
         let outputSize = Self.outputSize(for: request.quality)
@@ -450,6 +557,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             )
         )
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
+        let writerCancellation = VideoWriterCancellation(writer)
         var writerCompleted = false
         defer {
             if !writerCompleted { writer.cancelWriting() }
@@ -505,8 +613,10 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         var previousItemImage: CGImage?
         var previousItemPhotoIndex = 0
 
-        for item in timeline {
+        for (itemIndex, item) in timeline.enumerated() {
             try Task.checkCancellation()
+            let itemStarted = ProcessInfo.processInfo.systemUptime
+            try watchdog.checkpoint("prepare item \(itemIndex + 1)") { writerCancellation.cancel() }
             let duration = item.duration(defaultPhotoDuration: request.secondsPerPhoto)
             let frameCount = max(1, Int(ceil(duration * Double(frameRate))))
             var photoImage: CGImage?
@@ -540,35 +650,51 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 itemPhotoIndex = 0
             }
 
+            let activeReader = videoReader
+            defer { activeReader?.cancel() }
             for localFrame in 0..<frameCount {
-                try Task.checkCancellation()
+                try watchdog.checkpoint("item \(itemIndex + 1), frame \(localFrame), encoder") {
+                    activeReader?.cancel()
+                    writerCancellation.cancel()
+                }
                 while !input.isReadyForMoreMediaData {
-                    try Task.checkCancellation()
+                    try watchdog.check()
+                    guard writer.status == .writing else {
+                        throw TripReelVideoExportError.encodingFailed(
+                            writer.error?.localizedDescription ?? "The encoder stopped accepting frames"
+                        )
+                    }
                     try await Task.sleep(nanoseconds: 2_000_000)
                 }
-                guard let pool = adaptor.pixelBufferPool else {
-                    throw TripReelVideoExportError.cannotCreateFrame
+                try watchdog.checkpoint("item \(itemIndex + 1), frame \(localFrame), decode/draw") {
+                    activeReader?.cancel()
+                    writerCancellation.cancel()
                 }
-                let pixelBuffer = try Self.makePixelBuffer(from: pool)
-
-                let phase = frameCount <= 1 ? 1 : Double(localFrame) / Double(frameCount - 1)
-                if let videoReader, let videoPhoto {
-                    if let decodedFrame = try videoReader.nextImage() {
-                        photoImage = decodedFrame
-                    }
-                    guard photoImage != nil else {
-                        throw TripReelVideoExportError.photoUnavailable(videoPhoto.label)
-                    }
-                    lastPhotoImage = photoImage
-                }
-                let transitionFrames = previousItem == nil
-                    ? 0
-                    : min(frameCount - 1, max(2, Int((0.24 * Double(frameRate)).rounded())))
-                let transitionProgress = Self.transitionProgress(
-                    frame: localFrame,
-                    transitionFrames: transitionFrames
-                )
+                // Include decoding, image conversion and append, not just drawing:
+                // otherwise autoreleased video objects can accumulate for a whole clip.
                 try autoreleasepool {
+                    guard let pool = adaptor.pixelBufferPool else {
+                        throw TripReelVideoExportError.cannotCreateFrame
+                    }
+                    let pixelBuffer = try Self.makePixelBuffer(from: pool)
+
+                    let phase = frameCount <= 1 ? 1 : Double(localFrame) / Double(frameCount - 1)
+                    if let videoReader, let videoPhoto {
+                        if let decodedFrame = try videoReader.nextImage() {
+                            photoImage = decodedFrame
+                        }
+                        guard photoImage != nil else {
+                            throw TripReelVideoExportError.photoUnavailable(videoPhoto.label)
+                        }
+                        lastPhotoImage = photoImage
+                    }
+                    let transitionFrames = previousItem == nil
+                        ? 0
+                        : min(frameCount - 1, max(2, Int((0.24 * Double(frameRate)).rounded())))
+                    let transitionProgress = Self.transitionProgress(
+                        frame: localFrame,
+                        transitionFrames: transitionFrames
+                    )
                     try Self.draw(
                         item: item,
                         photoImage: photoImage,
@@ -582,12 +708,13 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                         transitionProgress: transitionProgress,
                         request: request
                     )
-                }
-                let presentationTime = CMTime(value: CMTimeValue(completedFrames), timescale: frameRate)
-                guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
-                    throw TripReelVideoExportError.encodingFailed(
-                        writer.error?.localizedDescription ?? "A frame could not be written"
-                    )
+                    let presentationTime = CMTime(value: CMTimeValue(completedFrames), timescale: frameRate)
+                    try watchdog.check()
+                    guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
+                        throw TripReelVideoExportError.encodingFailed(
+                            writer.error?.localizedDescription ?? "A frame could not be written"
+                        )
+                    }
                 }
                 completedFrames += 1
                 if completedFrames.isMultiple(of: 6) || completedFrames == totalFrames {
@@ -604,6 +731,8 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                     )
                 }
             }
+            let elapsed = ProcessInfo.processInfo.systemUptime - itemStarted
+            ExportProgressWatchdog.logger.info("Rendered item \(itemIndex + 1): \(frameCount) frames in \(elapsed) seconds; video=\(videoReader != nil)")
 
             previousItem = item
             previousItemImage = lastPhotoImage
@@ -611,9 +740,13 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         }
 
         input.markAsFinished()
-        await withCheckedContinuation { continuation in
-            writer.finishWriting { continuation.resume() }
+        try watchdog.checkpoint("finalize video") { writerCancellation.cancel() }
+        writer.finishWriting { }
+        while writer.status == .writing {
+            try watchdog.check()
+            try await Task.sleep(nanoseconds: 20_000_000)
         }
+        try watchdog.check()
         guard writer.status == .completed else {
             throw TripReelVideoExportError.encodingFailed(
                 writer.error?.localizedDescription ?? "The file could not be finalized"

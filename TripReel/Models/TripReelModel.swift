@@ -5951,6 +5951,11 @@ final class TripReelModel: ObservableObject {
                     self.exportErrorTitle = "Export paused"
                     self.exportCanRetryPhotoDownload = false
                     self.exportCanRetryRender = true
+                } else if let exportError = error as? TripReelVideoExportError,
+                          case .stalled = exportError {
+                    self.exportErrorTitle = "Export paused"
+                    self.exportCanRetryPhotoDownload = false
+                    self.exportCanRetryRender = true
                 } else {
                     self.exportErrorTitle = "Export couldn't finish"
                     self.exportCanRetryPhotoDownload = false

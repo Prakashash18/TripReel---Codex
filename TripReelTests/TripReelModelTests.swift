@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreVideo
 import Photos
 import UIKit
@@ -7,6 +8,145 @@ import XCTest
 
 @MainActor
 final class TripReelModelTests: XCTestCase {
+    func testExportWatchdogTimerStopsBlockedWork() async throws {
+        let aborted = expectation(description: "Independent watchdog queue fires")
+        let watchdog = ExportProgressWatchdog(timeout: 0.01)
+        defer { watchdog.stop() }
+        try watchdog.checkpoint("decoder") { aborted.fulfill() }
+        await fulfillment(of: [aborted], timeout: 3)
+        XCTAssertThrowsError(try watchdog.check())
+    }
+
+    func testExportWatchdogTimesOutWithoutProgress() throws {
+        let aborted = expectation(description: "Stops blocked encoder")
+        aborted.assertForOverFulfill = true
+        let watchdog = ExportProgressWatchdog(startTimer: false)
+        defer { watchdog.stop() }
+        try watchdog.checkpoint("decoder") { aborted.fulfill() }
+        watchdog.checkDeadline(now: .greatestFiniteMagnitude)
+        watchdog.checkDeadline(now: .greatestFiniteMagnitude)
+        XCTAssertThrowsError(try watchdog.check()) { error in
+            guard case TripReelVideoExportError.stalled = error else {
+                return XCTFail("Expected a retryable stall, got \(error)")
+            }
+        }
+        wait(for: [aborted], timeout: 1)
+    }
+
+    func testExportWatchdogAllowsProgressAndStopsAfterCompletion() throws {
+        let watchdog = ExportProgressWatchdog(startTimer: false)
+        try watchdog.checkpoint("frame") { XCTFail("Healthy encoder was cancelled") }
+        watchdog.checkDeadline()
+        XCTAssertNoThrow(try watchdog.check())
+        watchdog.stop()
+        watchdog.checkDeadline(now: .greatestFiniteMagnitude)
+        XCTAssertNoThrow(try watchdog.check())
+    }
+
+    func testExportWatchdogCancelsResourcesRegisteredAfterCancellation() {
+        let aborted = expectation(description: "Late decoder is stopped")
+        let watchdog = ExportProgressWatchdog(startTimer: false)
+        defer { watchdog.stop() }
+        watchdog.cancel()
+        XCTAssertThrowsError(try watchdog.checkpoint("decoder") { aborted.fulfill() }) {
+            XCTAssertTrue($0 is CancellationError)
+        }
+        wait(for: [aborted], timeout: 1)
+    }
+
+    /// Exercises actual decoding, transitions, H.264 encoding and finalization.
+    /// Unlike the UI demo, this must produce a decodable 2,700-frame 1080p film.
+    func testRealExporterNinetySecondMixedStoryAtThirtyFPS() async throws {
+        executionTimeAllowance = 300
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imageURL = directory.appendingPathComponent("fixture.jpg")
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 900), format: format).image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 600, height: 900))
+            UIColor.systemYellow.setFill()
+            context.fill(CGRect(x: 100, y: 100, width: 250, height: 400))
+        }
+        try XCTUnwrap(image.jpegData(compressionQuality: 0.9)).write(to: imageURL)
+        func photo(_ id: String) -> ReelPhoto {
+            ReelPhoto(id: id, source: .imported(imageURL.path), label: "Fixture", time: "",
+                      isSimilar: false, pixelWidth: 600, pixelHeight: 900,
+                      frameStyle: .fullBleed, motionStyle: .zoomIn, durationSeconds: 2)
+        }
+        func request(_ photos: [ReelPhoto]) -> TripReelVideoExportRequest {
+            TripReelVideoExportRequest(photos: photos, titleCards: [], textOverlays: [],
+                                      secondsPerPhoto: 2, look: .clean, motionIntensity: .gentle,
+                                      quality: .hd, soundtrackURL: nil, atmosphereURL: nil)
+        }
+        let exporter = TripReelVideoExporter()
+        let sourceRequest = request([photo("source-1"), photo("source-2")])
+        let sourceURL = try await Task.detached {
+            try await exporter.export(sourceRequest) { _ in }
+        }.value
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
+        var moments: [ReelPhoto] = []
+        for index in 0..<15 {
+            moments.append(photo("photo-\(index)"))
+            moments.append(ReelPhoto(
+                id: "video-\(index)", source: .imported(sourceURL.path), label: "Video fixture", time: "",
+                isSimilar: false, pixelWidth: 1080, pixelHeight: 1920,
+                frameStyle: .fullBleed, motionStyle: .zoomIn, durationSeconds: 4,
+                mediaKind: .video, sourceDurationSeconds: 4
+            ))
+        }
+        let mixedRequest = request(moments)
+        let renderingStarted = expectation(description: "Real renderer has produced frames")
+        let cancelledExport = Task.detached {
+            try await exporter.export(mixedRequest) { progress in
+                if abs(progress.fraction - 0.342) < 0.000001 {
+                    renderingStarted.fulfill()
+                }
+            }
+        }
+        await fulfillment(of: [renderingStarted], timeout: 90)
+        cancelledExport.cancel()
+        do {
+            let unexpectedURL = try await cancelledExport.value
+            try? FileManager.default.removeItem(at: unexpectedURL)
+            XCTFail("Cancelled renderer unexpectedly completed")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "Expected cancellation, got \(error)")
+        }
+        // Retry the identical request with the same exporter after cancellation.
+        let started = Date()
+        let outputURL = try await Task.detached {
+            try await exporter.export(mixedRequest) { _ in }
+        }.value
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+        let asset = AVURLAsset(url: outputURL)
+        let duration = try await asset.load(.duration)
+        XCTAssertEqual(duration.seconds, 90, accuracy: 0.05)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let track = try XCTUnwrap(tracks.first)
+        let size = try await track.load(.naturalSize)
+        let fps = try await track.load(.nominalFrameRate)
+        XCTAssertEqual(size, CGSize(width: 1080, height: 1920))
+        XCTAssertEqual(fps, 30, accuracy: 0.01)
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        ])
+        reader.add(output)
+        XCTAssertTrue(reader.startReading())
+        var frameCount = 0
+        while autoreleasepool(invoking: { output.copyNextSampleBuffer() != nil }) {
+            frameCount += 1
+        }
+        XCTAssertEqual(reader.status, .completed)
+        XCTAssertEqual(frameCount, 2700)
+        let timing = XCTAttachment(string: "90-second 1080p/30 mixed export plus verification: \(Date().timeIntervalSince(started))s. Simulator timing is not an iPhone 13 benchmark.")
+        timing.lifetime = .keepAlways
+        add(timing)
+    }
+
     private func makeModel() -> TripReelModel {
         TripReelModel(arguments: [], useDemoData: true)
     }
@@ -1522,7 +1662,15 @@ final class TripReelModelTests: XCTestCase {
     }
 
     func testFramePressureOffersOneTapRetryWithoutLosingHD() async throws {
-        let exporter = FailOnceVideoExporter(firstError: .cannotCreateFrame)
+        try await assertRetryableExportFailure(.cannotCreateFrame)
+    }
+
+    func testExportStallOffersOneTapRetryWithoutLosingHD() async throws {
+        try await assertRetryableExportFailure(.stalled)
+    }
+
+    private func assertRetryableExportFailure(_ firstError: TripReelVideoExportError) async throws {
+        let exporter = FailOnceVideoExporter(firstError: firstError)
         let model = TripReelModel(
             arguments: [],
             useDemoData: false,
