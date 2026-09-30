@@ -2343,6 +2343,9 @@ private struct AICutCandidate: Sendable {
 @MainActor
 final class TripReelModel: ObservableObject {
     @Published var screen: AppScreen = .welcome
+    /// Counts-only description of the last library scan, shown in the account
+    /// screen so a missing trip can be diagnosed without a Mac or Console.
+    @Published private(set) var lastScanSummary: String?
     @Published private(set) var navigationDirection: TRNavigationDirection = .replace
     @Published var buildCount = 0
     @Published var currentPhotoIndex = 0
@@ -5239,7 +5242,7 @@ final class TripReelModel: ObservableObject {
         )
         reconcileActiveFilm(withAvailableLibraryIDs: Set(metadata.map(\.id)))
         hasScannedLibrary = true
-        Self.logScanSummary(
+        lastScanSummary = Self.logScanSummary(
             metadata: metadata,
             access: photoLibrary.authorizationStatus,
             tripCount: detected.trips.count,
@@ -5256,7 +5259,7 @@ final class TripReelModel: ObservableObject {
         access: PHAuthorizationStatus,
         tripCount: Int,
         nearbyCount: Int
-    ) {
+    ) -> String {
         let now = Date()
         let dates = metadata.compactMap(\.creationDate)
         let newestHours = dates.max().map { Int(now.timeIntervalSince($0) / 3600) }
@@ -5269,6 +5272,8 @@ final class TripReelModel: ObservableObject {
         Logger(subsystem: Bundle.main.bundleIdentifier ?? "Memories", category: "LibraryScan").info(
             "access=\(accessName, privacy: .public) photos=\(metadata.count) newestAgeHours=\(newestHours ?? -1) last72h=\(recent.count) last72hWithLocation=\(recentLocated) trips=\(tripCount) nearby=\(nearbyCount)"
         )
+        let newest = newestHours.map { "\($0) hours ago" } ?? "none"
+        return "access=\(accessName)\nphotos seen=\(metadata.count)\nnewest photo=\(newest)\nlast 72h=\(recent.count) photos, \(recentLocated) with location\ntrips=\(tripCount)  day outings=\(nearbyCount)"
     }
 
     func refreshPhotoLibraryIfAuthorized(force: Bool = false) async {
