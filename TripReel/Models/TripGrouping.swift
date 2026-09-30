@@ -674,7 +674,11 @@ enum TripDetector {
 enum NearbyEventDetector {
     private static let minimumPhotoCount = 6
     private static let minimumLocatedPhotoCount = 3
-    private static let maximumSessionGap: TimeInterval = 4 * 60 * 60
+    // A real day out has breaks: lunch, a ride, a rest. Places already separate
+    // home life from an outing, so the time gap only needs to end an outing
+    // when there really was a long pause. Four hours split ordinary days into
+    // fragments that each fell below the photo minimum.
+    private static let maximumSessionGap: TimeInterval = 8 * 60 * 60
     private static let maximumDuration: TimeInterval = 18 * 60 * 60
     private static let maximumDistanceFromHabitualPlace = 150.0
     // Nearby cards represent one walkable place, not a whole city. Yishun and

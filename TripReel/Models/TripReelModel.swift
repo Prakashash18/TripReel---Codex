@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import OSLog
 import Photos
 import PhotosUI
 import SwiftUI
@@ -3197,6 +3198,24 @@ final class TripReelModel: ObservableObject {
             to: next
         )
         screen = next
+        updateOriginalsPrefetch(for: next)
+    }
+
+    /// Fetches full-quality originals for the paid export while the user is still
+    /// watching or deciding, so paying goes straight to rendering. Leaving the
+    /// flow discards everything; the free export never needs it.
+    private func updateOriginalsPrefetch(for screen: AppScreen) {
+        guard !usesDemoData else { return }
+        switch screen {
+        case .firstWatch, .firstCutOptions, .secondWatch, .pace, .export, .paywall:
+            let photos = preparedExportContent(for: .hd).photos
+            guard !photos.isEmpty else { return }
+            videoExporter.prefetchOriginals(for: photos)
+        case .done, .trips, .empty, .access, .limited, .welcome, .cleanup:
+            videoExporter.discardPrefetchedOriginals()
+        default:
+            break
+        }
     }
 
     /// The brand welcome appears once. Photos permission remains Apple's
@@ -5220,7 +5239,36 @@ final class TripReelModel: ObservableObject {
         )
         reconcileActiveFilm(withAvailableLibraryIDs: Set(metadata.map(\.id)))
         hasScannedLibrary = true
+        Self.logScanSummary(
+            metadata: metadata,
+            access: photoLibrary.authorizationStatus,
+            tripCount: detected.trips.count,
+            nearbyCount: detected.nearbyEvents.count
+        )
         return generation
+    }
+
+    /// Counts only: no filenames, places or coordinates. In Console, filter the
+    /// `LibraryScan` category to see whether yesterday's photos reached the
+    /// detectors (access level, newest photo age, recent and located counts).
+    private static func logScanSummary(
+        metadata: [PhotoMetadata],
+        access: PHAuthorizationStatus,
+        tripCount: Int,
+        nearbyCount: Int
+    ) {
+        let now = Date()
+        let dates = metadata.compactMap(\.creationDate)
+        let newestHours = dates.max().map { Int(now.timeIntervalSince($0) / 3600) }
+        let recent = metadata.filter {
+            guard let date = $0.creationDate else { return false }
+            return now.timeIntervalSince(date) <= 72 * 3600
+        }
+        let recentLocated = recent.filter { $0.coordinate != nil }.count
+        let accessName = access == .limited ? "limited" : (access == .authorized ? "full" : "other")
+        Logger(subsystem: Bundle.main.bundleIdentifier ?? "Memories", category: "LibraryScan").info(
+            "access=\(accessName, privacy: .public) photos=\(metadata.count) newestAgeHours=\(newestHours ?? -1) last72h=\(recent.count) last72hWithLocation=\(recentLocated) trips=\(tripCount) nearby=\(nearbyCount)"
+        )
     }
 
     func refreshPhotoLibraryIfAuthorized(force: Bool = false) async {
@@ -5815,6 +5863,9 @@ final class TripReelModel: ObservableObject {
     private func startRender(quality: ExportQuality, handoff: ExportHandoff) {
         workTask?.cancel()
         BackgroundExportSupport.shared.finish(success: false)
+        // The free preview uses smaller, planner-chosen media, so a running HD
+        // prefetch would only compete with it for bandwidth.
+        if quality != .hd { videoExporter.discardPrefetchedOriginals() }
         let generation = UUID()
         exportGeneration = generation
         exportQuality = quality

@@ -147,6 +147,271 @@ final class TripReelModelTests: XCTestCase {
         add(timing)
     }
 
+    /// Runs the real renderer for both the free (watermarked, 720p) and paid (HD, 1080p) exports.
+    func testRealExporterProducesDecodableFreeAndPaidFilms() async throws {
+        executionTimeAllowance = 180
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imageURL = directory.appendingPathComponent("fixture.jpg")
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 900), format: format).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 600, height: 900))
+        }
+        try XCTUnwrap(image.jpegData(compressionQuality: 0.9)).write(to: imageURL)
+        let photos = (0..<3).map { index in
+            ReelPhoto(id: "photo-\(index)", source: .imported(imageURL.path), label: "Fixture", time: "",
+                      isSimilar: false, pixelWidth: 600, pixelHeight: 900,
+                      frameStyle: .fullBleed, motionStyle: .zoomIn, durationSeconds: 2)
+        }
+        let expectations: [(ExportQuality, CGSize)] = [
+            (.standard, CGSize(width: 720, height: 1_280)),
+            (.hd, CGSize(width: 1_080, height: 1_920))
+        ]
+        let exporter = TripReelVideoExporter()
+        for (quality, expectedSize) in expectations {
+            let request = TripReelVideoExportRequest(
+                photos: photos, titleCards: [], textOverlays: [], secondsPerPhoto: 2,
+                look: .clean, motionIntensity: .gentle, quality: quality,
+                soundtrackURL: nil, atmosphereURL: nil)
+            let outputURL = try await Task.detached {
+                try await exporter.export(request) { _ in }
+            }.value
+            defer { try? FileManager.default.removeItem(at: outputURL) }
+            let asset = AVURLAsset(url: outputURL)
+            let duration = try await asset.load(.duration)
+            XCTAssertEqual(duration.seconds, 6, accuracy: 0.05, "\(quality)")
+            let tracks = try await asset.loadTracks(withMediaType: .video)
+            let track = try XCTUnwrap(tracks.first)
+            let size = try await track.load(.naturalSize)
+            XCTAssertEqual(size, expectedSize, "\(quality)")
+            let reader = try AVAssetReader(asset: asset)
+            let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+            ])
+            reader.add(output)
+            XCTAssertTrue(reader.startReading())
+            var frameCount = 0
+            while autoreleasepool(invoking: { output.copyNextSampleBuffer() != nil }) { frameCount += 1 }
+            XCTAssertEqual(reader.status, .completed, "\(quality)")
+            XCTAssertEqual(frameCount, 180, "\(quality)")
+        }
+    }
+
+    func testSessionMonitorAbortsAStalledAudioSession() async throws {
+        let aborted = expectation(description: "Stalled audio session is cancelled")
+        aborted.assertForOverFulfill = true
+        let watchdog = ExportProgressWatchdog(startTimer: false)
+        defer { watchdog.stop() }
+        let monitor = ExportSessionProgressMonitor(
+            watchdog: watchdog, stage: "mix soundtrack", interval: 0.02,
+            progress: { 0.25 }, abort: { aborted.fulfill() }
+        )
+        try monitor.start()
+        try await Task.sleep(nanoseconds: 120_000_000)
+        watchdog.checkDeadline(now: .greatestFiniteMagnitude)
+        monitor.stop()
+        XCTAssertThrowsError(try watchdog.check()) { error in
+            guard case TripReelVideoExportError.stalled = error else {
+                return XCTFail("Expected a retryable stall, got \(error)")
+            }
+        }
+        await fulfillment(of: [aborted], timeout: 1)
+    }
+
+    func testSessionMonitorKeepsFeedingWatchdogWhileProgressAdvances() async throws {
+        let watchdog = ExportProgressWatchdog(timeout: 0.3, startTimer: false)
+        defer { watchdog.stop() }
+        let ticks = Counter()
+        let monitor = ExportSessionProgressMonitor(
+            watchdog: watchdog, stage: "mix soundtrack", interval: 0.02,
+            progress: { Float(ticks.next()) / 1000 },
+            abort: { XCTFail("A slow but advancing export was cancelled") }
+        )
+        try monitor.start()
+        for _ in 0..<8 {
+            try await Task.sleep(nanoseconds: 60_000_000)
+            watchdog.checkDeadline()
+        }
+        monitor.stop()
+        XCTAssertNoThrow(try watchdog.check())
+    }
+
+    func testRequestGuardFailsARequestThatStopsReportingProgress() async throws {
+        let stalled = expectation(description: "Silent PhotoKit request is failed")
+        stalled.assertForOverFulfill = true
+        let requestGuard = RequestInactivityGuard(timeout: 0.15, tick: 0.03) { stalled.fulfill() }
+        defer { requestGuard.stop() }
+        await fulfillment(of: [stalled], timeout: 3)
+        try await Task.sleep(nanoseconds: 150_000_000)
+    }
+
+    func testRequestGuardLeavesAnActiveDownloadAlone() async throws {
+        let stalled = expectation(description: "Active download must not be failed")
+        stalled.isInverted = true
+        let requestGuard = RequestInactivityGuard(timeout: 0.3, tick: 0.03) { stalled.fulfill() }
+        defer { requestGuard.stop() }
+        for _ in 0..<10 {
+            try await Task.sleep(nanoseconds: 60_000_000)
+            requestGuard.touch()
+        }
+        await fulfillment(of: [stalled], timeout: 0.2)
+    }
+
+    /// The reported hang: a two-minute paid (1080p) film with music. Runs the
+    /// real renderer, the soundtrack mix and the final mux, then decodes the result.
+    func testRealExporterTwoMinuteHDFilmWithSoundtrackAndAtmosphere() async throws {
+        executionTimeAllowance = 600
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imageURL = directory.appendingPathComponent("fixture.jpg")
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 900), format: format).image { context in
+            UIColor.systemOrange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 600, height: 900))
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 150, y: 200, width: 300, height: 400))
+        }
+        try XCTUnwrap(image.jpegData(compressionQuality: 0.9)).write(to: imageURL)
+        let photos = (0..<60).map { index in
+            ReelPhoto(id: "photo-\(index)", source: .imported(imageURL.path), label: "Fixture", time: "",
+                      isSimilar: false, pixelWidth: 600, pixelHeight: 900,
+                      frameStyle: .fullBleed, motionStyle: .zoomIn, durationSeconds: 2)
+        }
+        let soundtrack = try XCTUnwrap(Bundle.main.url(forResource: "wanderlust", withExtension: "m4a"))
+        let atmosphere = try XCTUnwrap(
+            Bundle.main.url(forResource: "city-day", withExtension: "m4a")
+                ?? Bundle.main.url(forResource: "city-day", withExtension: "m4a", subdirectory: "Atmospheres")
+        )
+        let request = TripReelVideoExportRequest(
+            photos: photos, titleCards: [], textOverlays: [], secondsPerPhoto: 2,
+            look: .clean, motionIntensity: .gentle, quality: .hd,
+            soundtrackURL: soundtrack, atmosphereURL: atmosphere)
+        let exporter = TripReelVideoExporter()
+        let started = Date()
+        let phases = Counter()
+        let outputURL = try await Task.detached {
+            try await exporter.export(request) { progress in
+                if case .addingSoundtrack = progress.phase { _ = phases.next() }
+            }
+        }.value
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+        XCTAssertGreaterThan(phases.value, 0, "The soundtrack stage never ran")
+
+        let asset = AVURLAsset(url: outputURL)
+        let duration = try await asset.load(.duration)
+        XCTAssertEqual(duration.seconds, 120, accuracy: 0.1)
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        let videoTrack = try XCTUnwrap(videoTracks.first)
+        XCTAssertFalse(audioTracks.isEmpty, "The film has no soundtrack")
+        let size = try await videoTrack.load(.naturalSize)
+        XCTAssertEqual(size, CGSize(width: 1080, height: 1920))
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        ])
+        reader.add(output)
+        XCTAssertTrue(reader.startReading())
+        var frameCount = 0
+        while autoreleasepool(invoking: { output.copyNextSampleBuffer() != nil }) { frameCount += 1 }
+        XCTAssertEqual(reader.status, .completed)
+        XCTAssertEqual(frameCount, 3600)
+        let timing = XCTAttachment(string: "120-second 1080p film with soundtrack and atmosphere, export plus verification: \(Date().timeIntervalSince(started))s. Simulator timing is not an iPhone benchmark.")
+        timing.lifetime = .keepAlways
+        add(timing)
+    }
+
+    func testPrefetchCoordinatorSharesOneRunAndWaitsForItToFinish() async throws {
+        let coordinator = MediaPrefetchCoordinator()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("prefetch-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { coordinator.discard() }
+        let runs = Counter()
+        let body: @Sendable (@escaping @Sendable (String, PreparedReelMedia) -> Void) async -> Void = { store in
+            _ = runs.next()
+            for id in ["a", "b", "c"] {
+                try? await Task.sleep(nanoseconds: 60_000_000)
+                store(id, PreparedReelMedia(stillImageURL: nil, videoAsset: nil))
+            }
+        }
+        coordinator.begin(signature: "a|b|c", expected: 3, directory: directory, run: body)
+        // The same photo set must not start a second download run.
+        coordinator.begin(signature: "a|b|c", expected: 3, directory: directory, run: body)
+        try await coordinator.waitForCompletion(poll: 0.02)
+        XCTAssertEqual(runs.value, 1)
+        XCTAssertFalse(coordinator.isRunning)
+        XCTAssertEqual(coordinator.completedCount, 3)
+    }
+
+    func testPrefetchCoordinatorStopsWaitingOnAStuckDownloadAndDiscardCleansUp() async throws {
+        let coordinator = MediaPrefetchCoordinator()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("prefetch-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        coordinator.begin(signature: "stuck", expected: 1, directory: directory) { _ in
+            try? await Task.sleep(nanoseconds: 60_000_000_000)   // never finishes in time
+        }
+        let started = Date()
+        try await coordinator.waitForCompletion(inactivityTimeout: 0.2, poll: 0.02)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5)
+        XCTAssertFalse(coordinator.isRunning, "A stuck prefetch must not block the export")
+        coordinator.discard()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    }
+
+    /// The point of prefetch: once originals are fetched ahead of time, export
+    /// no longer needs the source at all. Deleting the source proves reuse.
+    func testExportReusesPrefetchedOriginalsInsteadOfFetchingAgain() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imageURL = directory.appendingPathComponent("fixture.jpg")
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 900), format: format).image { context in
+            UIColor.systemPurple.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 600, height: 900))
+        }
+        try XCTUnwrap(image.jpegData(compressionQuality: 0.9)).write(to: imageURL)
+        let photos = (0..<6).map { index in
+            ReelPhoto(id: "photo-\(index)", source: .imported(imageURL.path), label: "Fixture", time: "",
+                      isSimilar: false, pixelWidth: 600, pixelHeight: 900,
+                      frameStyle: .fullBleed, motionStyle: .zoomIn, durationSeconds: 2)
+        }
+        let exporter = TripReelVideoExporter(prefetchNetworkPolicy: { true })
+        defer { exporter.discardPrefetchedOriginals() }
+
+        exporter.prefetchOriginals(for: photos)
+        let deadline = Date().addingTimeInterval(30)
+        while exporter.prefetchedItemCount < photos.count, Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertEqual(exporter.prefetchedItemCount, photos.count)
+        let prefetchDirectory = try XCTUnwrap(exporter.prefetchDirectory)
+
+        try FileManager.default.removeItem(at: imageURL)   // the source is gone now
+
+        let request = TripReelVideoExportRequest(
+            photos: photos, titleCards: [], textOverlays: [], secondsPerPhoto: 2,
+            look: .clean, motionIntensity: .gentle, quality: .hd,
+            soundtrackURL: nil, atmosphereURL: nil)
+        let outputURL = try await Task.detached { try await exporter.export(request) { _ in } }.value
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+        let asset = AVURLAsset(url: outputURL)
+        let duration = try await asset.load(.duration)
+        XCTAssertEqual(duration.seconds, 12, accuracy: 0.1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: prefetchDirectory.path),
+                      "A retry should still find the prefetched originals")
+
+        exporter.discardPrefetchedOriginals()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: prefetchDirectory.path))
+        XCTAssertEqual(exporter.prefetchedItemCount, 0)
+    }
+
     private func makeModel() -> TripReelModel {
         TripReelModel(arguments: [], useDemoData: true)
     }
@@ -2615,4 +2880,11 @@ private actor FailOnceVideoExporter: TripReelVideoExporting {
     func saveToPhotoLibrary(_ url: URL) async throws {}
 
     func recordedQualities() -> [ExportQuality] { qualities }
+}
+
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.lock(); defer { lock.unlock() }; return count }
+    @discardableResult func next() -> Int { lock.lock(); defer { lock.unlock() }; count += 1; return count }
 }

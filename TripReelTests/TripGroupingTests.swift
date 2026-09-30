@@ -460,6 +460,71 @@ final class TripGroupingTests: XCTestCase {
         XCTAssertFalse(event.photos.contains { $0.id.hasPrefix("unlocated-home") })
     }
 
+    private var sentosaHistory: [PhotoMetadata] {
+        let clementi = PhotoCoordinate(latitude: 1.3151, longitude: 103.7650)
+        return (0..<30).map { week in
+            photo(
+                id: "home-\(week)",
+                date: origin.addingTimeInterval(Double(week) * 7 * 24 * 60 * 60),
+                coordinate: clementi
+            )
+        }
+    }
+
+    private func sentosaOuting(hours: [Double], located: Int? = nil) -> [PhotoMetadata] {
+        let places = [
+            PhotoCoordinate(latitude: 1.2565, longitude: 103.8130),
+            PhotoCoordinate(latitude: 1.2540, longitude: 103.8238),
+            PhotoCoordinate(latitude: 1.2478, longitude: 103.8330)
+        ]
+        let start = origin.addingTimeInterval(210 * 24 * 60 * 60 + 10 * 60 * 60)
+        return hours.enumerated().map { index, hour in
+            photo(
+                id: "sentosa-\(index)",
+                date: start.addingTimeInterval(hour * 60 * 60),
+                coordinate: index < (located ?? hours.count) ? places[index % places.count] : nil
+            )
+        }
+    }
+
+    func testADayOutWithALunchBreakStaysOneEvent() throws {
+        // 6 photos before lunch, 6 after a 5-hour break. This used to become two
+        // separate six-photo cards for the same day.
+        let hours: [Double] = [0, 0.3, 0.6, 0.9, 1.2, 1.5, 6.6, 6.9, 7.2, 7.5, 7.8, 8.1]
+        let events = NearbyEventDetector.detect(
+            in: sentosaHistory + sentosaOuting(hours: hours), calendar: utcCalendar
+        )
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(try XCTUnwrap(events.first).photoCount, 12)
+    }
+
+    func testAnOutingSplitByAnAfternoonBreakStillQualifies() throws {
+        // 4 morning + 4 evening photos: each half alone is below the minimum,
+        // but together they are one Sentosa day.
+        let events = NearbyEventDetector.detect(
+            in: sentosaHistory + sentosaOuting(hours: [0, 0.3, 0.6, 0.9, 7, 7.3, 7.6, 7.9]),
+            calendar: utcCalendar
+        )
+        XCTAssertEqual(try XCTUnwrap(events.first).photoCount, 8)
+    }
+
+    func testAContinuousDayOutIsDetectedAsBefore() throws {
+        let events = NearbyEventDetector.detect(
+            in: sentosaHistory + sentosaOuting(hours: (0..<12).map { Double($0) * 0.4 }),
+            calendar: utcCalendar
+        )
+        XCTAssertEqual(try XCTUnwrap(events.first).photoCount, 12)
+    }
+
+    func testAnOvernightPauseStillEndsAnOuting() {
+        // A nine-hour pause is long enough to be a different outing.
+        let events = NearbyEventDetector.detect(
+            in: sentosaHistory + sentosaOuting(hours: [0, 0.3, 0.6, 0.9, 1.2, 1.5, 10.6, 10.9, 11.2]),
+            calendar: utcCalendar
+        )
+        XCTAssertEqual(events.first?.photoCount, 6)
+    }
+
     private func habitualEvidence() -> [PhotoMetadata] {
         [0, 14, 28, 42, 56, 70, 84, 91].map { day in
             photo(

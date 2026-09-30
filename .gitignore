@@ -2,3 +2,7 @@
 xcuserdata/
 DerivedData/
 TestResults/
+
+# Local secrets
+.env
+.env.*

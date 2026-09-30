@@ -3,6 +3,7 @@ import CoreGraphics
 import CoreVideo
 import ImageIO
 import OSLog
+import Network
 import Photos
 import QuartzCore
 import UIKit
@@ -50,10 +51,17 @@ protocol TripReelVideoExporting: Sendable {
     ) async throws -> URL
     func finishGeneratedClip(_ url: URL, title: String) async throws -> URL
     func saveToPhotoLibrary(_ url: URL) async throws
+    /// Starts fetching full-quality originals for a likely HD export while the
+    /// user is still watching or deciding. Safe to call repeatedly.
+    func prefetchOriginals(for photos: [ReelPhoto])
+    /// Cancels any prefetch and deletes what it downloaded.
+    func discardPrefetchedOriginals()
 }
 
 extension TripReelVideoExporting {
     func finishGeneratedClip(_ url: URL, title: String) async throws -> URL { url }
+    func prefetchOriginals(for photos: [ReelPhoto]) {}
+    func discardPrefetchedOriginals() {}
 }
 
 enum TripReelVideoExportError: LocalizedError, Sendable {
@@ -175,7 +183,315 @@ final class ExportProgressWatchdog: @unchecked Sendable {
     }
 }
 
-private struct PreparedReelMedia: @unchecked Sendable {
+/// Lets the monitor and cancellation handler touch a session from other
+/// threads. `progress` and `cancelExport()` are documented as thread-safe.
+private final class ExportSessionBox: @unchecked Sendable {
+    let session: AVAssetExportSession
+    init(_ session: AVAssetExportSession) { self.session = session }
+    var progress: Float { session.progress }
+    func cancel() { session.cancelExport() }
+}
+
+/// `AVAssetExportSession` has no built-in stall detection. This polls its
+/// progress and tells the watchdog every time it moves, so a silent hang in the
+/// soundtrack mix or the final mux times out like the render does, while a slow
+/// but advancing export never does.
+final class ExportSessionProgressMonitor: @unchecked Sendable {
+    private let watchdog: ExportProgressWatchdog
+    private let stage: String
+    private let interval: UInt64
+    private let progress: @Sendable () -> Float
+    private let abort: @Sendable () -> Void
+    private let lock = NSLock()
+    private var task: Task<Void, Never>?
+
+    init(
+        watchdog: ExportProgressWatchdog,
+        stage: String,
+        interval: TimeInterval = 0.5,
+        progress: @escaping @Sendable () -> Float,
+        abort: @escaping @Sendable () -> Void
+    ) {
+        self.watchdog = watchdog
+        self.stage = stage
+        self.interval = UInt64(max(0.01, interval) * 1_000_000_000)
+        self.progress = progress
+        self.abort = abort
+    }
+
+    func start() throws {
+        try watchdog.checkpoint(stage, abort: abort)
+        let watchdog = watchdog, stage = stage, progress = progress, abort = abort, interval = interval
+        let task = Task.detached {
+            var last = progress()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: interval)
+                let value = progress()
+                if value != last {
+                    last = value
+                    try? watchdog.checkpoint(stage, abort: abort)
+                }
+            }
+        }
+        lock.lock()
+        self.task = task
+        lock.unlock()
+    }
+
+    func stop() {
+        lock.lock()
+        let task = task
+        self.task = nil
+        lock.unlock()
+        task?.cancel()
+    }
+}
+
+/// Fails a PhotoKit request that stops reporting progress, for example an
+/// iCloud download that never calls back, instead of waiting for it forever.
+final class RequestInactivityGuard: @unchecked Sendable {
+    static let defaultTimeout: TimeInterval = 60
+    private let lock = NSLock()
+    private let timeout: TimeInterval
+    private var lastActivity = ProcessInfo.processInfo.systemUptime
+    private var fired = false
+    private var timer: DispatchSourceTimer?
+    private let onStall: @Sendable () -> Void
+
+    init(
+        timeout: TimeInterval = RequestInactivityGuard.defaultTimeout,
+        tick: TimeInterval = 1,
+        onStall: @escaping @Sendable () -> Void
+    ) {
+        self.timeout = timeout
+        self.onStall = onStall
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "memories.request-guard"))
+        timer.schedule(deadline: .now() + tick, repeating: tick)
+        timer.setEventHandler { [weak self] in self?.check() }
+        self.timer = timer
+        timer.resume()
+    }
+
+    deinit { timer?.cancel() }
+
+    func touch() {
+        lock.lock()
+        lastActivity = ProcessInfo.processInfo.systemUptime
+        lock.unlock()
+    }
+
+    func stop() {
+        lock.lock()
+        timer?.cancel()
+        timer = nil
+        lock.unlock()
+    }
+
+    private func check() {
+        lock.lock()
+        let stalled = !fired && ProcessInfo.processInfo.systemUptime - lastActivity >= timeout
+        if stalled { fired = true }
+        lock.unlock()
+        if stalled {
+            ExportProgressWatchdog.logger.error("PhotoKit request stalled with no progress")
+            onStall()
+        }
+    }
+}
+
+/// Holds originals fetched ahead of an HD export so paying does not start
+/// from zero. Items are keyed by photo ID; a different photo set restarts it.
+final class MediaPrefetchCoordinator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: Task<Void, Never>?
+    private var completed: [String: PreparedReelMedia] = [:]
+    private var signature: String?
+    private var directory: URL?
+    private var expected = 0
+    private var progressTicks = 0
+
+    var completedCount: Int { lock.lock(); defer { lock.unlock() }; return completed.count }
+    var stagingDirectory: URL? { lock.lock(); defer { lock.unlock() }; return directory }
+    var isRunning: Bool { lock.lock(); defer { lock.unlock() }; return task != nil }
+
+    /// Starts (or keeps) a prefetch for `signature`. `run` fills the store one
+    /// item at a time; failed items are simply left for the export to fetch.
+    func begin(
+        signature: String,
+        expected: Int,
+        directory: URL,
+        run: @escaping @Sendable (_ store: @escaping @Sendable (String, PreparedReelMedia) -> Void) async -> Void
+    ) {
+        lock.lock()
+        if self.signature == signature, task != nil || !completed.isEmpty {
+            lock.unlock()
+            return
+        }
+        let oldTask = task
+        let oldDirectory = self.directory
+        self.signature = signature
+        self.directory = directory
+        self.expected = expected
+        completed = [:]
+        progressTicks = 0
+        let newTask = Task.detached(priority: .utility) { [weak self] in
+            await run { id, media in self?.store(id: id, media: media, from: signature) }
+            self?.finished(signature: signature)
+        }
+        task = newTask
+        lock.unlock()
+        oldTask?.cancel()
+        if let oldDirectory { try? FileManager.default.removeItem(at: oldDirectory) }
+    }
+
+    private func store(id: String, media: PreparedReelMedia, from signature: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard self.signature == signature else { return }
+        completed[id] = media
+        progressTicks += 1
+    }
+
+    private func finished(signature: String) {
+        lock.lock()
+        if self.signature == signature { task = nil }
+        lock.unlock()
+    }
+
+    /// Items ready for reuse. Stills whose file has gone (for example after the
+    /// system cleared temporary files) are dropped so the export refetches them.
+    func cachedMedia(for photos: [ReelPhoto]) -> [String: PreparedReelMedia] {
+        lock.lock()
+        let snapshot = completed
+        lock.unlock()
+        var result: [String: PreparedReelMedia] = [:]
+        for photo in photos {
+            guard let media = snapshot[photo.id] else { continue }
+            if let url = media.stillImageURL, !FileManager.default.fileExists(atPath: url.path) { continue }
+            result[photo.id] = media
+        }
+        return result
+    }
+
+    /// Waits for a running prefetch instead of downloading the same originals
+    /// twice. Gives up, and stops the prefetch, if nothing finishes for
+    /// `inactivityTimeout`, so a stuck download cannot hold the export back.
+    func waitForCompletion(
+        inactivityTimeout: TimeInterval = 60,
+        poll: TimeInterval = 0.25,
+        onProgress: @Sendable (_ ready: Int, _ expected: Int) -> Void = { _, _ in }
+    ) async throws {
+        var lastTicks = -1
+        var lastChange = ProcessInfo.processInfo.systemUptime
+        while true {
+            lock.lock()
+            let running = task != nil
+            let ticks = progressTicks
+            let expected = expected
+            lock.unlock()
+            guard running else { return }
+            if ticks != lastTicks {
+                lastTicks = ticks
+                lastChange = ProcessInfo.processInfo.systemUptime
+                onProgress(ticks, expected)
+            } else if ProcessInfo.processInfo.systemUptime - lastChange >= inactivityTimeout {
+                ExportProgressWatchdog.logger.error("Prefetch made no progress; exporting without it")
+                lock.lock()
+                let stuck = task
+                task = nil
+                lock.unlock()
+                stuck?.cancel()
+                return
+            }
+            try await Task.sleep(nanoseconds: UInt64(poll * 1_000_000_000))
+        }
+    }
+
+    func discard() {
+        lock.lock()
+        let oldTask = task
+        let oldDirectory = directory
+        task = nil
+        completed = [:]
+        signature = nil
+        directory = nil
+        expected = 0
+        progressTicks = 0
+        lock.unlock()
+        oldTask?.cancel()
+        if let oldDirectory { try? FileManager.default.removeItem(at: oldDirectory) }
+    }
+}
+
+/// Prefetching originals can mean large iCloud downloads. Skip it on cellular
+/// or in Low Data Mode; the export still fetches what it needs when it runs.
+enum PrefetchNetworkPolicy {
+    static func allowsPrefetch() async -> Bool {
+        await withCheckedContinuation { continuation in
+            let monitor = NWPathMonitor()
+            let once = OnceFlag()
+            let finish: @Sendable (Bool) -> Void = { value in
+                guard once.claim() else { return }
+                monitor.cancel()
+                continuation.resume(returning: value)
+            }
+            monitor.pathUpdateHandler = { path in
+                finish(path.status == .satisfied && !path.isExpensive && !path.isConstrained)
+            }
+            let queue = DispatchQueue(label: "memories.prefetch-network")
+            monitor.start(queue: queue)
+            queue.asyncAfter(deadline: .now() + 1) { finish(false) }
+        }
+    }
+}
+
+private final class OnceFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if claimed { return false }
+        claimed = true
+        return true
+    }
+}
+
+/// Combines per-item download progress into one bar while several items are
+/// fetched at the same time.
+private final class MediaPreparationTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var itemProgress: [Double]
+    private var completed = 0
+
+    init(total: Int) { itemProgress = Array(repeating: 0, count: max(0, total)) }
+
+    func update(index: Int, progress: Double) {
+        lock.lock()
+        if itemProgress.indices.contains(index) {
+            itemProgress[index] = max(itemProgress[index], min(1, max(0, progress)))
+        }
+        lock.unlock()
+    }
+
+    func complete(index: Int) {
+        lock.lock()
+        if itemProgress.indices.contains(index) {
+            itemProgress[index] = 1
+            completed += 1
+        }
+        lock.unlock()
+    }
+
+    func snapshot() -> (fraction: Double, completed: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !itemProgress.isEmpty else { return (1, completed) }
+        return (itemProgress.reduce(0, +) / Double(itemProgress.count), completed)
+    }
+}
+
+struct PreparedReelMedia: @unchecked Sendable {
     let stillImageURL: URL?
     let videoAsset: AVAsset?
 }
@@ -276,13 +592,16 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
     private static let renderingProgressWeight = 0.62
     private let imageManager: PHImageManager
     private let frameRate: Int32
+    private let prefetchNetworkPolicy: @Sendable () async -> Bool
 
     init(
         imageManager: PHImageManager = PHCachingImageManager(),
-        frameRate: Int32 = TripReelVideoExporter.defaultFrameRate
+        frameRate: Int32 = TripReelVideoExporter.defaultFrameRate,
+        prefetchNetworkPolicy: @escaping @Sendable () async -> Bool = { await PrefetchNetworkPolicy.allowsPrefetch() }
     ) {
         self.imageManager = imageManager
         self.frameRate = max(8, frameRate)
+        self.prefetchNetworkPolicy = prefetchNetworkPolicy
     }
 
     func export(
@@ -308,12 +627,32 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         defer { try? FileManager.default.removeItem(at: stagingDirectory) }
 
         do {
-            let preparedMedia = try await prepareMedia(
-                request.photos,
+            var preparedMedia: [String: PreparedReelMedia] = [:]
+            if request.quality == .hd {
+                // A prefetch that is still running is waited for, not duplicated.
+                try await prefetch.waitForCompletion { ready, expected in
+                    progress(
+                        TripReelVideoExportProgress(
+                            fraction: Double(ready) / Double(max(1, expected)) * Self.preparationProgressWeight,
+                            phase: .preparingPhotos(
+                                ready: ready, total: expected,
+                                currentLabel: nil, downloadProgress: nil
+                            )
+                        )
+                    )
+                }
+                preparedMedia = prefetch.cachedMedia(for: request.photos)
+            }
+            let missing = request.photos.filter { preparedMedia[$0.id] == nil }
+            let fresh = try await prepareMedia(
+                missing,
                 outputSize: Self.outputSize(for: request.quality),
                 in: stagingDirectory,
+                alreadyPrepared: preparedMedia.count,
+                overallTotal: request.photos.count,
                 progress: progress
             )
+            preparedMedia.merge(fresh) { _, new in new }
             let watchdog = ExportProgressWatchdog()
             do {
                 defer { watchdog.stop() }
@@ -342,12 +681,15 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                         phase: .addingSoundtrack
                     )
                 )
+                let audioWatchdog = ExportProgressWatchdog()
+                defer { audioWatchdog.stop() }
                 try await addAudio(
                     soundtrackURL: request.soundtrackURL,
                     toVideoAt: silentURL,
                     outputURL: finalURL,
                     request: request,
-                    preparedMedia: preparedMedia
+                    preparedMedia: preparedMedia,
+                    watchdog: audioWatchdog
                 )
                 try? FileManager.default.removeItem(at: silentURL)
             } else {
@@ -755,88 +1097,143 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         writerCompleted = true
     }
 
+    /// How many originals are fetched at once. Serial fetching made a long
+    /// story wait for every iCloud download one after another before the first
+    /// frame could be drawn; more than a few at once just competes for bandwidth
+    /// and memory on an older iPhone.
+    static let maxConcurrentPreparations = 3
+
     private func prepareMedia(
         _ photos: [ReelPhoto],
         outputSize: CGSize,
         in directory: URL,
+        alreadyPrepared: Int = 0,
+        overallTotal: Int? = nil,
         progress: @escaping @Sendable (TripReelVideoExportProgress) -> Void
     ) async throws -> [String: PreparedReelMedia] {
-        let total = photos.count
-        var prepared: [String: PreparedReelMedia] = [:]
-        prepared.reserveCapacity(total)
-        progress(
-            TripReelVideoExportProgress(
-                fraction: 0,
-                phase: .preparingPhotos(
-                    ready: 0,
-                    total: total,
-                    currentLabel: photos.first?.label,
-                    downloadProgress: nil
-                )
-            )
-        )
-
-        for (index, photo) in photos.enumerated() {
-            try Task.checkCancellation()
-            let preparationProgress: @Sendable (Double?) -> Void = { downloadProgress in
-                let itemProgress = downloadProgress ?? 0
-                let fraction = total == 0
-                    ? Self.preparationProgressWeight
-                    : ((Double(index) + itemProgress) / Double(total))
-                        * Self.preparationProgressWeight
-                progress(
-                    TripReelVideoExportProgress(
-                        fraction: fraction,
-                        phase: .preparingPhotos(
-                            ready: index,
-                            total: total,
-                            currentLabel: photo.label,
-                            downloadProgress: downloadProgress
-                        )
-                    )
-                )
-            }
-            preparationProgress(nil)
-            if photo.isVideo {
-                let asset = try await prepareVideoAsset(
-                    for: photo,
-                    progress: preparationProgress
-                )
-                prepared[photo.id] = PreparedReelMedia(
-                    stillImageURL: nil,
-                    videoAsset: asset
-                )
-            } else {
-                let requestSize = Self.photoRequestSize(for: photo, outputSize: outputSize)
-                let image = try await prepareImage(
-                    for: photo,
-                    targetSize: requestSize,
-                    progress: preparationProgress
-                )
-                let fileURL = directory.appendingPathComponent(
-                    String(format: "photo-%04d.jpg", index)
-                )
-                try Self.writePreparedImage(image, to: fileURL)
-                prepared[photo.id] = PreparedReelMedia(
-                    stillImageURL: fileURL,
-                    videoAsset: nil
-                )
-            }
+        let count = photos.count
+        let total = overallTotal ?? count
+        let weight = Self.preparationProgressWeight
+        let tracker = MediaPreparationTracker(total: count)
+        let report: @Sendable (String?, Double?) -> Void = { label, downloadProgress in
+            let snapshot = tracker.snapshot()
+            let fraction = total == 0
+                ? 1
+                : (Double(alreadyPrepared) + snapshot.fraction * Double(count)) / Double(total)
             progress(
                 TripReelVideoExportProgress(
-                    fraction: (Double(index + 1) / Double(max(1, total)))
-                        * Self.preparationProgressWeight,
+                    fraction: fraction * weight,
                     phase: .preparingPhotos(
-                        ready: index + 1,
+                        ready: alreadyPrepared + snapshot.completed,
                         total: total,
-                        currentLabel: index + 1 < total ? photos[index + 1].label : nil,
-                        downloadProgress: nil
+                        currentLabel: label,
+                        downloadProgress: downloadProgress
                     )
                 )
             )
         }
+        report(photos.first?.label, nil)
+        guard count > 0 else { return [:] }
+
+        var prepared: [String: PreparedReelMedia] = [:]
+        prepared.reserveCapacity(count)
+        try await withThrowingTaskGroup(of: (String, PreparedReelMedia).self) { group in
+            var nextIndex = 0
+            func launchNext() {
+                guard nextIndex < count else { return }
+                let index = nextIndex
+                nextIndex += 1
+                let photo = photos[index]
+                group.addTask { [self] in
+                    try Task.checkCancellation()
+                    let itemProgress: @Sendable (Double?) -> Void = { downloadProgress in
+                        tracker.update(index: index, progress: downloadProgress ?? 0)
+                        report(photo.label, downloadProgress)
+                    }
+                    itemProgress(nil)
+                    let media = try await prepareItem(
+                        photo,
+                        index: index,
+                        outputSize: outputSize,
+                        directory: directory,
+                        progress: itemProgress
+                    )
+                    tracker.complete(index: index)
+                    report(index + 1 < count ? photos[index + 1].label : nil, nil)
+                    return (photo.id, media)
+                }
+            }
+            for _ in 0..<min(Self.maxConcurrentPreparations, count) { launchNext() }
+            while let (id, media) = try await group.next() {
+                prepared[id] = media
+                launchNext()
+            }
+        }
         return prepared
     }
+
+    /// Fetches one photo or clip at the quality the export needs.
+    private func prepareItem(
+        _ photo: ReelPhoto,
+        index: Int,
+        outputSize: CGSize,
+        directory: URL,
+        progress: @escaping @Sendable (Double?) -> Void
+    ) async throws -> PreparedReelMedia {
+        if photo.isVideo {
+            let asset = try await prepareVideoAsset(for: photo, progress: progress)
+            return PreparedReelMedia(stillImageURL: nil, videoAsset: asset)
+        }
+        let requestSize = Self.photoRequestSize(for: photo, outputSize: outputSize)
+        let image = try await prepareImage(for: photo, targetSize: requestSize, progress: progress)
+        let fileURL = directory.appendingPathComponent(String(format: "photo-%04d.jpg", index))
+        try Self.writePreparedImage(image, to: fileURL)
+        return PreparedReelMedia(stillImageURL: fileURL, videoAsset: nil)
+    }
+
+    // MARK: Prefetch
+
+    private let prefetch = MediaPrefetchCoordinator()
+
+    func prefetchOriginals(for photos: [ReelPhoto]) {
+        guard !photos.isEmpty else { return }
+        let outputSize = Self.outputSize(for: .hd)
+        let signature = photos.map(\.id).joined(separator: "|")
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TripReel-Exports", isDirectory: true)
+            .appendingPathComponent("prefetch-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        prefetch.begin(signature: signature, expected: photos.count, directory: directory) { [self] store in
+            guard await prefetchNetworkPolicy() else { return }
+            // Gentler than the export itself: playback and editing keep priority.
+            await withTaskGroup(of: Void.self) { group in
+                var next = 0
+                func launch() {
+                    guard next < photos.count, !Task.isCancelled else { return }
+                    let index = next
+                    next += 1
+                    let photo = photos[index]
+                    group.addTask { [self] in
+                        guard let media = try? await prepareItem(
+                            photo, index: index, outputSize: outputSize,
+                            directory: directory, progress: { _ in }
+                        ) else { return }
+                        store(photo.id, media)
+                    }
+                }
+                for _ in 0..<min(2, photos.count) { launch() }
+                while await group.next() != nil { launch() }
+            }
+        }
+    }
+
+    func discardPrefetchedOriginals() {
+        prefetch.discard()
+    }
+
+    /// Test hooks.
+    var prefetchedItemCount: Int { prefetch.completedCount }
+    var prefetchDirectory: URL? { prefetch.stagingDirectory }
 
     private func prepareImage(
         for photo: ReelPhoto,
@@ -882,6 +1279,9 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                     )
                 } catch is CancellationError {
                     throw CancellationError()
+                } catch VideoPhotoPreparationError.stalled {
+                    // Already waited a full inactivity window; do not wait again.
+                    throw TripReelVideoExportError.photoUnavailable(photo.label)
                 } catch {
                     continue
                 }
@@ -917,11 +1317,15 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         case .bundled:
             throw TripReelVideoExportError.photoUnavailable(photo.label)
         case let .library(identifier):
-            return try await prepareLibraryVideoAsset(
-                identifier: identifier,
-                label: photo.label,
-                progress: progress
-            )
+            do {
+                return try await prepareLibraryVideoAsset(
+                    identifier: identifier,
+                    label: photo.label,
+                    progress: progress
+                )
+            } catch VideoPhotoPreparationError.stalled {
+                throw TripReelVideoExportError.photoUnavailable(photo.label)
+            }
         }
     }
 
@@ -936,6 +1340,8 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         }
 
         let state = VideoAssetPreparationState(manager: imageManager)
+        let inactivity = RequestInactivityGuard { state.fail(VideoPhotoPreparationError.stalled) }
+        defer { inactivity.stop() }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 state.install(continuation: continuation)
@@ -944,6 +1350,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 options.version = .current
                 options.isNetworkAccessAllowed = true
                 options.progressHandler = { value, _, _, _ in
+                    inactivity.touch()
                     progress(min(0.99, max(0, value)))
                 }
                 let requestID = imageManager.requestAVAsset(
@@ -974,6 +1381,8 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         progress: @escaping @Sendable (Double?) -> Void
     ) async throws -> CGImage {
         let state = VideoImageRequestState(manager: imageManager)
+        let inactivity = RequestInactivityGuard { state.fail(VideoPhotoPreparationError.stalled) }
+        defer { inactivity.stop() }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 state.install(continuation: continuation)
@@ -983,6 +1392,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 options.version = .current
                 options.isNetworkAccessAllowed = true
                 options.progressHandler = { value, _, _, _ in
+                    inactivity.touch()
                     progress(min(0.99, max(0, value)))
                 }
                 let requestID = imageManager.requestImage(
@@ -1021,6 +1431,8 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         progress: @escaping @Sendable (Double?) -> Void
     ) async throws -> CGImage {
         let state = VideoImageRequestState(manager: imageManager)
+        let inactivity = RequestInactivityGuard { state.fail(VideoPhotoPreparationError.stalled) }
+        defer { inactivity.stop() }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 state.install(continuation: continuation)
@@ -1029,6 +1441,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 options.version = .current
                 options.isNetworkAccessAllowed = true
                 options.progressHandler = { value, _, _, _ in
+                    inactivity.touch()
                     progress(min(0.99, max(0, value)))
                 }
                 let requestID = imageManager.requestImageDataAndOrientation(
@@ -1199,7 +1612,8 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         toVideoAt videoURL: URL,
         outputURL: URL,
         request: TripReelVideoExportRequest,
-        preparedMedia: [String: PreparedReelMedia]
+        preparedMedia: [String: PreparedReelMedia],
+        watchdog: ExportProgressWatchdog
     ) async throws {
         let videoAsset = AVURLAsset(url: videoURL)
         let videoDuration = try await videoAsset.load(.duration)
@@ -1401,15 +1815,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         let audioMix = AVMutableAudioMix()
         audioMix.inputParameters = mixParameters
         audioExportSession.audioMix = audioMix
-        await withCheckedContinuation { continuation in
-            audioExportSession.exportAsynchronously { continuation.resume() }
-        }
-        guard audioExportSession.status == .completed else {
-            if audioExportSession.status == .cancelled || Task.isCancelled {
-                throw CancellationError()
-            }
-            throw TripReelVideoExportError.soundtrackFailed
-        }
+        try await runExportSession(audioExportSession, stage: "mix soundtrack", watchdog: watchdog)
 
         try Task.checkCancellation()
         let mixedAudioAsset = AVURLAsset(url: mixedAudioURL)
@@ -1453,13 +1859,38 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         muxSession.outputURL = outputURL
         muxSession.outputFileType = .mp4
         muxSession.shouldOptimizeForNetworkUse = true
-        await withCheckedContinuation { continuation in
-            muxSession.exportAsynchronously { continuation.resume() }
-        }
-        guard muxSession.status == .completed else {
-            if muxSession.status == .cancelled || Task.isCancelled {
-                throw CancellationError()
+        try await runExportSession(muxSession, stage: "combine video and audio", watchdog: watchdog)
+    }
+
+    /// Runs one `AVAssetExportSession` under the inactivity watchdog. A stall
+    /// cancels the session and surfaces as `.stalled` (which offers a retry);
+    /// task cancellation cancels the session too, instead of leaving it running.
+    private func runExportSession(
+        _ session: AVAssetExportSession,
+        stage: String,
+        watchdog: ExportProgressWatchdog
+    ) async throws {
+        let box = ExportSessionBox(session)
+        let monitor = ExportSessionProgressMonitor(
+            watchdog: watchdog,
+            stage: stage,
+            progress: { box.progress },
+            abort: { box.cancel() }
+        )
+        try monitor.start()
+        defer { monitor.stop() }
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                box.session.exportAsynchronously { continuation.resume() }
             }
+        } onCancel: {
+            watchdog.cancel()
+            box.cancel()
+        }
+        // Prefer the actionable timeout/cancellation over the generic
+        // "cancelled" status the aborted session reports.
+        try watchdog.check()
+        guard box.session.status == .completed else {
             throw TripReelVideoExportError.soundtrackFailed
         }
     }
@@ -2110,6 +2541,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
 private enum VideoPhotoPreparationError: Error {
     case noFinalImage
     case cannotDecodeData
+    case stalled
 }
 
 private final class VideoImageRequestState: @unchecked Sendable {
@@ -2158,7 +2590,10 @@ private final class VideoImageRequestState: @unchecked Sendable {
         continuation?.resume(with: result)
     }
 
-    func cancel() {
+    func cancel() { fail(CancellationError()) }
+
+    /// Cancels the underlying PhotoKit request and resumes with `error`.
+    func fail(_ error: Error) {
         lock.lock()
         guard !completed else {
             lock.unlock()
@@ -2172,7 +2607,7 @@ private final class VideoImageRequestState: @unchecked Sendable {
         if requestID != PHInvalidImageRequestID {
             manager.cancelImageRequest(requestID)
         }
-        continuation?.resume(throwing: CancellationError())
+        continuation?.resume(throwing: error)
     }
 }
 
@@ -2219,7 +2654,10 @@ private final class VideoAssetPreparationState: @unchecked Sendable {
         continuation?.resume(with: result)
     }
 
-    func cancel() {
+    func cancel() { fail(CancellationError()) }
+
+    /// Cancels the underlying PhotoKit request and resumes with `error`.
+    func fail(_ error: Error) {
         lock.lock()
         guard !completed else { lock.unlock(); return }
         completed = true
@@ -2228,6 +2666,6 @@ private final class VideoAssetPreparationState: @unchecked Sendable {
         let requestID = requestID
         lock.unlock()
         if requestID != PHInvalidImageRequestID { manager.cancelImageRequest(requestID) }
-        continuation?.resume(throwing: CancellationError())
+        continuation?.resume(throwing: error)
     }
 }
