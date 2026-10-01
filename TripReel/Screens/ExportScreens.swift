@@ -1142,9 +1142,26 @@ struct RenderingScreen: View {
                 .padding(.top, 22)
                 .animation(reduceMotion ? nil : TRMotion.progress, value: model.renderProgress)
 
-                Text(model.exportCanFinishInBackground
-                     ? "You can leave Memories while this finishes. We'll notify you when it's ready."
-                     : "Keep Memories open while this video finishes.")
+                if model.exportPausedPercent != nil {
+                    Button("Continue now") { model.resumePausedExport() }
+                        .buttonStyle(CreamButtonStyle())
+                        .padding(.horizontal, 64)
+                        .padding(.top, 18)
+                        .accessibilityIdentifier("continue-paused-export")
+                } else if ProcessInfo.processInfo.isLowPowerModeEnabled {
+                    Text("Low Power Mode slows exports and can pause them in the background. Turn it off to finish faster.")
+                        .font(TR.ui(12))
+                        .foregroundStyle(TR.accent)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                        .padding(.top, 14)
+                }
+
+                Text(model.exportPausedPercent != nil
+                     ? "Nothing is lost. Your finished pieces are saved on this iPhone."
+                     : (model.exportCanFinishInBackground
+                        ? "You can leave Memories while this finishes. We'll notify you when it's ready."
+                        : "Keep Memories open while this video finishes."))
                     .font(TR.ui(11))
                     .foregroundStyle(.white.opacity(0.72))
                     .multilineTextAlignment(.center)

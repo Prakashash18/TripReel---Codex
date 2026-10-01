@@ -2434,6 +2434,10 @@ final class TripReelModel: ObservableObject {
     @Published private(set) var exportShareLinkURL: URL?
     @Published private(set) var exportCanFinishInBackground = false
     @Published var interruptedExportNotice = false
+    /// Set while iOS has paused a render in the background. The screen stays on "Rendering"
+    /// and the render picks up from its saved pieces as soon as the app is opened again.
+    @Published private(set) var exportPausedPercent: Int?
+    @Published private(set) var exportResumedFromPercent: Int?
     @Published private(set) var interruptedExportMessage = "An earlier render didn't finish. Your photos are unchanged; choose the story and export it again."
     @Published private(set) var restoredExportOnly = false
     @Published private(set) var activeExportPhotos: [ReelPhoto] = []
@@ -2915,19 +2919,24 @@ final class TripReelModel: ObservableObject {
     }
 
     var exportProgressTitle: String {
+        if let paused = exportPausedPercent { return "Paused at \(paused)%" }
+        if let resumed = exportResumedFromPercent, renderProgress < 0.995 {
+            if case .preparingPhotos = exportProgressPhase { return "Picking up at \(resumed)%" }
+        }
         switch exportProgressPhase {
         case .preparingPhotos:
-            "Gathering full-quality moments"
+            return "Gathering full-quality moments"
         case .rendering:
-            "Rendering"
+            return "Rendering"
         case .addingSoundtrack:
-            "Adding your soundtrack"
+            return "Adding your soundtrack"
         case .finalizing:
-            "Finishing your film"
+            return "Finishing your film"
         }
     }
 
     var exportProgressDetail: String {
+        if exportPausedPercent != nil { return "Saved · continues when you open Memories" }
         switch exportProgressPhase {
         case let .preparingPhotos(ready, total, currentLabel, downloadProgress):
             let count = "\(ready) of \(total) ready"
@@ -3261,9 +3270,20 @@ final class TripReelModel: ObservableObject {
         return "Kept on this iPhone in My exports · \(item.remainingDescription()). Nothing is uploaded."
     }
 
+    func resumePausedExport() {
+        resumeExportWhenActive = true
+        resumeInterruptedExportIfNeeded()
+    }
+
     func resumeInterruptedExportIfNeeded() {
         guard resumeExportWhenActive else { return }
         resumeExportWhenActive = false
+        if let paused = exportPausedPercent, screen == .rendering {
+            exportPausedPercent = nil
+            exportResumedFromPercent = paused
+            startRender(quality: exportQuality, handoff: exportHandoff, resuming: true)
+            return
+        }
         guard screen == .export, exportCanRetryRender else { return }
         retryCurrentExport()
     }
@@ -5935,8 +5955,12 @@ final class TripReelModel: ObservableObject {
         startRender(quality: .standard, handoff: .capCut)
     }
 
-    private func startRender(quality: ExportQuality, handoff: ExportHandoff) {
+    private func startRender(quality: ExportQuality, handoff: ExportHandoff, resuming: Bool = false) {
         workTask?.cancel()
+        if !resuming {
+            exportPausedPercent = nil
+            exportResumedFromPercent = nil
+        }
         BackgroundExportSupport.shared.finish(success: false)
         // The free preview uses smaller, planner-chosen media, so a running HD
         // prefetch would only compete with it for bandwidth.
@@ -5953,7 +5977,7 @@ final class TripReelModel: ObservableObject {
         exportedVideoURL = nil
         exportShareLinkURL = nil
         exportCanFinishInBackground = false
-        renderProgress = 0
+        if !resuming { renderProgress = 0 }
         exportErrorMessage = nil
         exportErrorTitle = "Export couldn't finish"
         exportCanRetryPhotoDownload = false
@@ -6015,12 +6039,18 @@ final class TripReelModel: ObservableObject {
             self.exportCanFinishInBackground = await background.begin { [weak self] in
                 guard let self, self.exportGeneration == generation else { return }
                 self.workTask?.cancel()
-                self.exportErrorTitle = "Export paused"
-                self.exportErrorMessage = "iOS paused your export to free up resources. Nothing is lost: Memories saved its progress and will carry on when you come back."
-                self.exportCanRetryRender = true
+                let percent = Int(self.renderProgress * 100)
+                self.exportPausedPercent = percent
+                self.exportCanFinishInBackground = false
                 self.resumeExportWhenActive = true
-                self.preferenceStore.removeObject(forKey: LocalCompletedExport.interruptedKey)
-                self.go(.export)
+                self.preferenceStore.set(true, forKey: LocalCompletedExport.interruptedKey)
+                // Already looking at the app: carry on right away. Otherwise say so
+                // in a notification and continue the moment the app is opened.
+                if UIApplication.shared.applicationState == .active {
+                    self.resumeInterruptedExportIfNeeded()
+                } else {
+                    Task { await BackgroundExportSupport.shared.notifyPaused(percent: percent) }
+                }
             }
             guard !Task.isCancelled, self.exportGeneration == generation else {
                 background.finish(success: false)
@@ -6060,6 +6090,7 @@ final class TripReelModel: ObservableObject {
                 LocalCompletedExport.markSeen(receipt.id)
                 self.refreshMyExports()
                 self.renderProgress = 1
+                self.exportResumedFromPercent = nil
                 self.preferenceStore.removeObject(forKey: LocalCompletedExport.interruptedKey)
                 background.updateProgress(1)
                 await background.notifyIfBackgrounded()
@@ -6156,6 +6187,8 @@ final class TripReelModel: ObservableObject {
         workTask?.cancel()
         workTask = nil
         resumeExportWhenActive = false
+        exportPausedPercent = nil
+        exportResumedFromPercent = nil
         // Cancelling on purpose discards the saved pieces; an interruption keeps them.
         videoExporter.discardRenderCheckpoints()
         BackgroundExportSupport.shared.finish(success: false)

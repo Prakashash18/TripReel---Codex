@@ -93,3 +93,13 @@ The privacy policy (in the app, `PRIVACY.md`, and `marketing-site/dist/privacy/i
 tracked here and must be deployed separately) now states this retention. Tests cover retention by quality,
 the five-film cap, one-time opening, deletion and legacy migration; model tests run against an isolated shelf
 so they can never write to a real one. Not yet verified on a physical iPhone.
+
+## When iOS pauses a background render
+
+- The Rendering screen stays on screen and shows "Paused at N%" with "Continue now"; there is no error alert.
+- A notification says "Your film is N% done. Open Memories and it carries on from here."
+- Opening the app resumes automatically from the saved pieces ("Picking up at N%"). If the pause happens while the app is open, it resumes straight away.
+- The diagnostic log records the phone's conditions at the moment of expiry (thermal state, Low Power Mode, battery, free memory). After a TestFlight run, read `latestDiagnosticSummary` (shown in the export error text) to see which one correlates with the pause.
+- Progress is reported to iOS in tenths of a percent, so the system sees steady movement.
+- Low Power Mode shows a note on the Rendering screen.
+- Device test: start a 2-minute 1080p export, lock the phone, wait 3 minutes. Expect either a finished film notification or the paused notification, then a resume to 100% on opening the app.

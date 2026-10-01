@@ -24,6 +24,7 @@ final class BackgroundExportSupport {
     private var graceTask: UIBackgroundTaskIdentifier = .invalid
     private var expirationAction: (() -> Void)?
     private var lastReportedPercent = -1
+    private var lastTitlePercent = -1
     private(set) var interruptionMessage = "iOS stopped the background render. Open this story and try exporting again."
 
     private init() {}
@@ -74,13 +75,13 @@ final class BackgroundExportSupport {
                             self?.resumePendingLaunch(accepted: false)
                             return
                         }
-                        task.progress.totalUnitCount = 100
+                        task.progress.totalUnitCount = 1000
                         task.progress.completedUnitCount = 1
                         task.expirationHandler = { [weak self] in
                             Task { @MainActor in
                                 guard let self else { return }
                                 self.interruptionMessage = "iOS ended an active background export because the phone needed its resources. Open this story and try exporting again. Diagnostic: continued-task-expired."
-                                self.record("continued-task-expired")
+                                self.record("continued-task-expired " + Self.deviceConditions())
                                 self.expirationAction?()
                                 // Progress is checkpointed, so this is a pause, not a failure.
                                 self.finish(success: true)
@@ -142,7 +143,11 @@ final class BackgroundExportSupport {
         guard #available(iOS 26.0, *),
               let activeTask = activeTask as? BGContinuedProcessingTask else { return }
         let percent = Int(max(0, min(1, fraction)) * 100)
-        activeTask.progress.completedUnitCount = Int64(percent)
+        // Tenths of a percent: iOS judges a continued task by how steadily its progress moves,
+        // so report every small step, not only whole percents.
+        activeTask.progress.completedUnitCount = max(activeTask.progress.completedUnitCount, Int64(max(0, min(1, fraction)) * 1000))
+        guard percent != lastTitlePercent else { return }
+        lastTitlePercent = percent
         activeTask.updateTitle("Rendering your memory", subtitle: "\(percent)% complete")
         if percent != lastReportedPercent, percent.isMultiple(of: 10) {
             lastReportedPercent = percent
@@ -167,6 +172,7 @@ final class BackgroundExportSupport {
         activeRequestID = nil
         expirationAction = nil
         lastReportedPercent = -1
+        lastTitlePercent = -1
         endGraceTask()
         record("finished success=\(success)")
     }
@@ -220,6 +226,35 @@ final class BackgroundExportSupport {
             guard settings.authorizationStatus == .notDetermined else { return }
             _ = try? await center.requestAuthorization(options: [.alert, .sound])
         }
+    }
+
+    /// What the phone was doing when iOS ended the task. Kept in the diagnostic log so a
+    /// pattern (heat, Low Power Mode, little memory) can be spotted across attempts.
+    private static func deviceConditions() -> String {
+        let thermal = ProcessInfo.processInfo.thermalState
+        let thermalName = ["nominal", "fair", "serious", "critical"][min(max(thermal.rawValue, 0), 3)]
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        let battery = Int(UIDevice.current.batteryLevel * 100)
+        let free = Int(os_proc_available_memory() / 1_048_576)
+        return "thermal=\(thermalName) lowPower=\(ProcessInfo.processInfo.isLowPowerModeEnabled) battery=\(battery)% freeMemoryMB=\(free)"
+    }
+
+    /// Sent when iOS pauses a render in the background, so the person knows to come back.
+    func notifyPaused(percent: Int) async {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard settings.authorizationStatus == .authorized ||
+                settings.authorizationStatus == .provisional else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Your film is \(percent)% done"
+        content.body = "iOS paused it in the background. Open Memories and it carries on from here."
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "memory-paused",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        )
+        try? await center.add(request)
     }
 
     func notifyIfBackgrounded() async {
