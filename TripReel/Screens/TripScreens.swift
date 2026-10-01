@@ -97,7 +97,7 @@ struct TripsScreen: View {
                                         ? "1 finished film kept on this iPhone"
                                         : "\(model.myExports.count) finished films kept on this iPhone"))
                                     .font(TR.ui(10))
-                                    .foregroundStyle(.white.opacity(0.46))
+                                    .foregroundStyle(.white.opacity(0.72))
                             }
                             Spacer()
                             Image(systemName: "chevron.right")
@@ -125,7 +125,7 @@ struct TripsScreen: View {
                                     .font(TR.ui(12, weight: .semibold))
                                 Text("Review moments left out of your last film")
                                     .font(TR.ui(10))
-                                    .foregroundStyle(.white.opacity(0.46))
+                                    .foregroundStyle(.white.opacity(0.72))
                             }
                             Spacer()
                             Image(systemName: "chevron.right")
@@ -148,7 +148,7 @@ struct TripsScreen: View {
                                     .tint(TR.accent)
                                 Text("Looking through \(model.libraryPhotoCount) accessible moments…")
                                     .font(TR.ui(13))
-                                    .foregroundStyle(.white.opacity(0.58))
+                                    .foregroundStyle(.white.opacity(0.72))
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 72)
@@ -184,7 +184,7 @@ struct TripsScreen: View {
                             if isShowingLocalMemories {
                                 Text("One-day memories near places you visit often. Screenshots never create a memory.")
                                     .font(TR.ui(11))
-                                    .foregroundStyle(.white.opacity(0.39))
+                                    .foregroundStyle(.white.opacity(0.72))
                                     .multilineTextAlignment(.center)
                                     .lineSpacing(3)
                                     .padding(.horizontal, 24)
@@ -198,7 +198,7 @@ struct TripsScreen: View {
                                 model.go(.empty)
                             }
                             .font(TR.ui(13, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.42))
+                            .foregroundStyle(.white.opacity(0.72))
                             .buttonStyle(.plain)
                             .padding(.vertical, 14)
                         }
@@ -321,7 +321,7 @@ struct TripsScreen: View {
                  ? "Local memories appear after Memories recognizes a familiar area and a compact day with six or more moments."
                  : "Pull down to scan again, or pick the moments that matter yourself.")
                 .font(TR.ui(12))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.white.opacity(0.72))
                 .multilineTextAlignment(.center)
                 .lineSpacing(3)
         }
@@ -356,11 +356,11 @@ private struct TripRow: View {
                         .minimumScaleFactor(0.82)
 
                     Text(detailText)
-                        .lineLimit(1)
+                        .lineLimit(2)
                         .minimumScaleFactor(0.78)
                         .font(TR.mono(10))
                         .tracking(0.8)
-                        .foregroundStyle(.white.opacity(0.42))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -592,7 +592,7 @@ struct EmptyTripsScreen: View {
                         }
                     }
                     .font(TR.ui(14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.53))
+                    .foregroundStyle(.white.opacity(0.72))
                     .buttonStyle(.plain)
                     .disabled(model.isScanningLibrary)
                 }
@@ -661,7 +661,7 @@ struct BuildingScreen: View {
 
                 Text("\(model.buildCount) of \(model.photos.count) moments placed")
                     .font(TR.ui(15))
-                    .foregroundStyle(.white.opacity(0.61))
+                    .foregroundStyle(.white.opacity(0.72))
                     .contentTransition(.numericText())
                     .animation(reduceMotion ? nil : TRMotion.progress, value: model.buildCount)
 

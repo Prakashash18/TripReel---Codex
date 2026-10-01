@@ -93,7 +93,7 @@ struct PhotoAnalysisProgressOverlay: View {
                             .multilineTextAlignment(.center)
                         Text(status)
                             .font(TR.ui(13, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.62))
+                            .foregroundStyle(.white.opacity(0.72))
                             .contentTransition(.numericText())
                     }
                     .padding(.top, 20)
@@ -141,13 +141,13 @@ struct PhotoAnalysisProgressOverlay: View {
                     VStack(spacing: 12) {
                         Text(privacyNote)
                             .font(TR.ui(10))
-                            .foregroundStyle(.white.opacity(0.38))
+                            .foregroundStyle(.white.opacity(0.72))
                             .multilineTextAlignment(.center)
                             .lineSpacing(3)
 
                         Button("Cancel", action: onCancel)
                             .font(TR.ui(13, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.66))
+                            .foregroundStyle(.white.opacity(0.72))
                             .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 40)
@@ -364,7 +364,7 @@ struct SmartSelectionReviewView: View {
 
                 Text("Memories kept these moments out of the automatic cut. Nothing was deleted. Add back anything that matters to you.")
                     .font(TR.ui(13))
-                    .foregroundStyle(.white.opacity(0.62))
+                    .foregroundStyle(.white.opacity(0.72))
                     .lineSpacing(4)
                     .padding(.horizontal, 22)
                     .padding(.top, 12)
@@ -423,7 +423,7 @@ struct SmartSelectionReviewView: View {
                         .font(TR.ui(15, weight: .semibold))
                     Text("Enjoy it now. Memories can check a few more moments whenever you choose.")
                         .font(TR.ui(12))
-                        .foregroundStyle(.white.opacity(0.58))
+                        .foregroundStyle(.white.opacity(0.72))
                         .lineSpacing(3)
                 }
             }
@@ -490,11 +490,11 @@ struct SmartSelectionReviewView: View {
             if let count {
                 Text("\(count)")
                     .font(TR.mono(11))
-                    .foregroundStyle(.white.opacity(0.52))
+                    .foregroundStyle(.white.opacity(0.72))
             } else if let detail {
                 Text(detail)
                     .font(TR.ui(10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.48))
+                    .foregroundStyle(.white.opacity(0.72))
             }
         }
     }
@@ -522,19 +522,19 @@ struct SmartSelectionReviewView: View {
                     .foregroundStyle(TR.accent)
                 Text(excluded.detail)
                     .font(TR.ui(11))
-                    .foregroundStyle(.white.opacity(0.56))
+                    .foregroundStyle(.white.opacity(0.72))
                     .lineLimit(2)
                 Text(excluded.origin.title)
                     .font(TR.mono(9))
                     .tracking(0.7)
-                    .foregroundStyle(.white.opacity(0.36))
+                    .foregroundStyle(.white.opacity(0.72))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             if excluded.reason == .waitingForPhotos {
                 Text("Check later")
                     .font(TR.ui(11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.48))
+                    .foregroundStyle(.white.opacity(0.72))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 9)
                     .background(.white.opacity(0.07))

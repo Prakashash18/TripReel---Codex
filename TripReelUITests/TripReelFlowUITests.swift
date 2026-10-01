@@ -262,8 +262,8 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("save-film").exists)
         XCTAssertTrue(screen("share-link-button").exists)
 
-        screen("app-back-button").tap()
-        XCTAssertTrue(app.buttons["Create 7-day link"].waitForExistence(timeout: 3))
+        screen("ready-all-memories").tap()
+        XCTAssertTrue(app.buttons["Get 7-day link"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["Leave without keeping"].exists)
         attachScreenshot(named: "Unsaved video exit choices")
         app.buttons["Stay here"].tap()

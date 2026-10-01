@@ -197,7 +197,7 @@ struct ExportScreen: View {
 
                     Text("Tap an option to see what’s included.")
                         .font(TR.ui(12))
-                        .foregroundStyle(.white.opacity(0.54))
+                        .foregroundStyle(.white.opacity(0.72))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 16)
                 }
@@ -270,7 +270,7 @@ private struct ExportOptionCard: View {
                             .font(TR.ui(18, weight: .semibold))
                         Text(subtitle)
                             .font(TR.ui(13))
-                            .foregroundStyle(.white.opacity(0.63))
+                            .foregroundStyle(.white.opacity(0.72))
                         MetadataText(text: badge, color: badgeColor)
                             .lineLimit(2)
                             .minimumScaleFactor(0.76)
@@ -363,7 +363,7 @@ private struct ProjectFormatSheet: View {
 
                 Text("Choose a finished MP4 for mobile editors, or a timing file for a desktop editor.")
                     .font(TR.ui(13))
-                    .foregroundStyle(.white.opacity(0.57))
+                    .foregroundStyle(.white.opacity(0.72))
                     .lineSpacing(4)
 
                 VStack(alignment: .leading, spacing: 12) {
@@ -374,7 +374,7 @@ private struct ProjectFormatSheet: View {
                                 .font(TR.ui(15, weight: .semibold))
                             Text("CapCut accepts Memories' MP4 as one editable video clip. Its mobile app doesn't import CSV, EDL or Final Cut timelines.")
                                 .font(TR.ui(12))
-                                .foregroundStyle(.white.opacity(0.66))
+                                .foregroundStyle(.white.opacity(0.72))
                                 .lineSpacing(3)
                         }
                     }
@@ -394,7 +394,7 @@ private struct ProjectFormatSheet: View {
 
                     Text("If CapCut isn't offered in the share sheet, save the MP4 to Photos and import it from inside CapCut.")
                         .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.48))
+                        .foregroundStyle(.white.opacity(0.72))
                         .lineSpacing(3)
                 }
                 .padding(14)
@@ -453,7 +453,7 @@ private struct ProjectFormatSheet: View {
                         .font(TR.ui(15, weight: .semibold))
                     Text(format.apps)
                         .font(TR.ui(12))
-                        .foregroundStyle(.white.opacity(0.56))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
                 Spacer()
                 Text(format.fileExtension)
@@ -646,7 +646,7 @@ struct ExportUnlockSuccessView: View {
                         .multilineTextAlignment(.center)
                     Text(kind.detail)
                         .font(TR.ui(15))
-                        .foregroundStyle(.white.opacity(0.62))
+                        .foregroundStyle(.white.opacity(0.72))
                         .multilineTextAlignment(.center)
                         .lineSpacing(3)
                 }
@@ -663,7 +663,7 @@ struct ExportUnlockSuccessView: View {
                 if let remainingMonthlyExports {
                     Text("\(remainingMonthlyExports) free full export\(remainingMonthlyExports == 1 ? "" : "s") left this month")
                         .font(TR.ui(12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
 
                 Spacer()
@@ -674,7 +674,7 @@ struct ExportUnlockSuccessView: View {
 
                 Button("Do this later", action: laterAction)
                     .font(TR.ui(14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.58))
+                    .foregroundStyle(.white.opacity(0.72))
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("finish-unlock-later")
             }
@@ -764,7 +764,7 @@ struct PaywallScreen: View {
                                 ProgressView().tint(TR.accent)
                                 Text("Loading export options…")
                                     .font(TR.ui(13))
-                                    .foregroundStyle(.white.opacity(0.62))
+                                    .foregroundStyle(.white.opacity(0.72))
                             }
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.vertical, 20)
@@ -800,7 +800,7 @@ struct PaywallScreen: View {
                     } label: {
                         Text("Or export a \(model.freeExportDurationText) preview with watermark")
                             .font(TR.ui(13, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.white.opacity(0.72))
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
@@ -815,7 +815,7 @@ struct PaywallScreen: View {
                             Button("Terms") { showsTermsOfUse = true }
                         }
                         .font(TR.ui(11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.54))
+                        .foregroundStyle(.white.opacity(0.72))
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -882,7 +882,7 @@ struct PaywallScreen: View {
                             .font(TR.ui(14, weight: .semibold))
                         Text("Come back next month for three more full 1080p exports.")
                             .font(TR.ui(12))
-                            .foregroundStyle(.white.opacity(0.58))
+                            .foregroundStyle(.white.opacity(0.72))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -906,7 +906,7 @@ struct PaywallScreen: View {
                 if let freeExportReminderMessage {
                     Text(freeExportReminderMessage)
                         .font(TR.ui(11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.62))
+                        .foregroundStyle(.white.opacity(0.72))
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
@@ -961,7 +961,7 @@ struct PaywallScreen: View {
                         .fixedSize(horizontal: false, vertical: true)
                     Text("Unlock this complete film in 1080p, without a watermark.")
                         .font(TR.ui(13))
-                        .foregroundStyle(.white.opacity(0.64))
+                        .foregroundStyle(.white.opacity(0.72))
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -973,7 +973,7 @@ struct PaywallScreen: View {
                             .foregroundStyle(TR.accent)
                         Text("One-time · No subscription")
                             .font(TR.ui(11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.52))
+                            .foregroundStyle(.white.opacity(0.72))
                     }
                     Spacer(minLength: 12)
                     Text(price ?? "Apple price")
@@ -985,7 +985,7 @@ struct PaywallScreen: View {
 
                 Text("Apple’s localized price for your App Store region.")
                     .font(TR.ui(11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.white.opacity(0.72))
 
                 Button {
                     buySelectedPackage(storyPass)
@@ -1014,7 +1014,7 @@ struct PaywallScreen: View {
     private var configurationNotice: some View {
         Label("Full export is temporarily unavailable", systemImage: "exclamationmark.circle")
             .font(TR.ui(12, weight: .medium))
-            .foregroundStyle(.white.opacity(0.58))
+            .foregroundStyle(.white.opacity(0.72))
             .frame(maxWidth: .infinity, alignment: .center)
     }
 
@@ -1113,7 +1113,7 @@ struct RenderingScreen: View {
                 Text(model.exportProgressDetail.uppercased())
                     .font(TR.mono(11, weight: .medium))
                     .tracking(1.1)
-                    .foregroundStyle(.white.opacity(0.62))
+                    .foregroundStyle(.white.opacity(0.72))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .minimumScaleFactor(0.72)
@@ -1124,7 +1124,7 @@ struct RenderingScreen: View {
                 if case .preparingPhotos = model.exportProgressPhase {
                     Text("Memories retries iCloud automatically before it starts encoding.")
                         .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.42))
+                        .foregroundStyle(.white.opacity(0.72))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 44)
                         .padding(.top, 10)
@@ -1144,7 +1144,7 @@ struct RenderingScreen: View {
                      ? "You can leave Memories while this finishes. We'll notify you when it's ready."
                      : "Keep Memories open while this video finishes.")
                     .font(TR.ui(11))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(.white.opacity(0.72))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 48)
                     .padding(.top, 18)
@@ -1153,7 +1153,7 @@ struct RenderingScreen: View {
                     model.cancelRender()
                 }
                 .font(TR.ui(14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.52))
+                .foregroundStyle(.white.opacity(0.72))
                 .buttonStyle(.plain)
                 .padding(.top, 26)
             }
@@ -1253,7 +1253,7 @@ struct FilmReadyScreen: View {
                         Text("\(model.tripDates.uppercased()) · \(model.activeExportMediaSummary.uppercased())")
                             .font(TR.mono(9))
                             .tracking(1)
-                            .foregroundStyle(.white.opacity(0.48))
+                            .foregroundStyle(.white.opacity(0.72))
                             .multilineTextAlignment(.center)
                     }
 
@@ -1297,7 +1297,7 @@ struct FilmReadyScreen: View {
                                 }
                                 Text(model.exportShareLinkURL == nil ? "Saved to cloud · 7 days" : "Online for 7 days")
                                     .font(TR.ui(10, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.6))
+                                    .foregroundStyle(.white.opacity(0.72))
                             }
                             .frame(maxWidth: .infinity)
                         }
@@ -1312,7 +1312,7 @@ struct FilmReadyScreen: View {
                     )
                     .accessibilityIdentifier("export-retention-note")
                         .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.44))
+                        .foregroundStyle(.white.opacity(0.72))
                         .multilineTextAlignment(.center)
                         .lineSpacing(3)
                         .padding(.horizontal, 8)
@@ -1328,7 +1328,7 @@ struct FilmReadyScreen: View {
                         .accessibilityIdentifier("edit-film-button")
                         Text("Changing it and exporting again doesn't cost another export.")
                             .font(TR.ui(11))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.white.opacity(0.72))
                             .multilineTextAlignment(.center)
                     }
 
@@ -1590,7 +1590,7 @@ struct CleanupScreen: View {
 
             Text("They're still in your library. You decide whether any originals are deleted.")
                 .font(TR.ui(14))
-                .foregroundStyle(.white.opacity(0.61))
+                .foregroundStyle(.white.opacity(0.72))
                 .multilineTextAlignment(.center)
                 .lineSpacing(4)
 
@@ -1647,7 +1647,7 @@ private struct CleanupGrid: View {
                     .accessibilityIdentifier("cleanup-screen")
                 Text(subtitle)
                     .font(TR.ui(13))
-                    .foregroundStyle(.white.opacity(0.57))
+                    .foregroundStyle(.white.opacity(0.72))
 
                 selectionToolbar
                     .padding(.top, 8)
@@ -1720,7 +1720,7 @@ private struct CleanupGrid: View {
                     model.restart()
                 }
                 .font(TR.ui(14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.53))
+                .foregroundStyle(.white.opacity(0.72))
                 .buttonStyle(.plain)
                 .padding(.vertical, 4)
                 .disabled(model.isDeletingPhotos)
@@ -1792,7 +1792,7 @@ private struct CleanupGrid: View {
         Text("\(model.cleanupSelectedCount) / \(candidatePhotos.count) selected")
             .font(TR.mono(11, weight: .semibold))
             .tracking(0.6)
-            .foregroundStyle(.white.opacity(0.64))
+            .foregroundStyle(.white.opacity(0.72))
             .contentTransition(.numericText())
             .accessibilityLabel("\(model.cleanupSelectedCount) of \(candidatePhotos.count) photos selected")
     }
@@ -1897,12 +1897,12 @@ struct MyExportsSheet: View {
                             .font(TR.display(34))
                         Text("Kept on this iPhone so you can save or share them again. Full films stay for seven days, previews for one day. Nothing is uploaded.")
                             .font(TR.ui(13))
-                            .foregroundStyle(.white.opacity(0.58))
+                            .foregroundStyle(.white.opacity(0.72))
                             .lineSpacing(3)
                         if model.myExports.isEmpty {
                             Text("No films yet. When you make one, it waits here for seven days.")
                                 .font(TR.ui(14))
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.white.opacity(0.72))
                                 .padding(.top, 24)
                         }
                         ForEach(model.myExports) { item in
@@ -1951,7 +1951,7 @@ struct MyExportsSheet: View {
                     Text("\(Self.durationText(item.durationSeconds)) · \(item.isHD ? "1080p" : "720p preview")")
                         .font(TR.mono(10))
                         .tracking(0.8)
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.white.opacity(0.72))
                     Text(item.remainingDescription().uppercased())
                         .font(TR.mono(9, weight: .semibold))
                         .tracking(1)

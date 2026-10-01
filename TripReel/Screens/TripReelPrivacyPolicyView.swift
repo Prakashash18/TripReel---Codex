@@ -60,7 +60,7 @@ struct TripReelPrivacyPolicyView: View {
                         Text("Effective September 18, 2026")
                             .font(TR.mono(10))
                             .tracking(0.8)
-                            .foregroundStyle(.white.opacity(0.38))
+                            .foregroundStyle(.white.opacity(0.72))
                             .padding(.top, 4)
                     }
                     .padding(.horizontal, 22)
@@ -92,7 +92,7 @@ struct TripReelPrivacyPolicyView: View {
                 .font(TR.display(34))
             Text("This policy explains the private on-device First Cut, optional AI Director, and temporary links you explicitly create.")
                 .font(TR.ui(14))
-                .foregroundStyle(.white.opacity(0.66))
+                .foregroundStyle(.white.opacity(0.72))
                 .lineSpacing(4)
         }
     }
@@ -103,7 +103,7 @@ struct TripReelPrivacyPolicyView: View {
                 .font(TR.ui(15, weight: .semibold))
             Text(body)
                 .font(TR.ui(13))
-                .foregroundStyle(.white.opacity(0.64))
+                .foregroundStyle(.white.opacity(0.72))
                 .lineSpacing(5)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -126,7 +126,7 @@ struct MemoriesTermsOfUseView: View {
                                 .font(TR.display(34))
                             Text("These terms explain the permission Memories needs to turn media you choose into a story.")
                                 .font(TR.ui(14))
-                                .foregroundStyle(.white.opacity(0.66))
+                                .foregroundStyle(.white.opacity(0.72))
                                 .lineSpacing(4)
                         }
 
@@ -169,7 +169,7 @@ struct MemoriesTermsOfUseView: View {
                         Text("Effective September 13, 2026")
                             .font(TR.mono(10))
                             .tracking(0.8)
-                            .foregroundStyle(.white.opacity(0.38))
+                            .foregroundStyle(.white.opacity(0.72))
                             .padding(.top, 4)
                     }
                     .padding(.horizontal, 22)
@@ -197,7 +197,7 @@ struct MemoriesTermsOfUseView: View {
                 .font(TR.ui(15, weight: .semibold))
             Text(body)
                 .font(TR.ui(13))
-                .foregroundStyle(.white.opacity(0.64))
+                .foregroundStyle(.white.opacity(0.72))
                 .lineSpacing(5)
                 .fixedSize(horizontal: false, vertical: true)
         }

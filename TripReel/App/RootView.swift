@@ -57,6 +57,7 @@ struct RootView: View {
                 CleanupScreen()
             }
         }
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .id(model.screen.rawValue)
         .transition(
             TRMotion.screenTransition(

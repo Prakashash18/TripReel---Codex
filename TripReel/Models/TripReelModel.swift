@@ -3318,10 +3318,11 @@ final class TripReelModel: ObservableObject {
         if isStoryPassPresented { return true }
         switch screen {
         case .access, .limited, .storyClue, .firstWatch, .firstCutOptions, .aiDirection, .aiComparison,
-             .aiVideoIntro, .aiVideoReady, .secondWatch, .pace, .export, .paywall, .done:
+             .aiVideoIntro, .aiVideoReady, .secondWatch, .pace, .export, .paywall:
             return true
+        // The ready screen has its own labelled "All memories" exit.
         case .welcome, .trips, .empty, .building, .aiProcessing, .aiVideoGenerating,
-             .cut, .rendering, .cleanup:
+             .cut, .rendering, .cleanup, .done:
             return false
         }
     }

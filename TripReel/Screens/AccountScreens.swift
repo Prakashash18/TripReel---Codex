@@ -76,7 +76,7 @@ struct AccountCenterView: View {
                  ? "Share or save a linked video again before it expires in seven days."
                  : "Sign in to create a private share link for Messages or social media. Local saving never needs an account.")
                 .font(TR.ui(15))
-                .foregroundStyle(.white.opacity(0.62))
+                .foregroundStyle(.white.opacity(0.72))
                 .lineSpacing(3)
         }
         .padding(.top, 18)
@@ -118,7 +118,7 @@ struct AccountCenterView: View {
 
             Text("Apple shares only the account details you approve. Memories never uploads your photo library.")
                 .font(TR.ui(11))
-                .foregroundStyle(.white.opacity(0.42))
+                .foregroundStyle(.white.opacity(0.72))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 12)
         }
@@ -132,7 +132,7 @@ struct AccountCenterView: View {
                 Spacer()
                 Button("Sign out") { Task { await account.signOut() } }
                     .font(TR.ui(12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.58))
+                    .foregroundStyle(.white.opacity(0.72))
             }
             .padding(16)
             .glassCard(cornerRadius: 18)
@@ -149,7 +149,7 @@ struct AccountCenterView: View {
                             .font(TR.ui(14, weight: .semibold))
                         Text("\(account.monthlyExportAllowance.remaining) of 3 remaining")
                             .font(TR.ui(11))
-                            .foregroundStyle(.white.opacity(0.52))
+                            .foregroundStyle(.white.opacity(0.72))
                         if let resetDate = MonthlyExportResetNotificationScheduler.nextResetDate() {
                             Text("Resets \(resetDate.formatted(.dateTime.day().month(.wide)))")
                                 .font(TR.ui(11, weight: .medium))
@@ -180,7 +180,7 @@ struct AccountCenterView: View {
                     if let freeExportReminderMessage {
                         Text(freeExportReminderMessage)
                             .font(TR.ui(10, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.52))
+                            .foregroundStyle(.white.opacity(0.72))
                     }
                 }
             }
@@ -198,7 +198,7 @@ struct AccountCenterView: View {
                          ? "Close this screen, then tap Create share link again."
                          : "Create a link from the final screen of any memory.")
                         .font(TR.ui(13))
-                        .foregroundStyle(.white.opacity(0.52))
+                        .foregroundStyle(.white.opacity(0.72))
                         .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
@@ -224,10 +224,10 @@ struct AccountCenterView: View {
             Text("ACCOUNT & PRIVACY")
                 .font(TR.mono(10, weight: .semibold))
                 .tracking(1.5)
-                .foregroundStyle(.white.opacity(0.46))
+                .foregroundStyle(.white.opacity(0.72))
             Text("You can permanently remove your account and every video and link stored by Memories.")
                 .font(TR.ui(12))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.white.opacity(0.72))
                 .lineSpacing(2)
             Button(role: .destructive) {
                 showsAccountDeletion = true
@@ -312,7 +312,7 @@ private struct AccountDeletionSheet: View {
                                 .tracking(-0.6)
                             Text("This cannot be undone. Before continuing, make sure you have saved every video you want to keep.")
                                 .font(TR.ui(15))
-                                .foregroundStyle(.white.opacity(0.65))
+                                .foregroundStyle(.white.opacity(0.72))
                                 .lineSpacing(3)
                         }
 
@@ -431,13 +431,13 @@ private struct SharedMemoryRow: View {
                             .foregroundStyle(memory.isPaid ? TR.accent : TR.keep)
                         Text("Created \(creationText)")
                             .font(TR.ui(10))
-                            .foregroundStyle(.white.opacity(0.46))
+                            .foregroundStyle(.white.opacity(0.72))
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 8) {
                         Text(memory.daysRemaining == 0 ? "Expires today" : "\(memory.daysRemaining)d left")
                             .font(TR.ui(10, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.48))
+                            .foregroundStyle(.white.opacity(0.72))
                         Image(systemName: "chevron.right")
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(.white.opacity(0.42))
@@ -546,7 +546,7 @@ private struct SharedMemoryDetailView: View {
                             .tracking(-0.5)
                         Text(expiryText)
                             .font(TR.ui(13))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(.white.opacity(0.72))
                     }
 
                     Button {
@@ -608,7 +608,7 @@ private struct SharedMemoryDetailView: View {
 
                     Text("The video and private link expire automatically. Save it to Photos if you want to keep it.")
                         .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.44))
+                        .foregroundStyle(.white.opacity(0.72))
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                 }
@@ -663,7 +663,7 @@ private struct SharedMemoryDetailView: View {
                     ProgressView().tint(TR.accent)
                     Text("Preparing your memory…")
                         .font(TR.ui(12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.58))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
             } else {
                 VStack(spacing: 12) {
@@ -672,7 +672,7 @@ private struct SharedMemoryDetailView: View {
                         .foregroundStyle(TR.accent)
                     Text(playbackError ?? "This video couldn’t be opened.")
                         .font(TR.ui(13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.white.opacity(0.72))
                         .multilineTextAlignment(.center)
                     Button("Try again") { Task { await loadVideo() } }
                         .font(TR.ui(13, weight: .semibold))
@@ -745,7 +745,7 @@ struct MemoryLinkReadySheet: View {
                     .multilineTextAlignment(.center)
                 Text("Anyone with this link can watch “\(title)” until it expires.")
                     .font(TR.ui(14))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.white.opacity(0.72))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 18)
                 Spacer()
@@ -772,11 +772,11 @@ struct MemoryLinkReadySheet: View {
                 .foregroundStyle(TR.accent)
                 Text(copyConfirmation ?? "For Facebook posts, copy the link and paste it into your caption.")
                     .font(TR.ui(11))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(.white.opacity(0.72))
                     .multilineTextAlignment(.center)
                 Button("Done") { dismiss() }
                     .font(TR.ui(14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.58))
+                    .foregroundStyle(.white.opacity(0.72))
             }
             .padding(24)
         }

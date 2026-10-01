@@ -110,7 +110,7 @@ struct CloudAnalysisConsentView: View {
                     systemImage: "iphone.slash"
                 )
                 .font(TR.ui(12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.62))
+                .foregroundStyle(.white.opacity(0.72))
                 .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -170,7 +170,7 @@ struct CloudAnalysisConsentView: View {
     private func compactSafetyLabel(_ title: String, symbol: String) -> some View {
         Label(title, systemImage: symbol)
             .font(TR.ui(10, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.70))
+            .foregroundStyle(.white.opacity(0.72))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
             .background(.white.opacity(0.06))
@@ -182,7 +182,7 @@ struct CloudAnalysisConsentView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Memories also sends First Cut title text, order, pacing, motion, music and style, plus broad on-device cues such as relative day, orientation, scene category and score bands. A preview can contain text visible in the image, but Memories does not send extracted OCR text, GPS, exact dates, filenames or stable Photos IDs. Memories’ Cloudflare service passes this request to OpenAI and does not intentionally store it. OpenAI API data is not used for training by default and may be retained for abuse monitoring for up to 30 days, or longer when legally or safety-required. Child-safety review exceptions may apply.")
                     .font(TR.ui(11))
-                    .foregroundStyle(.white.opacity(0.60))
+                    .foregroundStyle(.white.opacity(0.72))
                     .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
 

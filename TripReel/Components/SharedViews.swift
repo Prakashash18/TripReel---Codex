@@ -370,6 +370,9 @@ struct MontageView: View {
                         .font(TR.ui(13, weight: .bold))
                         .foregroundStyle(TR.cream)
                 }
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
                 .background(.black.opacity(0.74))

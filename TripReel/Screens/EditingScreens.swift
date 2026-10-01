@@ -113,7 +113,7 @@ struct FirstWatchScreen: View {
                     MetadataText(text: "First Cut · On-device", color: .white.opacity(0.82))
                     Text("\(model.tripPlace) · \(model.tripDates)")
                         .font(TR.ui(12))
-                        .foregroundStyle(.white.opacity(0.52))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
                 .padding(.top, 4)
                 .padding(.horizontal, 62)
@@ -234,7 +234,7 @@ struct FirstWatchScreen: View {
                     Text(model.firstCutDurationText)
                         .font(TR.mono(12))
                         .tracking(0.8)
-                        .foregroundStyle(.white.opacity(0.65))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
             }
 
@@ -242,7 +242,7 @@ struct FirstWatchScreen: View {
                 skipToEnd()
             }
             .font(TR.ui(13, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.62))
+            .foregroundStyle(.white.opacity(0.72))
             .padding(.vertical, 11)
             .padding(.horizontal, 16)
             .contentShape(Rectangle())
@@ -298,7 +298,7 @@ struct FirstWatchScreen: View {
                             .font(TR.ui(13, weight: .semibold))
                         Text("Try optional AI Director · your First Cut stays safe")
                             .font(TR.ui(10))
-                            .foregroundStyle(.white.opacity(0.66))
+                            .foregroundStyle(.white.opacity(0.72))
                     }
                     Spacer(minLength: 0)
                     Image(systemName: "arrow.right")
@@ -345,7 +345,7 @@ struct FirstWatchScreen: View {
     ) -> some View {
         Button(title, action: action)
             .font(TR.ui(13, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.62))
+            .foregroundStyle(.white.opacity(0.72))
             .padding(.vertical, 11)
             .contentShape(Rectangle())
             .buttonStyle(.plain)
@@ -494,7 +494,7 @@ private struct StoryPassSheet: View {
             if purchases.storyPassPackage == nil {
                 Label("Story Pass isn't available right now", systemImage: "exclamationmark.circle")
                     .font(TR.ui(12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.58))
+                    .foregroundStyle(.white.opacity(0.72))
                     .frame(maxWidth: .infinity, alignment: .center)
             } else {
                 Button {
@@ -542,7 +542,7 @@ private struct StoryPassSheet: View {
                 sendFreeTrailer()
             }
             .font(TR.ui(14, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.6))
+            .foregroundStyle(.white.opacity(0.72))
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity)
             .disabled(purchases.isPurchasing)
@@ -551,7 +551,7 @@ private struct StoryPassSheet: View {
             VStack(spacing: 7) {
                 Text("One-time purchase for this memory. No subscription.")
                     .font(TR.ui(10))
-                    .foregroundStyle(.white.opacity(0.38))
+                    .foregroundStyle(.white.opacity(0.72))
                     .multilineTextAlignment(.center)
 
                 HStack(spacing: 18) {
@@ -559,7 +559,7 @@ private struct StoryPassSheet: View {
                     Button("Terms", action: showTerms)
                 }
                 .font(TR.ui(11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.54))
+                .foregroundStyle(.white.opacity(0.72))
             }
             .frame(maxWidth: .infinity)
         }
@@ -856,7 +856,7 @@ struct AICutDirectionScreen: View {
 
             Text(stepDetail)
                 .font(TR.ui(14))
-                .foregroundStyle(.white.opacity(0.62))
+                .foregroundStyle(.white.opacity(0.72))
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 6) {
@@ -887,7 +887,7 @@ struct AICutDirectionScreen: View {
 
             Label("Nothing is sent until you create the cut", systemImage: "lock.fill")
                 .font(TR.ui(11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.46))
+                .foregroundStyle(.white.opacity(0.72))
         }
         .trEntrance(1, distance: 8)
         .accessibilityIdentifier("ai-setup-step-moments")
@@ -948,7 +948,7 @@ struct AICutDirectionScreen: View {
 
             Text(footerNote)
                 .font(TR.ui(10))
-                .foregroundStyle(.white.opacity(0.42))
+                .foregroundStyle(.white.opacity(0.72))
                 .multilineTextAlignment(.center)
         }
         .padding(.horizontal, 24)
@@ -1054,7 +1054,7 @@ private struct AICutPhotoSelectionCard: View {
                         .font(TR.ui(15, weight: .semibold))
                     Text(selectionSummary)
                         .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.56))
+                        .foregroundStyle(.white.opacity(0.72))
                     Text("Ranked on device for quality & relevance")
                         .font(TR.ui(10, weight: .medium))
                         .foregroundStyle(TR.keep.opacity(0.82))
@@ -1151,11 +1151,11 @@ private struct AICutPhotoSelectionSheet: View {
                 if selectionIsFull {
                     Text("Deselect one moment to choose another")
                         .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.52))
+                        .foregroundStyle(.white.opacity(0.72))
                 } else {
                     Text("Chosen on this iPhone for quality, relevance & variety")
                         .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.52))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
 
                 Button("Done") { dismiss() }
@@ -1316,7 +1316,7 @@ private struct AICutDirectionCard: View {
                         .font(TR.ui(15, weight: .semibold))
                     Text(direction.detail)
                         .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.56))
+                        .foregroundStyle(.white.opacity(0.72))
                         .lineLimit(2)
                 }
 
@@ -1427,7 +1427,7 @@ struct AICutProcessingScreen: View {
                             .multilineTextAlignment(.center)
                         Text(failure.message)
                             .font(TR.ui(14))
-                            .foregroundStyle(.white.opacity(0.62))
+                            .foregroundStyle(.white.opacity(0.72))
                             .multilineTextAlignment(.center)
                             .lineSpacing(4)
 
@@ -1442,7 +1442,7 @@ struct AICutProcessingScreen: View {
                                     .foregroundStyle(TR.cream)
                                 Text(failure.suggestion)
                                     .font(TR.ui(11))
-                                    .foregroundStyle(.white.opacity(0.52))
+                                    .foregroundStyle(.white.opacity(0.72))
                                     .lineSpacing(2)
                             }
                             Spacer(minLength: 0)
@@ -1460,7 +1460,7 @@ struct AICutProcessingScreen: View {
                         Text("Reference · \(failure.reference)")
                             .font(TR.mono(8))
                             .tracking(0.8)
-                            .foregroundStyle(.white.opacity(0.28))
+                            .foregroundStyle(.white.opacity(0.72))
                     }
                 } else {
                     VStack(spacing: 10) {
@@ -1485,7 +1485,7 @@ struct AICutProcessingScreen: View {
 
                         Text("AI is comparing these previews with your First Cut’s order, pace, titles, music and motion. Rendering stays on your iPhone.")
                             .font(TR.ui(12))
-                            .foregroundStyle(.white.opacity(0.50))
+                            .foregroundStyle(.white.opacity(0.72))
                             .multilineTextAlignment(.center)
                             .lineSpacing(3)
 
@@ -1500,7 +1500,7 @@ struct AICutProcessingScreen: View {
 
                         Text("Your First Cut stays unchanged")
                             .font(TR.ui(11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.42))
+                            .foregroundStyle(.white.opacity(0.72))
                     }
                 }
 
@@ -1569,7 +1569,7 @@ private struct AIPhotoTransferArtwork: View {
                             : isSending ? "Sending copies securely to OpenAI" : "Original media remains on this iPhone"
                     )
                         .font(TR.ui(11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.48))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
                 .position(x: proxy.size.width / 2, y: 27)
 
@@ -1710,7 +1710,7 @@ private struct AITransferEndpoint: View {
                     .foregroundStyle(.white.opacity(0.78))
                 Text(detail)
                     .font(TR.ui(8, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.40))
+                    .foregroundStyle(.white.opacity(0.72))
             }
             .fixedSize()
         }
@@ -1777,7 +1777,7 @@ struct AICutComparisonScreen: View {
                             .multilineTextAlignment(.center)
                         Text("Tap either version. The whole card is your answer.")
                             .font(TR.ui(12))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(.white.opacity(0.72))
                             .multilineTextAlignment(.center)
                     }
                     .padding(.horizontal, 28)
@@ -1853,7 +1853,7 @@ struct AICutComparisonScreen: View {
                                         .font(TR.ui(12, weight: .semibold))
                                     Text(soundtrack.isPlaying ? "Tap to pause" : "Tap to hear this cut")
                                         .font(TR.ui(10))
-                                        .foregroundStyle(.white.opacity(0.48))
+                                        .foregroundStyle(.white.opacity(0.72))
                                 }
                                 Spacer()
                                 Image(systemName: "waveform")
@@ -1924,7 +1924,7 @@ struct AICutComparisonScreen: View {
                 Text("\(duration) · \(detail)")
                     .font(TR.mono(9))
                     .tracking(0.5)
-                    .foregroundStyle(.white.opacity(0.48))
+                    .foregroundStyle(.white.opacity(0.72))
                     .lineLimit(2)
             }
             .foregroundStyle(TR.cream)
@@ -1977,7 +1977,7 @@ private struct AIComparisonDetailPage: View {
                 Spacer()
                 Label("Swipe", systemImage: "arrow.left.and.right")
                     .font(TR.mono(8))
-                    .foregroundStyle(.white.opacity(0.34))
+                    .foregroundStyle(.white.opacity(0.72))
             }
 
             Text(title)
@@ -1987,7 +1987,7 @@ private struct AIComparisonDetailPage: View {
 
             Text(detail)
                 .font(TR.ui(11))
-                .foregroundStyle(.white.opacity(0.54))
+                .foregroundStyle(.white.opacity(0.72))
                 .lineSpacing(2)
                 .lineLimit(3)
 
@@ -1996,7 +1996,7 @@ private struct AIComparisonDetailPage: View {
                     ForEach(Array(badges.prefix(3).enumerated()), id: \.offset) { _, badge in
                         Label(badge.1, systemImage: badge.0)
                             .font(TR.ui(9, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.68))
+                            .foregroundStyle(.white.opacity(0.72))
                             .lineLimit(1)
                             .padding(.horizontal, 9)
                             .padding(.vertical, 6)
@@ -2053,7 +2053,7 @@ struct AIVideoIntroScreen: View {
                             .multilineTextAlignment(.center)
                         Text("A beginning and ending are ready. Tap either one to change it.")
                             .font(TR.ui(12))
-                            .foregroundStyle(.white.opacity(0.56))
+                            .foregroundStyle(.white.opacity(0.72))
                             .multilineTextAlignment(.center)
                     }
                     .padding(.horizontal, 36)
@@ -2069,7 +2069,7 @@ struct AIVideoIntroScreen: View {
                             Spacer()
                             Text(model.aiVideoHasStoryPair ? "6 SEC · 9:16" : "4 SEC · 9:16")
                                 .font(TR.mono(9))
-                                .foregroundStyle(.white.opacity(0.46))
+                                .foregroundStyle(.white.opacity(0.72))
                         }
 
                         HStack(spacing: 10) {
@@ -2302,7 +2302,7 @@ private struct AIVideoBenefitPage: View {
                     .lineLimit(1)
                 Text(detail)
                     .font(TR.ui(11))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(.white.opacity(0.72))
                     .lineSpacing(2)
                     .lineLimit(3)
             }
@@ -2369,7 +2369,7 @@ struct AIVideoGeneratingScreen: View {
                         .font(TR.display(38))
                     Text(model.aiVideoStatus)
                         .font(TR.ui(13))
-                        .foregroundStyle(.white.opacity(0.58))
+                        .foregroundStyle(.white.opacity(0.72))
                         .multilineTextAlignment(.center)
                 }
 
@@ -2382,7 +2382,7 @@ struct AIVideoGeneratingScreen: View {
                         Text("\(Int((model.aiVideoProgress * 100).rounded()))%")
                     }
                     .font(TR.mono(9))
-                    .foregroundStyle(.white.opacity(0.42))
+                    .foregroundStyle(.white.opacity(0.72))
                 }
                 .padding(.horizontal, 34)
 
@@ -2394,7 +2394,7 @@ struct AIVideoGeneratingScreen: View {
 
                 Text("Your submitted video keeps processing. Come back within 29 minutes to resume without starting over.")
                     .font(TR.ui(10))
-                    .foregroundStyle(.white.opacity(0.38))
+                    .foregroundStyle(.white.opacity(0.72))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 34)
 
@@ -2422,7 +2422,7 @@ struct AIVideoReadyScreen: View {
                             .font(TR.display(37))
                         Text("Review carefully—AI can invent small visual details.")
                             .font(TR.ui(11))
-                            .foregroundStyle(.white.opacity(0.52))
+                            .foregroundStyle(.white.opacity(0.72))
                     }
                     .padding(.horizontal, 28)
 
@@ -2465,7 +2465,7 @@ struct AIVideoReadyScreen: View {
 
                     Text("This AI clip is kept privately on this iPhone, so you can reopen this memory and decide about Story Pass later. Save it to Photos for a permanent copy.")
                         .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.44))
+                        .foregroundStyle(.white.opacity(0.72))
                         .multilineTextAlignment(.center)
                         .lineSpacing(3)
                         .padding(.horizontal, 10)
@@ -2525,7 +2525,7 @@ struct CutScreen: View {
                             Text("\(model.cutPhotoIDs.count) CUT")
                                 .font(TR.mono(12))
                                 .tracking(1)
-                                .foregroundStyle(.white.opacity(0.57))
+                                .foregroundStyle(.white.opacity(0.72))
                                 .frame(width: 82, alignment: .leading)
                                 .accessibilityIdentifier("cut-screen")
 
@@ -2607,7 +2607,7 @@ struct CutScreen: View {
 
                         Text("Choose what stays in this film. Nothing is deleted.")
                             .font(TR.ui(12))
-                            .foregroundStyle(.white.opacity(0.43))
+                            .foregroundStyle(.white.opacity(0.72))
                     }
                     .padding(.bottom, 12)
                 }
@@ -2792,7 +2792,7 @@ private struct CutHintOverlay: View {
 
                 Text("Nothing is deleted from your phone.")
                     .font(TR.ui(14))
-                    .foregroundStyle(.white.opacity(0.61))
+                    .foregroundStyle(.white.opacity(0.72))
 
                 Text("Tap to start")
                     .font(TR.ui(13, weight: .semibold))
@@ -2849,7 +2849,7 @@ struct PaceScreen: View {
                         HStack(alignment: .firstTextBaseline) {
                             Text(String(format: "%.1fs base pace", model.secondsPerPhoto))
                                 .font(TR.ui(13))
-                                .foregroundStyle(.white.opacity(0.57))
+                                .foregroundStyle(.white.opacity(0.72))
                             Spacer()
                             Text(model.durationText)
                                 .font(TR.display(34))
@@ -2868,7 +2868,7 @@ struct PaceScreen: View {
                             Text("Fast and punchy")
                         }
                         .font(TR.ui(12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.62))
+                        .foregroundStyle(.white.opacity(0.72))
                     }
                 }
                 .padding(.horizontal, 26)
@@ -2920,7 +2920,7 @@ private struct AdvancedTimingSheet: View {
                             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                         Text(photo.label)
                             .font(TR.mono(13))
-                            .foregroundStyle(.white.opacity(0.61))
+                            .foregroundStyle(.white.opacity(0.72))
                         Spacer()
                         Text(String(format: "%.1fs", model.secondsPerPhoto))
                             .font(TR.mono(13))
@@ -2929,7 +2929,7 @@ private struct AdvancedTimingSheet: View {
 
                 Text("Most people never need this. The pace slider sets everything at once.")
                     .font(TR.ui(12))
-                    .foregroundStyle(.white.opacity(0.44))
+                    .foregroundStyle(.white.opacity(0.72))
                     .lineSpacing(4)
             }
             .padding(.horizontal, 24)
@@ -3075,10 +3075,14 @@ struct SecondWatchScreen: View {
                 Color.clear.frame(width: 52, height: 38)
                 VStack(spacing: 4) {
                     MetadataText(text: "FILM STUDIO · \(model.tripShortPlace)", color: .white.opacity(0.82))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                         .accessibilityIdentifier("second-watch-screen")
                     Text("\(model.keptMediaSummary) · \(model.filmDurationText)\(trackSuffix)")
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
                         .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.53))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
                 .frame(maxWidth: .infinity)
 
@@ -3296,9 +3300,11 @@ struct SecondWatchScreen: View {
                     .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 Text(title)
                     .font(TR.ui(9, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             }
             .foregroundStyle(tint)
-            .frame(width: 54)
+            .frame(minWidth: 54)
         }
         .buttonStyle(TactileButtonStyle(pressedScale: 0.93))
         .disabled(disabled)
@@ -3436,7 +3442,7 @@ private struct FilmStudioTimeline: View {
                     }
                     Text(trackName ?? "Add music")
                         .font(TR.ui(9, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.62))
+                        .foregroundStyle(.white.opacity(0.72))
                     Spacer()
                 }
                 .padding(.horizontal, 12)
@@ -3559,7 +3565,7 @@ private struct FilmMomentManagerSheet: View {
                     Spacer()
                     Text("Tap to add or remove")
                         .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.48))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
                 .padding(.horizontal, 22)
                 .padding(.top, 10)
@@ -3581,12 +3587,12 @@ private struct FilmMomentManagerSheet: View {
             VStack(spacing: 5) {
                 Text("Changes only this film. Your originals stay in Photos.")
                     .font(TR.ui(11))
-                    .foregroundStyle(.white.opacity(0.54))
+                    .foregroundStyle(.white.opacity(0.72))
                     .multilineTextAlignment(.center)
 
                 Text("Hold and drag clips in the timeline to reorder them.")
                     .font(TR.ui(10))
-                    .foregroundStyle(.white.opacity(0.38))
+                    .foregroundStyle(.white.opacity(0.72))
             }
             .padding(.horizontal, 22)
             .padding(.top, 10)
@@ -3752,7 +3758,7 @@ private struct FullFilmPreview: View {
                             .foregroundStyle(.white.opacity(0.72))
                         Text("Tap anywhere to hide controls")
                             .font(TR.ui(10))
-                            .foregroundStyle(.white.opacity(0.42))
+                            .foregroundStyle(.white.opacity(0.72))
                     }
                     .padding(.bottom, 12)
                 }
@@ -3828,7 +3834,7 @@ private struct PhotoEditorSheet: View {
 
                 Text("Photos use a face-aware crop. Videos start on the strongest locally detected moment. Pinch to reframe, then adjust only what needs it.")
                     .font(TR.ui(12))
-                    .foregroundStyle(.white.opacity(0.56))
+                    .foregroundStyle(.white.opacity(0.72))
                     .lineSpacing(4)
 
                 if let photo = selectedPhoto {
@@ -4030,7 +4036,7 @@ private struct PhotoEditorSheet: View {
                     ? "Original sound is mixed beneath the soundtrack."
                     : "This clip brings movement without artificial zooming.")
                     .font(TR.ui(10))
-                    .foregroundStyle(.white.opacity(0.50))
+                    .foregroundStyle(.white.opacity(0.72))
             }
             Spacer()
         }
@@ -4065,7 +4071,7 @@ private struct PhotoEditorSheet: View {
             } else if photo.isVideo {
                 Text("This short video uses the full clip.")
                     .font(TR.ui(10))
-                    .foregroundStyle(.white.opacity(0.48))
+                    .foregroundStyle(.white.opacity(0.72))
             }
 
             if photo.isVideo {
@@ -4074,7 +4080,7 @@ private struct PhotoEditorSheet: View {
                     Spacer()
                     Text(videoRangeText(photo))
                         .font(TR.mono(11))
-                        .foregroundStyle(.white.opacity(0.62))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
                 let maximumStart = maxVideoStart(for: photo)
                 if maximumStart > 0.05 {
@@ -4181,7 +4187,7 @@ private struct FilmStyleSheet: View {
 
                 Text("Choose the mood, not every tiny transition. Memories still adapts portrait and landscape photos automatically.")
                     .font(TR.ui(13))
-                    .foregroundStyle(.white.opacity(0.57))
+                    .foregroundStyle(.white.opacity(0.72))
                     .lineSpacing(4)
 
                 stylePreview
@@ -4228,7 +4234,7 @@ private struct FilmStyleSheet: View {
 
                     Text("Reduce Motion in iOS Settings always overrides this choice.")
                         .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.40))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
             }
             .padding(.horizontal, 22)
@@ -4265,12 +4271,12 @@ private struct FilmStyleSheet: View {
                     .foregroundStyle(TR.cream)
                 Text(model.montageLook.detail)
                     .font(TR.ui(11))
-                    .foregroundStyle(.white.opacity(0.54))
+                    .foregroundStyle(.white.opacity(0.72))
                     .lineSpacing(3)
                 Spacer(minLength: 4)
                 Label("Updates with every tap", systemImage: "play.circle.fill")
                     .font(TR.ui(10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.62))
+                    .foregroundStyle(.white.opacity(0.72))
             }
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -4330,7 +4336,7 @@ private struct FilmStyleSheet: View {
                         .font(TR.ui(14, weight: .semibold))
                     Text(look.detail)
                         .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.50))
+                        .foregroundStyle(.white.opacity(0.72))
                         .multilineTextAlignment(.leading)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -4372,7 +4378,7 @@ private struct TitlesSheet: View {
 
                     Text("Suggested privately from this film's place, days and visual themes. Tap any card to rewrite it or remove it.")
                         .font(TR.ui(13))
-                        .foregroundStyle(.white.opacity(0.58))
+                        .foregroundStyle(.white.opacity(0.72))
                         .lineSpacing(4)
 
                     titlePreview
@@ -4459,7 +4465,7 @@ private struct TitlesSheet: View {
                         .font(TR.ui(16, weight: .semibold))
                     Text(selectedKind.placement)
                         .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.49))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
                 Spacer()
                 Toggle(
@@ -4532,7 +4538,7 @@ private struct TitlesSheet: View {
             MetadataText(text: "ON-PHOTO STORY BEATS", color: TR.accent)
             Text("AI placed these short lines inside the reel. Rewrite them, move them, change how they enter, or remove them.")
                 .font(TR.ui(12))
-                .foregroundStyle(.white.opacity(0.52))
+                .foregroundStyle(.white.opacity(0.72))
                 .lineSpacing(3)
 
             ForEach(model.textOverlays) { overlay in
@@ -4716,13 +4722,13 @@ private struct MusicSheet: View {
 
                 Text("Matched to your \(String(format: "%.1fs", model.secondsPerPhoto)) pace. Picking a track re-cuts the film to its beats.")
                     .font(TR.ui(13))
-                    .foregroundStyle(.white.opacity(0.57))
+                    .foregroundStyle(.white.opacity(0.72))
                     .lineSpacing(4)
 
                 Link(destination: URL(string: "https://www.scottbuckley.com.au/library/using-this-music/")!) {
                     Label("Music by Scott Buckley · CC BY 4.0", systemImage: "checkmark.seal")
                         .font(TR.ui(11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.52))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
 
                 VStack(spacing: 8) {
@@ -4733,7 +4739,7 @@ private struct MusicSheet: View {
 
                 Text("Music previews are 90-second excerpts, trimmed, loudness-normalized, faded, and transcoded to AAC for Memories.")
                     .font(TR.ui(10))
-                    .foregroundStyle(.white.opacity(0.38))
+                    .foregroundStyle(.white.opacity(0.72))
                     .lineSpacing(3)
 
                 atmosphereSection
@@ -4744,7 +4750,7 @@ private struct MusicSheet: View {
                             .font(TR.ui(14, weight: .semibold))
                         Text(beatNote)
                             .font(TR.ui(12))
-                            .foregroundStyle(.white.opacity(0.51))
+                            .foregroundStyle(.white.opacity(0.72))
                     }
                     Spacer()
                     Toggle("Cut to the beat", isOn: $model.cutToBeat)
@@ -4792,7 +4798,7 @@ private struct MusicSheet: View {
                         .font(TR.ui(15, weight: .semibold))
                     Text(track.mood)
                         .font(TR.ui(12))
-                        .foregroundStyle(.white.opacity(0.56))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
 
                 Spacer()
@@ -4805,7 +4811,7 @@ private struct MusicSheet: View {
 
                 Text(track.tag)
                     .font(TR.mono(10))
-                    .foregroundStyle(.white.opacity(0.43))
+                    .foregroundStyle(.white.opacity(0.72))
                     .frame(width: 48, alignment: .trailing)
             }
             .foregroundStyle(TR.cream)
@@ -4827,7 +4833,7 @@ private struct MusicSheet: View {
             MetadataText(text: "MEMORY ATMOSPHERE", color: TR.accent)
             Text("A quiet environmental layer matched on this iPhone from the memory’s place and imagery. Original clip audio always stays in front.")
                 .font(TR.ui(12))
-                .foregroundStyle(.white.opacity(0.56))
+                .foregroundStyle(.white.opacity(0.72))
                 .lineSpacing(4)
 
             Button {
@@ -4845,7 +4851,7 @@ private struct MusicSheet: View {
                             .font(TR.ui(14, weight: .semibold))
                         Text(model.recommendedAtmosphere?.name ?? "Matched on this iPhone")
                             .font(TR.ui(11))
-                            .foregroundStyle(.white.opacity(0.54))
+                            .foregroundStyle(.white.opacity(0.72))
                     }
                     Spacer()
                     if model.usesAutomaticAtmosphere {
@@ -4892,7 +4898,7 @@ private struct MusicSheet: View {
             Link(destination: URL(string: MemoryAtmosphereCatalog.licenseURL)!) {
                 Label("Environmental recordings from Mixkit · Free commercial licence", systemImage: "checkmark.seal")
                     .font(TR.ui(10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .foregroundStyle(.white.opacity(0.72))
             }
         }
         .padding(.top, 4)
@@ -4916,7 +4922,7 @@ private struct MusicSheet: View {
                         .font(TR.ui(14, weight: .semibold))
                     Text(atmosphere.detail)
                         .font(TR.ui(11))
-                        .foregroundStyle(.white.opacity(0.54))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
                 Spacer()
                 Image(systemName: active ? "checkmark.circle.fill" : "play.circle")

@@ -165,7 +165,7 @@ private struct MemoriesEntranceArtwork: View {
             }
             .font(TR.mono(9, weight: .semibold))
             .tracking(1.4)
-            .foregroundStyle(.white.opacity(0.56))
+            .foregroundStyle(.white.opacity(0.72))
             .position(x: centerX, y: height - 12)
         }
         .opacity(cycleOpacity)
@@ -384,7 +384,7 @@ struct PhotoAccessScreen: View {
                     .fontWeight(.semibold)
                 }
                 .font(TR.ui(10))
-                .foregroundStyle(.white.opacity(0.46))
+                .foregroundStyle(.white.opacity(0.72))
                 .multilineTextAlignment(.center)
                 .buttonStyle(.plain)
             }
@@ -431,7 +431,7 @@ struct LimitedAccessScreen: View {
                 VStack(spacing: 24) {
                     Text("Limited access")
                         .font(TR.ui(13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.63))
+                        .foregroundStyle(.white.opacity(0.72))
 
                     Text("You'll only see the moments you picked")
                         .font(TR.display(36))

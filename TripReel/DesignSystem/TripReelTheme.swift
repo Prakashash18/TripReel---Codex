@@ -19,12 +19,35 @@ enum TR {
         .custom("InstrumentSerif-Italic", size: size, relativeTo: .largeTitle)
     }
 
+    /// Text that follows the person's Dynamic Type setting. The design sizes map to the
+    /// nearest system text style, and nothing is drawn smaller than 12 pt at the default
+    /// size so captions, prices and expiry lines stay readable.
+    private static func textStyle(for size: CGFloat) -> Font.TextStyle? {
+        switch max(size, 12) {
+        case ..<12.5: .caption
+        case ..<14: .footnote
+        case ..<15.5: .subheadline
+        case ..<16.5: .callout
+        case ..<19: .body
+        case ..<21: .title3
+        case ..<25: .title2
+        case ..<31: .title
+        default: nil
+        }
+    }
+
     static func ui(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .default)
+        guard let style = textStyle(for: size) else {
+            return .system(size: size, weight: weight, design: .default)
+        }
+        return .system(style, design: .default, weight: weight)
     }
 
     static func mono(_ size: CGFloat, weight: Font.Weight = .medium) -> Font {
-        .system(size: size, weight: weight, design: .monospaced)
+        guard let style = textStyle(for: size) else {
+            return .system(size: size, weight: weight, design: .monospaced)
+        }
+        return .system(style, design: .monospaced, weight: weight)
     }
 }
 
