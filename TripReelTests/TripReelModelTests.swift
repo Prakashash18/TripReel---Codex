@@ -8,6 +8,22 @@ import XCTest
 
 @MainActor
 final class TripReelModelTests: XCTestCase {
+    private var isolatedShelf: URL!
+
+    /// Tests that render films must never write to the app's real "My exports" shelf.
+    override func setUp() async throws {
+        try await super.setUp()
+        isolatedShelf = FileManager.default.temporaryDirectory
+            .appendingPathComponent("test-shelf-\(UUID().uuidString)", isDirectory: true)
+        LocalCompletedExport.directoryOverride = isolatedShelf
+    }
+
+    override func tearDown() async throws {
+        LocalCompletedExport.directoryOverride = nil
+        try? FileManager.default.removeItem(at: isolatedShelf)
+        try await super.tearDown()
+    }
+
     func testExportWatchdogTimerStopsBlockedWork() async throws {
         let aborted = expectation(description: "Independent watchdog queue fires")
         let watchdog = ExportProgressWatchdog(timeout: 0.01)
@@ -629,27 +645,101 @@ final class TripReelModelTests: XCTestCase {
         XCTAssertTrue(reminders.isEmpty)
     }
 
-    func testCompletedRenderCanBeRecoveredAndDiscardedLocally() throws {
-        LocalCompletedExport.discard()
-        defer { LocalCompletedExport.discard() }
-        let source = FileManager.default.temporaryDirectory
-            .appendingPathComponent("export-recovery-test-\(UUID().uuidString).mp4")
-        try Data([0, 1, 2, 3]).write(to: source)
+    // MARK: My exports (finished films kept on the phone)
 
-        let saved = try LocalCompletedExport.keep(
-            source,
-            title: "A day together",
-            durationSeconds: 42,
-            isHD: true
-        )
-        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
-        XCTAssertEqual(LocalCompletedExport.load()?.title, "A day together")
-        XCTAssertEqual(LocalCompletedExport.load()?.durationSeconds, 42)
-        XCTAssertTrue(saved.isHD)
+    private func withTemporaryShelf(_ body: () throws -> Void) throws {
+        let previous = LocalCompletedExport.directoryOverride
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shelf-test-\(UUID().uuidString)", isDirectory: true)
+        LocalCompletedExport.directoryOverride = directory
+        defer {
+            LocalCompletedExport.directoryOverride = previous
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try body()
+    }
 
-        LocalCompletedExport.discard()
-        XCTAssertNil(LocalCompletedExport.load())
-        XCTAssertFalse(FileManager.default.fileExists(atPath: saved.fileURL.path))
+    private func renderedFile() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("rendered-\(UUID().uuidString).mp4")
+        try Data([0, 1, 2, 3]).write(to: url)
+        return url
+    }
+
+    func testAFullFilmStaysForSevenDaysAndAPreviewForOneDay() throws {
+        try withTemporaryShelf {
+            let start = Date(timeIntervalSince1970: 1_800_000_000)
+            let full = try LocalCompletedExport.keep(try renderedFile(), title: "Full", durationSeconds: 89, isHD: true, now: start)
+            let preview = try LocalCompletedExport.keep(try renderedFile(), title: "Preview", durationSeconds: 9, isHD: false, now: start)
+            XCTAssertEqual(LocalCompletedExport.all(now: start).count, 2)
+
+            let sixDays = start.addingTimeInterval(6 * 24 * 3600)
+            XCTAssertEqual(LocalCompletedExport.all(now: sixDays).map(\.title), ["Full"])
+            XCTAssertFalse(FileManager.default.fileExists(atPath: preview.fileURL.path), "An expired film's file must be deleted")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: full.fileURL.path))
+
+            let eightDays = start.addingTimeInterval(8 * 24 * 3600)
+            XCTAssertTrue(LocalCompletedExport.all(now: eightDays).isEmpty)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: full.fileURL.path))
+        }
+    }
+
+    func testTheShelfKeepsOnlyTheNewestFiveFilms() throws {
+        try withTemporaryShelf {
+            let start = Date(timeIntervalSince1970: 1_800_000_000)
+            var saved: [LocalCompletedExport] = []
+            for index in 0..<7 {
+                saved.append(try LocalCompletedExport.keep(
+                    try renderedFile(), title: "Film \(index)", durationSeconds: 60, isHD: true,
+                    now: start.addingTimeInterval(Double(index) * 60)
+                ))
+            }
+            let shelf = LocalCompletedExport.all(now: start.addingTimeInterval(600))
+            XCTAssertEqual(shelf.map(\.title), ["Film 6", "Film 5", "Film 4", "Film 3", "Film 2"])
+            XCTAssertFalse(FileManager.default.fileExists(atPath: saved[0].fileURL.path))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: saved[1].fileURL.path))
+        }
+    }
+
+    func testAFilmThatFinishedWhileAwayOpensOnceAndCanBeDeleted() throws {
+        try withTemporaryShelf {
+            let film = try LocalCompletedExport.keep(try renderedFile(), title: "A day together", durationSeconds: 42, isHD: true)
+            XCTAssertEqual(LocalCompletedExport.latestUnseen()?.id, film.id)
+            LocalCompletedExport.markSeen(film.id)
+            XCTAssertNil(LocalCompletedExport.latestUnseen(), "A film already shown must not reopen on every launch")
+            XCTAssertEqual(LocalCompletedExport.all().count, 1, "Seen films stay on the shelf")
+
+            LocalCompletedExport.remove(film.id)
+            XCTAssertTrue(LocalCompletedExport.all().isEmpty)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: film.fileURL.path))
+        }
+    }
+
+    func testTheOldSingleReceiptMovesOntoTheShelf() throws {
+        try withTemporaryShelf {
+            let directory = LocalCompletedExport.directory
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let fileName = "memory-legacy.mp4"
+            try Data([1, 2, 3]).write(to: directory.appendingPathComponent(fileName))
+            let legacy = """
+            {"fileName":"\(fileName)","title":"Old film","durationSeconds":30,"isHD":true,"completedAt":\(Date().timeIntervalSinceReferenceDate)}
+            """
+            try Data(legacy.utf8).write(to: directory.appendingPathComponent("completed-export.json"))
+
+            let shelf = LocalCompletedExport.all()
+            XCTAssertEqual(shelf.map(\.title), ["Old film"])
+            XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("completed-export.json").path))
+            XCTAssertEqual(LocalCompletedExport.all().count, 1, "The migration must run only once")
+        }
+    }
+
+    func testRemainingTimeIsDescribedInDaysThenHours() throws {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let item = LocalCompletedExport(id: "x", fileName: "x.mp4", title: "T", durationSeconds: 10, isHD: true, completedAt: start, seen: true)
+        XCTAssertEqual(item.remainingDescription(now: start), "7 days left")
+        XCTAssertEqual(item.remainingDescription(now: start.addingTimeInterval(6 * 24 * 3600)), "1 day left")
+        XCTAssertEqual(item.remainingDescription(now: start.addingTimeInterval(6.5 * 24 * 3600)), "12 hours left")
+        XCTAssertEqual(item.remainingDescription(now: start.addingTimeInterval(7 * 24 * 3600 - 5 * 3600)), "5 hours left")
+        XCTAssertEqual(item.remainingDescription(now: start.addingTimeInterval(8 * 24 * 3600)), "1 hour left")
     }
 
     func testShareItemSourceHandsOffAFileURLAsAnExplicitMP4Movie() {

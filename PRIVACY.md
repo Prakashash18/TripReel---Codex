@@ -14,6 +14,10 @@ With Photos permission, Memories reads accessible photos and videos, capture dat
 
 Photos or videos selected without broad library permission are copied temporarily into Memories' private on-device cache for the editing session.
 
+## Finished films kept on your iPhone
+
+A finished film is kept in Memories' private storage on your iPhone, in **My exports**, so you can save or share it again: a full 1080p film for up to seven days and a free preview for up to 24 hours. Nothing is uploaded for this. Memories keeps only your five newest films, you can delete any of them yourself, and expired films are removed when the app next opens. Saving to Photos is the only permanent copy Memories offers; the copy in My exports is temporary.
+
 ## On-device visual intelligence
 
 Apple Vision analyzes reduced photo thumbnails and a bounded set of sampled video frames on the iPhone for screenshots, document-like images, people, scenery, food, and visual quality. Memories compares sampled video frames to choose a useful 2–4 second source window, preferring clear people or scenic moments with usable motion over static, abrupt, or document-like sections. Recognized text itself is not retained. Moments omitted from an automatic cut remain recoverable under **More Moments** and can be restored.

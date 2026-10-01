@@ -138,7 +138,7 @@ struct RootView: View {
             Button("Leave without keeping", role: .destructive) { model.navigateBack() }
             Button("Stay here") { }
         } message: {
-            Text("This render is temporary. Save a permanent copy, or create a seven-day link in your account before leaving.")
+            Text("This film is not kept anywhere yet. Save a copy to Photos, or create a seven-day link in your account before leaving.")
         }
         .sheet(isPresented: $model.isCloudAnalysisConsentPresented) {
             CloudAnalysisConsentView(
@@ -189,7 +189,8 @@ struct RootView: View {
     private func navigateBackWithSaveReminder() {
         guard model.screen == .done,
               model.exportSaveMessage == nil,
-              model.exportShareLinkURL == nil else {
+              model.exportShareLinkURL == nil,
+              !model.exportIsKeptOnShelf else {
             model.navigateBack()
             return
         }

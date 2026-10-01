@@ -1259,7 +1259,11 @@ struct FilmReadyScreen: View {
                         .accessibilityIdentifier("share-link-button")
                     }
 
-                    Text("This on-device render expires after 24 hours. A link lasts 7 days; saving to Photos is permanent.")
+                    Text(
+                        model.keptExportSummary.map { "\($0) A link lasts 7 days; saving to Photos is permanent." }
+                            ?? "This film is not kept anywhere yet. A link lasts 7 days; saving to Photos is permanent."
+                    )
+                    .accessibilityIdentifier("export-retention-note")
                         .font(TR.ui(11))
                         .foregroundStyle(.white.opacity(0.44))
                         .multilineTextAlignment(.center)
@@ -1268,7 +1272,8 @@ struct FilmReadyScreen: View {
 
                     Button {
                         if model.exportSaveMessage == nil &&
-                            model.exportShareLinkURL == nil {
+                            model.exportShareLinkURL == nil &&
+                            !model.exportIsKeptOnShelf {
                             showsLeaveWithoutSaving = true
                         } else {
                             model.restart()
@@ -1372,7 +1377,7 @@ struct FilmReadyScreen: View {
             Button("Leave without keeping", role: .destructive) { model.restart() }
             Button("Stay here") { }
         } message: {
-            Text("This render is temporary. Save a permanent copy, or create a seven-day link in your account before leaving.")
+            Text("This film is not kept anywhere yet. Save a copy to Photos, or create a seven-day link in your account before leaving.")
         }
         .accessibilityIdentifier("film-ready-screen")
     }
@@ -1381,17 +1386,27 @@ struct FilmReadyScreen: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(
                 model.exportSaveMessage != nil ? "KEPT ON YOUR IPHONE" :
-                    model.exportShareLinkURL != nil ? "LINKED FOR SEVEN DAYS" : "NOT KEPT YET"
+                    model.exportShareLinkURL != nil ? "LINKED FOR SEVEN DAYS" :
+                    model.exportIsKeptOnShelf ? "KEPT IN MY EXPORTS" : "NOT KEPT YET"
             )
             .font(TR.mono(10, weight: .semibold))
             .tracking(1)
-            .foregroundStyle(model.exportSaveMessage != nil || model.exportShareLinkURL != nil ? TR.keep : TR.accent)
-
-            Label(
-                model.exportSaveMessage == nil ? "Video not saved to Photos" : "Video saved to Photos",
-                systemImage: model.exportSaveMessage == nil ? "exclamationmark.circle" : "checkmark.circle.fill"
+            .foregroundStyle(
+                model.exportSaveMessage != nil || model.exportShareLinkURL != nil || model.exportIsKeptOnShelf
+                    ? TR.keep : TR.accent
             )
-            .foregroundStyle(model.exportSaveMessage == nil ? TR.accent : TR.keep)
+
+            // A film on the shelf is safe for a while; only saving to Photos makes it permanent.
+            Label(
+                model.exportSaveMessage != nil ? "Video saved to Photos" :
+                    (model.exportIsKeptOnShelf ? "Not saved to Photos yet" : "Video not saved to Photos"),
+                systemImage: model.exportSaveMessage != nil ? "checkmark.circle.fill" :
+                    (model.exportIsKeptOnShelf ? "info.circle" : "exclamationmark.circle")
+            )
+            .foregroundStyle(
+                model.exportSaveMessage != nil ? TR.keep :
+                    (model.exportIsKeptOnShelf ? .white.opacity(0.72) : TR.accent)
+            )
             .accessibilityIdentifier("film-ready-video-status")
 
             Label(
@@ -1796,6 +1811,136 @@ private struct CleanupGrid: View {
                 "confirm-\(count)-\(includesEveryCutPhoto)"
             case let .success(count): "success-\(count)"
             case let .failure(message): "failure-\(message)"
+            }
+        }
+    }
+}
+
+// MARK: - My exports
+
+/// Finished films kept on this iPhone for a few days. Nothing here is uploaded.
+struct MyExportsSheet: View {
+    @EnvironmentObject private var model: TripReelModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var pendingDeletion: LocalCompletedExport?
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                WarmBackground(variant: .trips)
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("MY EXPORTS")
+                            .font(TR.mono(10, weight: .semibold))
+                            .tracking(1.5)
+                            .foregroundStyle(TR.accent)
+                        Text("Your finished films")
+                            .font(TR.display(34))
+                        Text("Kept on this iPhone so you can save or share them again. Full films stay for seven days, previews for one day. Nothing is uploaded.")
+                            .font(TR.ui(13))
+                            .foregroundStyle(.white.opacity(0.58))
+                            .lineSpacing(3)
+                        if model.myExports.isEmpty {
+                            Text("No finished films right now.")
+                                .font(TR.ui(14))
+                                .foregroundStyle(.white.opacity(0.5))
+                                .padding(.top, 24)
+                        }
+                        ForEach(model.myExports) { item in
+                            row(item)
+                        }
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 36)
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }.foregroundStyle(TR.cream)
+                }
+            }
+            .toolbarBackground(.hidden, for: .navigationBar)
+        }
+        .confirmationDialog(
+            "Delete this film?",
+            isPresented: Binding(get: { pendingDeletion != nil }, set: { if !$0 { pendingDeletion = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete from this iPhone", role: .destructive) {
+                if let pendingDeletion { model.deleteMyExport(pendingDeletion.id) }
+                pendingDeletion = nil
+            }
+            Button("Keep it", role: .cancel) { pendingDeletion = nil }
+        } message: {
+            Text("This removes the film from Memories. A copy saved to Photos or a link you created is not affected.")
+        }
+        .accessibilityIdentifier("my-exports-sheet")
+    }
+
+    private func row(_ item: LocalCompletedExport) -> some View {
+        Button {
+            dismiss()
+            model.openMyExport(item.id)
+        } label: {
+            HStack(spacing: 14) {
+                ExportThumbnail(url: item.fileURL)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.title)
+                        .font(TR.ui(16, weight: .semibold))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Text("\(Self.durationText(item.durationSeconds)) · \(item.isHD ? "1080p" : "720p preview")")
+                        .font(TR.mono(10))
+                        .tracking(0.8)
+                        .foregroundStyle(.white.opacity(0.5))
+                    Text(item.remainingDescription().uppercased())
+                        .font(TR.mono(9, weight: .semibold))
+                        .tracking(1)
+                        .foregroundStyle(item.remaining() < 86_400 ? TR.accent : TR.keep)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.white.opacity(0.35))
+            }
+            .padding(12)
+            .glassCard(cornerRadius: 18)
+        }
+        .buttonStyle(TactileButtonStyle())
+        .contextMenu {
+            Button(role: .destructive) { pendingDeletion = item } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        .accessibilityIdentifier("my-export-row")
+    }
+
+    private static func durationText(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+private struct ExportThumbnail: View {
+    let url: URL
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white.opacity(0.08))
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Image(systemName: "film").foregroundStyle(.white.opacity(0.3))
+            }
+        }
+        .frame(width: 54, height: 96)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .task(id: url) {
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 240, height: 420)
+            if let result = try? await generator.image(at: CMTime(seconds: 1, preferredTimescale: 600)) {
+                image = UIImage(cgImage: result.image)
             }
         }
     }

@@ -225,7 +225,7 @@ final class BackgroundExportSupport {
 
         let content = UNMutableNotificationContent()
         content.title = "Your memory is ready"
-        content.body = "Open Memories to save the video or create a seven-day link. It isn't saved automatically."
+        content.body = "Open Memories to save the video or share it. It stays in My exports for a while, but saving to Photos keeps it for good."
         content.sound = .default
         let request = UNNotificationRequest(
             identifier: "memory-ready-\(UUID().uuidString)",
@@ -236,68 +236,168 @@ final class BackgroundExportSupport {
     }
 }
 
-/// A finished render stays only on this device until the person saves it or
-/// explicitly creates a share link. The small receipt restores the ready screen
-/// after process termination; it does not upload or auto-save the MP4.
-struct LocalCompletedExport: Codable {
+/// A finished film kept on this iPhone ("My exports"). Nothing is uploaded: the file stays in
+/// the app's private storage until it expires or the person deletes it. A full 1080p film is kept
+/// for seven days so it can be saved or shared again; the free preview is kept for a day.
+struct LocalCompletedExport: Codable, Identifiable, Equatable {
+    let id: String
     let fileName: String
-    let title: String
+    var title: String
     let durationSeconds: Double
     let isHD: Bool
     let completedAt: Date
+    /// False until the film has been shown once, so a render that finished while the app was
+    /// closed opens on the ready screen next launch, and only once.
+    var seen: Bool
 
-    static let receiptName = "completed-export.json"
     static let interruptedKey = "memories.export-in-progress.v1"
-    static let lifetime: TimeInterval = 24 * 60 * 60
+    static let fullFilmLifetime: TimeInterval = 7 * 24 * 60 * 60
+    static let previewLifetime: TimeInterval = 24 * 60 * 60
+    static let maximumKept = 5
+    private static let indexName = "shelf.json"
+    private static let legacyReceiptName = "completed-export.json"
+
+    /// Tests point this at a temporary folder so they never touch the real shelf.
+    nonisolated(unsafe) static var directoryOverride: URL?
 
     static var directory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        directoryOverride ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("CompletedExport", isDirectory: true)
     }
 
     var fileURL: URL { Self.directory.appendingPathComponent(fileName) }
+    var lifetime: TimeInterval { isHD ? Self.fullFilmLifetime : Self.previewLifetime }
+    var expiresAt: Date { completedAt.addingTimeInterval(lifetime) }
 
-    static func load() -> Self? {
-        let receiptURL = directory.appendingPathComponent(receiptName)
-        guard let data = try? Data(contentsOf: receiptURL),
-              let receipt = try? JSONDecoder().decode(Self.self, from: data),
-              FileManager.default.fileExists(atPath: receipt.fileURL.path) else { return nil }
-        guard Date().timeIntervalSince(receipt.completedAt) < lifetime else {
-            try? FileManager.default.removeItem(at: receipt.fileURL)
-            try? FileManager.default.removeItem(at: receiptURL)
-            return nil
-        }
-        return receipt
+    func remaining(now: Date = Date()) -> TimeInterval { expiresAt.timeIntervalSince(now) }
+
+    /// "6 days left", "5 hours left".
+    func remainingDescription(now: Date = Date()) -> String {
+        let seconds = max(0, remaining(now: now))
+        let days = Int((seconds / 86_400).rounded(.up))
+        if seconds >= 86_400 { return days == 1 ? "1 day left" : "\(days) days left" }
+        let hours = max(1, Int((seconds / 3_600).rounded(.up)))
+        return hours == 1 ? "1 hour left" : "\(hours) hours left"
     }
 
-    static func keep(_ renderedURL: URL, title: String, durationSeconds: Double, isHD: Bool) throws -> Self {
+    // MARK: Shelf
+
+    /// Newest first. Expired and missing films are removed as a side effect.
+    static func all(now: Date = Date()) -> [Self] {
+        migrateLegacyReceipt()
+        let stored = readIndex()
+        var kept: [Self] = []
+        for item in stored {
+            if now < item.expiresAt, FileManager.default.fileExists(atPath: item.fileURL.path) {
+                kept.append(item)
+            } else {
+                try? FileManager.default.removeItem(at: item.fileURL)
+            }
+        }
+        if kept.count != stored.count { writeIndex(kept) }
+        return kept.sorted { $0.completedAt > $1.completedAt }
+    }
+
+    /// A finished film that has not been shown yet.
+    static func latestUnseen(now: Date = Date()) -> Self? {
+        all(now: now).first { !$0.seen }
+    }
+
+    @discardableResult
+    static func keep(
+        _ renderedURL: URL,
+        title: String,
+        durationSeconds: Double,
+        isHD: Bool,
+        now: Date = Date()
+    ) throws -> Self {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let prior = load()
+        var folder = directory
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? folder.setResourceValues(values)
+
+        let identifier = UUID().uuidString
         let receipt = Self(
-            fileName: "memory-\(UUID().uuidString).mp4",
+            id: identifier,
+            fileName: "memory-\(identifier).mp4",
             title: title,
             durationSeconds: durationSeconds,
             isHD: isHD,
-            completedAt: Date()
+            completedAt: now,
+            seen: false
         )
         try FileManager.default.moveItem(at: renderedURL, to: receipt.fileURL)
         try? FileManager.default.setAttributes(
             [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
             ofItemAtPath: receipt.fileURL.path
         )
-        do {
-            let data = try JSONEncoder().encode(receipt)
-            try data.write(to: directory.appendingPathComponent(receiptName), options: .atomic)
-            if let prior { try? FileManager.default.removeItem(at: prior.fileURL) }
-            return receipt
-        } catch {
-            try? FileManager.default.removeItem(at: receipt.fileURL)
-            throw error
+        var shelf = all(now: now) + [receipt]
+        shelf.sort { $0.completedAt > $1.completedAt }
+        // Only the newest few stay, so films cannot quietly fill the phone.
+        for extra in shelf.dropFirst(maximumKept) { try? FileManager.default.removeItem(at: extra.fileURL) }
+        shelf = Array(shelf.prefix(maximumKept))
+        writeIndex(shelf)
+        guard shelf.contains(receipt) else {
+            throw CocoaError(.fileWriteOutOfSpace)
         }
+        return receipt
     }
 
-    static func discard() {
-        if let prior = load() { try? FileManager.default.removeItem(at: prior.fileURL) }
-        try? FileManager.default.removeItem(at: directory.appendingPathComponent(receiptName))
+    static func markSeen(_ id: String) {
+        var shelf = all()
+        guard let index = shelf.firstIndex(where: { $0.id == id }), !shelf[index].seen else { return }
+        shelf[index].seen = true
+        writeIndex(shelf)
+    }
+
+    static func remove(_ id: String) {
+        let shelf = all()
+        if let item = shelf.first(where: { $0.id == id }) { try? FileManager.default.removeItem(at: item.fileURL) }
+        writeIndex(shelf.filter { $0.id != id })
+    }
+
+    static func discardAll() {
+        for item in readIndex() { try? FileManager.default.removeItem(at: item.fileURL) }
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent(indexName))
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent(legacyReceiptName))
+    }
+
+    // MARK: Storage
+
+    private static func readIndex() -> [Self] {
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent(indexName)),
+              let items = try? JSONDecoder().decode([Self].self, from: data) else { return [] }
+        return items
+    }
+
+    private static func writeIndex(_ items: [Self]) {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        guard let data = try? JSONEncoder().encode(items) else { return }
+        try? data.write(to: directory.appendingPathComponent(indexName), options: .atomic)
+    }
+
+    /// Versions before the shelf kept one film and a single receipt. Move it across once.
+    private struct LegacyReceipt: Codable {
+        let fileName: String
+        let title: String
+        let durationSeconds: Double
+        let isHD: Bool
+        let completedAt: Date
+    }
+
+    private static func migrateLegacyReceipt() {
+        let legacyURL = directory.appendingPathComponent(legacyReceiptName)
+        guard let data = try? Data(contentsOf: legacyURL) else { return }
+        defer { try? FileManager.default.removeItem(at: legacyURL) }
+        guard let legacy = try? JSONDecoder().decode(LegacyReceipt.self, from: data),
+              FileManager.default.fileExists(atPath: directory.appendingPathComponent(legacy.fileName).path) else { return }
+        var shelf = readIndex()
+        shelf.append(Self(
+            id: UUID().uuidString, fileName: legacy.fileName, title: legacy.title,
+            durationSeconds: legacy.durationSeconds, isHD: legacy.isHD,
+            completedAt: legacy.completedAt, seen: false
+        ))
+        writeIndex(shelf)
     }
 }

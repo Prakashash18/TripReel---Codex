@@ -2350,6 +2350,10 @@ final class TripReelModel: ObservableObject {
     /// Set when iOS paused an export in the background; the render continues from its saved
     /// pieces as soon as the person returns to the app.
     private var resumeExportWhenActive = false
+    /// Finished films kept on this iPhone for later ("My exports"). Nothing is uploaded.
+    @Published private(set) var myExports: [LocalCompletedExport] = []
+    /// The kept film currently shown on the ready screen, if any.
+    @Published private(set) var currentExportID: String?
     @Published private(set) var navigationDirection: TRNavigationDirection = .replace
     @Published var buildCount = 0
     @Published var currentPhotoIndex = 0
@@ -2609,18 +2613,12 @@ final class TripReelModel: ObservableObject {
             // previews commonly provide an isolated UserDefaults suite; allowing
             // those models to read the process-wide receipt makes parallel tests
             // race with the recovery test and can incorrectly route to `.done`.
+            if preferenceStore === UserDefaults.standard {
+                myExports = LocalCompletedExport.all()
+            }
             if preferenceStore === UserDefaults.standard,
-               let receipt = LocalCompletedExport.load() {
-                exportedVideoURL = receipt.fileURL
-                activeExportDurationSeconds = receipt.durationSeconds
-                exportQuality = receipt.isHD ? .hd : .standard
-                titleDrafts[.opening] = TitleCardDraft(
-                    title: receipt.title,
-                    subtitle: "",
-                    style: .editorial,
-                    duration: TitleCardKind.opening.defaultDuration
-                )
-                restoredExportOnly = true
+               let receipt = LocalCompletedExport.latestUnseen() {
+                showKeptExport(receipt)
                 screen = .done
                 preferenceStore.removeObject(forKey: LocalCompletedExport.interruptedKey)
             } else if preferenceStore.bool(forKey: LocalCompletedExport.interruptedKey) {
@@ -3213,6 +3211,57 @@ final class TripReelModel: ObservableObject {
 
     /// Called when the app becomes active. If iOS paused an export while the app was in the
     /// background, continue it from the pieces already saved instead of asking the person to retry.
+    /// Loads a kept film into the ready screen's state.
+    private func showKeptExport(_ receipt: LocalCompletedExport) {
+        exportedVideoURL = receipt.fileURL
+        activeExportDurationSeconds = receipt.durationSeconds
+        exportQuality = receipt.isHD ? .hd : .standard
+        titleDrafts[.opening] = TitleCardDraft(
+            title: receipt.title,
+            subtitle: "",
+            style: .editorial,
+            duration: TitleCardKind.opening.defaultDuration
+        )
+        exportSaveMessage = nil
+        exportShareLinkURL = nil
+        currentExportID = receipt.id
+        restoredExportOnly = true
+        LocalCompletedExport.markSeen(receipt.id)
+    }
+
+    /// Re-reads the shelf, dropping films that expired.
+    func refreshMyExports() {
+        guard !usesDemoData, preferenceStore === UserDefaults.standard else { return }
+        myExports = LocalCompletedExport.all()
+    }
+
+    /// Opens a film from "My exports" so it can be saved, shared or given a link again.
+    func openMyExport(_ id: String) {
+        refreshMyExports()
+        guard let receipt = myExports.first(where: { $0.id == id }) else { return }
+        showKeptExport(receipt)
+        go(.done)
+    }
+
+    func deleteMyExport(_ id: String) {
+        LocalCompletedExport.remove(id)
+        if currentExportID == id { currentExportID = nil }
+        refreshMyExports()
+    }
+
+    /// True while the film on the ready screen is safely on the shelf, so leaving the screen
+    /// loses nothing.
+    var exportIsKeptOnShelf: Bool {
+        guard let currentExportID else { return false }
+        return myExports.contains { $0.id == currentExportID }
+    }
+
+    /// "Kept in My exports · 7 days left", shown under the save buttons.
+    var keptExportSummary: String? {
+        guard let currentExportID, let item = myExports.first(where: { $0.id == currentExportID }) else { return nil }
+        return "Kept on this iPhone in My exports · \(item.remainingDescription()). Nothing is uploaded."
+    }
+
     func resumeInterruptedExportIfNeeded() {
         guard resumeExportWhenActive else { return }
         resumeExportWhenActive = false
@@ -5939,9 +5988,9 @@ final class TripReelModel: ObservableObject {
             return
         }
 
-        // A new explicit export replaces the previous temporary local render.
-        LocalCompletedExport.discard()
+        // Earlier films stay on the shelf until they expire; the shelf keeps only the newest few.
         restoredExportOnly = false
+        currentExportID = nil
         preferenceStore.set(true, forKey: LocalCompletedExport.interruptedKey)
         BackgroundExportSupport.shared.requestReadyNotificationPermission()
 
@@ -6006,6 +6055,9 @@ final class TripReelModel: ObservableObject {
                     isHD: quality == .hd
                 )
                 self.exportedVideoURL = receipt.fileURL
+                self.currentExportID = receipt.id
+                LocalCompletedExport.markSeen(receipt.id)
+                self.refreshMyExports()
                 self.renderProgress = 1
                 self.preferenceStore.removeObject(forKey: LocalCompletedExport.interruptedKey)
                 background.updateProgress(1)
@@ -6158,8 +6210,9 @@ final class TripReelModel: ObservableObject {
     }
 
     func restart() {
-        LocalCompletedExport.discard()
         restoredExportOnly = false
+        currentExportID = nil
+        refreshMyExports()
         cleanupSelection = []
         cleanupShowsGrid = false
         cleanupDeletionErrorMessage = nil

@@ -31,6 +31,7 @@ struct TripsScreen: View {
     @State private var collection: MemoryCollection = .overseas
     @State private var activeMemoryID: String?
     @State private var showsAccount = false
+    @State private var showsMyExports = false
     @Namespace private var collectionSelection
 
     private var availableCollections: [MemoryCollection] {
@@ -78,6 +79,35 @@ struct TripsScreen: View {
                         .padding(.horizontal, 18)
                         .padding(.bottom, 14)
                         .trEntrance(1, distance: 8)
+                }
+
+                if !model.myExports.isEmpty {
+                    Button {
+                        showsMyExports = true
+                    } label: {
+                        HStack(spacing: 11) {
+                            Image(systemName: "film.stack")
+                                .foregroundStyle(TR.accent)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("My exports")
+                                    .font(TR.ui(12, weight: .semibold))
+                                Text(model.myExports.count == 1
+                                     ? "1 finished film kept on this iPhone"
+                                     : "\(model.myExports.count) finished films kept on this iPhone")
+                                    .font(TR.ui(10))
+                                    .foregroundStyle(.white.opacity(0.46))
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(.white.opacity(0.35))
+                        }
+                        .padding(13)
+                        .glassCard(cornerRadius: 16)
+                    }
+                    .buttonStyle(TactileButtonStyle())
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+                    .accessibilityIdentifier("my-exports-banner")
                 }
 
                 if !model.cutPhotoIDs.isEmpty && !model.cleanupCandidatePhotos.isEmpty {
@@ -204,6 +234,12 @@ struct TripsScreen: View {
             .padding(.trailing, 17)
             .safeAreaPadding(.top, 7)
             .accessibilityLabel(account.isSignedIn ? "Your account" : "Sign in")
+        }
+        .sheet(isPresented: $showsMyExports) {
+            MyExportsSheet()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
         }
         .sheet(isPresented: $showsAccount) {
             AccountCenterView(context: .account)

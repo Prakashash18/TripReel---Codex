@@ -78,3 +78,18 @@ Tests: piece plan, fingerprint, and `testInterruptedExportResumesFromFinishedPie
 remaining pieces, that both films are 48 s at 30 fps and look the same at the joins, and that saved pieces are
 cleared). Not yet verified on a physical iPhone: how often iOS ends the background task there, and how long
 a full 1080p film takes on an older phone.
+
+## My exports: finished films kept on the phone (added 1 October 2026)
+
+A finished film is kept in the app's private storage, with no upload, so a paid export can be opened again
+instead of being lost when the person leaves the ready screen: a full 1080p film for seven days, a free
+preview for 24 hours. `LocalCompletedExport` is now a shelf (index `shelf.json`) that holds the newest five
+films, removes expired ones and their files whenever it is read, excludes them from backups, and migrates the
+old single receipt once. A film that finished while the app was closed opens on the ready screen once
+(`seen`), then lives on the shelf. The trips list shows a "My exports" entry; each film can be opened to
+save, share or link again, or deleted. Leaving the ready screen only warns when the film is not on the shelf.
+
+The privacy policy (in the app, `PRIVACY.md`, and `marketing-site/dist/privacy/index.html`, which is not
+tracked here and must be deployed separately) now states this retention. Tests cover retention by quality,
+the five-film cap, one-time opening, deletion and legacy migration; model tests run against an isolated shelf
+so they can never write to a real one. Not yet verified on a physical iPhone.
