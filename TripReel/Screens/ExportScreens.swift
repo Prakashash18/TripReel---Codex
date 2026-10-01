@@ -1188,6 +1188,7 @@ struct FilmReadyScreen: View {
     @State private var showsLeaveWithoutSaving = false
     @State private var wantsLinkAfterSignIn = false
     @State private var showsMyFilms = false
+    @State private var showsLinkUploadConfirmation = false
 
     private func leaveReadyScreen() {
         if model.exportSaveMessage == nil &&
@@ -1282,16 +1283,21 @@ struct FilmReadyScreen: View {
                         .accessibilityIdentifier("share-video-button")
 
                         Button {
-                            createShareLink()
+                            requestShareLink()
                         } label: {
-                            HStack(spacing: 7) {
-                                if isCreatingLink { ProgressView().controlSize(.small) }
-                                Label(
-                                    model.exportShareLinkURL == nil
-                                        ? (isCreatingLink ? account.shareLinkCreationPhase.statusText : "Get link")
-                                        : "Copy link",
-                                    systemImage: "link"
-                                )
+                            VStack(spacing: 3) {
+                                HStack(spacing: 7) {
+                                    if isCreatingLink { ProgressView().controlSize(.small) }
+                                    Label(
+                                        model.exportShareLinkURL == nil
+                                            ? (isCreatingLink ? account.shareLinkCreationPhase.statusText : "Get link")
+                                            : "Copy link",
+                                        systemImage: "link"
+                                    )
+                                }
+                                Text(model.exportShareLinkURL == nil ? "Saved to cloud · 7 days" : "Online for 7 days")
+                                    .font(TR.ui(10, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.6))
                             }
                             .frame(maxWidth: .infinity)
                         }
@@ -1301,8 +1307,8 @@ struct FilmReadyScreen: View {
                     }
 
                     Text(
-                        model.keptExportSummary.map { "\($0) A link lasts 7 days; saving to Photos is permanent." }
-                            ?? "This film is not kept anywhere yet. A link lasts 7 days; saving to Photos is permanent."
+                        model.keptExportSummary.map { "\($0) A link uploads the film to the cloud for 7 days; saving to Photos is permanent." }
+                            ?? "This film is not kept anywhere yet. A link uploads the film to the cloud for 7 days; saving to Photos is permanent."
                     )
                     .accessibilityIdentifier("export-retention-note")
                         .font(TR.ui(11))
@@ -1343,9 +1349,19 @@ struct FilmReadyScreen: View {
             readyFeedback.toggle()
         }
         .onChange(of: createShareLinkRequest) { _, _ in
-            createShareLink()
+            requestShareLink()
         }
         .sensoryFeedback(.success, trigger: readyFeedback)
+        .confirmationDialog(
+            "Save this film to the cloud?",
+            isPresented: $showsLinkUploadConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Upload and get link") { createShareLink() }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("The film is uploaded to your private Memories cloud space. Anyone with the link can watch it for 7 days, then it's deleted automatically. The copy on this iPhone isn't affected.")
+        }
         .sheet(isPresented: $showsMyFilms) {
             MyExportsSheet()
                 .presentationDetents([.large])
@@ -1361,7 +1377,7 @@ struct FilmReadyScreen: View {
         .sheet(isPresented: $showsAccount, onDismiss: {
             if wantsLinkAfterSignIn && account.isSignedIn {
                 wantsLinkAfterSignIn = false
-                createShareLink()
+                requestShareLink()
             }
         }) {
             AccountCenterView(context: .sharing)
@@ -1501,6 +1517,15 @@ struct FilmReadyScreen: View {
             if saved, let shareURL = model.exportShareLinkURL {
                 await account.markSavedToPhone(shareURL: shareURL)
             }
+        }
+    }
+
+    /// A link uploads the film, so say so and ask before sending it anywhere.
+    private func requestShareLink() {
+        if model.exportShareLinkURL != nil || !account.isSignedIn {
+            createShareLink()
+        } else {
+            showsLinkUploadConfirmation = true
         }
     }
 
