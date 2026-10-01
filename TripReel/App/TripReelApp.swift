@@ -21,6 +21,7 @@ struct TripReelApp: App {
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
+            model.resumeInterruptedExportIfNeeded()
             Task {
                 await model.refreshPhotoLibraryIfAuthorized()
                 await purchases.refresh()

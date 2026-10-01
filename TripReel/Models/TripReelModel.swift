@@ -2347,6 +2347,9 @@ final class TripReelModel: ObservableObject {
     /// Counts-only description of the last library scan, shown in the account
     /// screen so a missing trip can be diagnosed without a Mac or Console.
     @Published private(set) var lastScanSummary: String?
+    /// Set when iOS paused an export in the background; the render continues from its saved
+    /// pieces as soon as the person returns to the app.
+    private var resumeExportWhenActive = false
     @Published private(set) var navigationDirection: TRNavigationDirection = .replace
     @Published var buildCount = 0
     @Published var currentPhotoIndex = 0
@@ -3202,7 +3205,19 @@ final class TripReelModel: ObservableObject {
             to: next
         )
         screen = next
+        // A long render is far more reliable in the foreground than in a background task iOS may
+        // end, so stop the screen from locking while it runs.
+        UIApplication.shared.isIdleTimerDisabled = (next == .rendering)
         updateOriginalsPrefetch(for: next)
+    }
+
+    /// Called when the app becomes active. If iOS paused an export while the app was in the
+    /// background, continue it from the pieces already saved instead of asking the person to retry.
+    func resumeInterruptedExportIfNeeded() {
+        guard resumeExportWhenActive else { return }
+        resumeExportWhenActive = false
+        guard screen == .export, exportCanRetryRender else { return }
+        retryCurrentExport()
     }
 
     /// Fetches full-quality originals for the paid export while the user is still
@@ -5950,8 +5965,10 @@ final class TripReelModel: ObservableObject {
             self.exportCanFinishInBackground = await background.begin { [weak self] in
                 guard let self, self.exportGeneration == generation else { return }
                 self.workTask?.cancel()
-                self.exportErrorTitle = "Export was interrupted"
-                self.exportErrorMessage = background.interruptionMessage
+                self.exportErrorTitle = "Export paused"
+                self.exportErrorMessage = "iOS paused your export to free up resources. Nothing is lost: Memories saved its progress and will carry on when you come back."
+                self.exportCanRetryRender = true
+                self.resumeExportWhenActive = true
                 self.preferenceStore.removeObject(forKey: LocalCompletedExport.interruptedKey)
                 self.go(.export)
             }
@@ -6085,6 +6102,9 @@ final class TripReelModel: ObservableObject {
         exportGeneration = UUID()
         workTask?.cancel()
         workTask = nil
+        resumeExportWhenActive = false
+        // Cancelling on purpose discards the saved pieces; an interruption keeps them.
+        videoExporter.discardRenderCheckpoints()
         BackgroundExportSupport.shared.finish(success: false)
         preferenceStore.removeObject(forKey: LocalCompletedExport.interruptedKey)
         renderProgress = 0

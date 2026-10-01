@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreGraphics
+import CryptoKit
 import CoreVideo
 import ImageIO
 import OSLog
@@ -56,12 +57,16 @@ protocol TripReelVideoExporting: Sendable {
     func prefetchOriginals(for photos: [ReelPhoto])
     /// Cancels any prefetch and deletes what it downloaded.
     func discardPrefetchedOriginals()
+    /// Deletes the saved pieces of an interrupted render. Called when the person
+    /// cancels on purpose; an interruption keeps them so the export can resume.
+    func discardRenderCheckpoints()
 }
 
 extension TripReelVideoExporting {
     func finishGeneratedClip(_ url: URL, title: String) async throws -> URL { url }
     func prefetchOriginals(for photos: [ReelPhoto]) {}
     func discardPrefetchedOriginals() {}
+    func discardRenderCheckpoints() {}
 }
 
 enum TripReelVideoExportError: LocalizedError, Sendable {
@@ -491,6 +496,124 @@ private final class MediaPreparationTracker: @unchecked Sendable {
     }
 }
 
+/// Saves each finished piece of a long render so an interrupted export can resume
+/// where it stopped. iOS may end a background render at any moment; without this
+/// every interruption threw away all the work done so far.
+final class RenderCheckpointStore: @unchecked Sendable {
+    struct DoneSegment: Codable, Equatable {
+        let index: Int
+        let fileName: String
+        let frameCount: Int
+        let carryImageName: String?
+    }
+    struct Manifest: Codable {
+        var fingerprint: String
+        var segments: [DoneSegment]
+        var updatedAt: Date
+    }
+
+    static var defaultDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("RenderCheckpoints", isDirectory: true)
+    }
+
+    let baseDirectory: URL
+
+    init(baseDirectory: URL = RenderCheckpointStore.defaultDirectory) {
+        self.baseDirectory = baseDirectory
+    }
+
+    func directory(for fingerprint: String) -> URL {
+        baseDirectory.appendingPathComponent(String(fingerprint.prefix(40)), isDirectory: true)
+    }
+
+    func url(for fingerprint: String, name: String) -> URL {
+        directory(for: fingerprint).appendingPathComponent(name)
+    }
+
+    func segmentName(_ index: Int) -> String { String(format: "segment-%03d.mp4", index) }
+    func carryName(_ index: Int) -> String { String(format: "carry-%03d.png", index) }
+
+    func prepare(_ fingerprint: String) throws {
+        let directory = directory(for: fingerprint)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var base = baseDirectory
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? base.setResourceValues(values)
+    }
+
+    /// The longest unbroken run of finished pieces that still exist on disk.
+    func manifest(for fingerprint: String) -> Manifest {
+        let empty = Manifest(fingerprint: fingerprint, segments: [], updatedAt: Date())
+        let manifestURL = url(for: fingerprint, name: "manifest.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+              let saved = try? JSONDecoder().decode(Manifest.self, from: data),
+              saved.fingerprint == fingerprint else { return empty }
+        var valid: [DoneSegment] = []
+        for (position, segment) in saved.segments.enumerated() {
+            guard segment.index == position,
+                  FileManager.default.fileExists(atPath: url(for: fingerprint, name: segment.fileName).path),
+                  segment.carryImageName.map({
+                      FileManager.default.fileExists(atPath: url(for: fingerprint, name: $0).path)
+                  }) ?? true else { break }
+            valid.append(segment)
+        }
+        return Manifest(fingerprint: fingerprint, segments: valid, updatedAt: saved.updatedAt)
+    }
+
+    func save(_ manifest: Manifest) throws {
+        var manifest = manifest
+        manifest.updatedAt = Date()
+        let data = try JSONEncoder().encode(manifest)
+        try data.write(to: url(for: manifest.fingerprint, name: "manifest.json"), options: .atomic)
+    }
+
+    func discard(_ fingerprint: String) {
+        try? FileManager.default.removeItem(at: directory(for: fingerprint))
+    }
+
+    func discardAll() {
+        try? FileManager.default.removeItem(at: baseDirectory)
+    }
+
+    /// Interrupted renders nobody came back to must not fill the phone.
+    func purgeStale(olderThan age: TimeInterval = 48 * 60 * 60, now: Date = Date()) {
+        guard let items = try? FileManager.default.contentsOfDirectory(
+            at: baseDirectory, includingPropertiesForKeys: [.contentModificationDateKey]
+        ) else { return }
+        for item in items {
+            let modified = (try? item.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            if now.timeIntervalSince(modified) > age { try? FileManager.default.removeItem(at: item) }
+        }
+    }
+
+    static func writePNG(_ image: CGImage, to url: URL) throws {
+        guard let destination = CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.png.identifier as CFString, 1, nil
+        ) else { throw TripReelVideoExportError.cannotCreateFrame }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { throw TripReelVideoExportError.cannotCreateFrame }
+    }
+
+    static func readImage(at url: URL) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
+}
+
+/// What one timeline item hands to the next: the previous item (for the cross
+/// fade) and the last picture shown (also the background of title cards).
+private struct RenderCarry {
+    var previousItem: MontageTimelineItem?
+    /// The previous item's final picture, used for the cross fade into this item.
+    var previousImage: CGImage?
+    /// The most recent picture shown (also the background of title cards).
+    var lastImage: CGImage?
+    var previousPhotoIndex = 0
+}
+
 struct PreparedReelMedia: @unchecked Sendable {
     let stillImageURL: URL?
     let videoAsset: AVAsset?
@@ -593,15 +716,24 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
     private let imageManager: PHImageManager
     private let frameRate: Int32
     private let prefetchNetworkPolicy: @Sendable () async -> Bool
+    private let checkpoints: RenderCheckpointStore
+    private let segmentCounter = NSLock()
+    private var segmentsRendered = 0
+    /// Test hook: how many pieces this exporter has actually rendered (not resumed).
+    var renderedSegmentCount: Int { segmentCounter.lock(); defer { segmentCounter.unlock() }; return segmentsRendered }
+    private func countRenderedSegment() { segmentCounter.lock(); segmentsRendered += 1; segmentCounter.unlock() }
 
     init(
         imageManager: PHImageManager = PHCachingImageManager(),
         frameRate: Int32 = TripReelVideoExporter.defaultFrameRate,
-        prefetchNetworkPolicy: @escaping @Sendable () async -> Bool = { await PrefetchNetworkPolicy.allowsPrefetch() }
+        prefetchNetworkPolicy: @escaping @Sendable () async -> Bool = { await PrefetchNetworkPolicy.allowsPrefetch() },
+        checkpoints: RenderCheckpointStore = RenderCheckpointStore()
     ) {
         self.imageManager = imageManager
         self.frameRate = max(8, frameRate)
         self.prefetchNetworkPolicy = prefetchNetworkPolicy
+        self.checkpoints = checkpoints
+        checkpoints.purgeStale()
     }
 
     func export(
@@ -654,13 +786,14 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             )
             preparedMedia.merge(fresh) { _, new in new }
             let watchdog = ExportProgressWatchdog()
+            let fingerprint = Self.renderFingerprint(request, frameRate: frameRate)
             do {
                 defer { watchdog.stop() }
                 try await withTaskCancellationHandler {
                     do {
                         try await renderSilentVideo(
                             request, preparedMedia: preparedMedia, to: silentURL,
-                            watchdog: watchdog, progress: progress
+                            fingerprint: fingerprint, watchdog: watchdog, progress: progress
                         )
                     } catch {
                         // Prefer the actionable timeout/cancellation over the
@@ -701,6 +834,8 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                     phase: .finalizing
                 )
             )
+            // Only a finished film clears the saved pieces; any failure keeps them.
+            checkpoints.discard(fingerprint)
             return finalURL
         } catch {
             try? FileManager.default.removeItem(at: silentURL)
@@ -884,20 +1019,155 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         return outputURL
     }
 
+    /// Whole timeline items grouped into runs of about ten seconds. Each run is
+    /// rendered to its own file so an interrupted export resumes at the last
+    /// finished run.
+    static func segmentPlan(frameCounts: [Int], frameRate: Int32, targetSeconds: Double = 10) -> [Range<Int>] {
+        let target = max(1, Int(targetSeconds * Double(frameRate)))
+        var ranges: [Range<Int>] = []
+        var start = 0
+        var frames = 0
+        for (index, count) in frameCounts.enumerated() {
+            frames += count
+            if frames >= target {
+                ranges.append(start..<(index + 1))
+                start = index + 1
+                frames = 0
+            }
+        }
+        if start < frameCounts.count { ranges.append(start..<frameCounts.count) }
+        return ranges
+    }
+
+    /// Identifies everything that changes the pictures. A different fingerprint
+    /// means saved pieces are never reused for an edited film.
+    static func renderFingerprint(_ request: TripReelVideoExportRequest, frameRate: Int32) -> String {
+        let parts = [
+            "render-v1", "\(frameRate)", "\(request.quality)", "\(request.secondsPerPhoto)",
+            "\(request.look)", "\(request.motionIntensity)",
+            String(reflecting: request.photos), String(reflecting: request.titleCards),
+            String(reflecting: request.textOverlays)
+        ]
+        let digest = SHA256.hash(data: Data(parts.joined(separator: "\u{1F}").utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
     private func renderSilentVideo(
         _ request: TripReelVideoExportRequest,
         preparedMedia: [String: PreparedReelMedia],
         to outputURL: URL,
+        fingerprint: String,
         watchdog: ExportProgressWatchdog,
         progress: @escaping @Sendable (TripReelVideoExportProgress) -> Void
     ) async throws {
         let outputSize = Self.outputSize(for: request.quality)
-        progress(
-            TripReelVideoExportProgress(
-                fraction: Self.preparationProgressWeight,
-                phase: .rendering
-            )
+        let timeline = MontageTimelineBuilder.make(
+            photos: request.photos,
+            titleCards: request.titleCards
         )
+        let frameCounts = timeline.map {
+            max(1, Int(ceil($0.duration(defaultPhotoDuration: request.secondsPerPhoto) * Double(frameRate))))
+        }
+        let totalFrames = frameCounts.reduce(0, +)
+        let segments = Self.segmentPlan(frameCounts: frameCounts, frameRate: frameRate)
+        try checkpoints.prepare(fingerprint)
+        var manifest = checkpoints.manifest(for: fingerprint)
+
+        var completedFrames = manifest.segments.reduce(0) { $0 + $1.frameCount }
+        let reportFrames: @Sendable (Int) -> Void = { frames in
+            progress(
+                TripReelVideoExportProgress(
+                    fraction: min(
+                        0.90,
+                        Self.preparationProgressWeight
+                            + (Double(frames) / Double(max(1, totalFrames))) * Self.renderingProgressWeight
+                    ),
+                    phase: .rendering
+                )
+            )
+        }
+        reportFrames(completedFrames)
+        if !manifest.segments.isEmpty {
+            ExportProgressWatchdog.logger.info("Resuming render: \(manifest.segments.count) of \(segments.count) pieces already finished")
+        }
+
+        // Pick up the carried picture from the last finished piece.
+        var carry = RenderCarry()
+        if let last = manifest.segments.last, segments.indices.contains(last.index) {
+            let lastItem = segments[last.index].upperBound - 1
+            carry.previousItem = timeline[lastItem]
+            carry.lastImage = last.carryImageName.flatMap {
+                RenderCheckpointStore.readImage(at: checkpoints.url(for: fingerprint, name: $0))
+            }
+            carry.previousImage = carry.lastImage
+            if case let .photo(photo) = timeline[lastItem] {
+                carry.previousPhotoIndex = request.photos.firstIndex { $0.id == photo.id } ?? 0
+            }
+        }
+
+        let photoIndices = Dictionary(
+            uniqueKeysWithValues: request.photos.enumerated().map { ($0.element.id, $0.offset) }
+        )
+        for (segmentIndex, items) in segments.enumerated() where segmentIndex >= manifest.segments.count {
+            try Task.checkCancellation()
+            let segmentURL = checkpoints.url(for: fingerprint, name: checkpoints.segmentName(segmentIndex))
+            // Every attempt writes to its own file and renames it into place only once complete. A
+            // cancelled attempt's writer deletes its output asynchronously, and that late cleanup
+            // must never remove the file a resumed attempt is writing.
+            let attemptURL = checkpoints.url(
+                for: fingerprint, name: "attempt-\(segmentIndex)-\(UUID().uuidString).mp4"
+            )
+            let baseFrames = completedFrames
+            do {
+                try await renderSegment(
+                    items: items, timeline: timeline, request: request, preparedMedia: preparedMedia,
+                    photoIndices: photoIndices, carry: &carry, outputURL: attemptURL,
+                    outputSize: outputSize, watchdog: watchdog,
+                    onFrame: { done in reportFrames(baseFrames + done) }
+                )
+            } catch {
+                try? FileManager.default.removeItem(at: attemptURL)
+                throw error
+            }
+            try? FileManager.default.removeItem(at: segmentURL)
+            try FileManager.default.moveItem(at: attemptURL, to: segmentURL)
+            countRenderedSegment()
+            var carryName: String?
+            if let image = carry.lastImage {
+                let name = checkpoints.carryName(segmentIndex)
+                try RenderCheckpointStore.writePNG(image, to: checkpoints.url(for: fingerprint, name: name))
+                carryName = name
+            }
+            let pieceFrames = items.reduce(0) { $0 + frameCounts[$1] }
+            completedFrames += pieceFrames
+            manifest.segments.append(
+                .init(index: segmentIndex, fileName: checkpoints.segmentName(segmentIndex),
+                      frameCount: pieceFrames, carryImageName: carryName)
+            )
+            try checkpoints.save(manifest)
+            reportFrames(completedFrames)
+        }
+
+        try await concatenateSegments(
+            manifest.segments.map { checkpoints.url(for: fingerprint, name: $0.fileName) },
+            to: outputURL,
+            watchdog: watchdog
+        )
+    }
+
+    /// Renders one run of whole timeline items into its own H.264 file.
+    private func renderSegment(
+        items: Range<Int>,
+        timeline: [MontageTimelineItem],
+        request: TripReelVideoExportRequest,
+        preparedMedia: [String: PreparedReelMedia],
+        photoIndices: [String: Int],
+        carry: inout RenderCarry,
+        outputURL: URL,
+        outputSize: CGSize,
+        watchdog: ExportProgressWatchdog,
+        onFrame: @escaping @Sendable (Int) -> Void
+    ) async throws {
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
         let writerCancellation = VideoWriterCancellation(writer)
         var writerCompleted = false
@@ -913,7 +1183,10 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                 AVVideoAverageBitRateKey: bitRate,
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
                 AVVideoExpectedSourceFrameRateKey: frameRate,
-                AVVideoMaxKeyFrameIntervalKey: frameRate * 2
+                AVVideoMaxKeyFrameIntervalKey: frameRate * 2,
+                // Pieces are joined end to end. Frame reordering (B-frames) shifts each
+                // piece's timestamps and made the joins overlap, so keep decode order.
+                AVVideoAllowFrameReorderingKey: false
             ]
         ]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
@@ -937,25 +1210,9 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         }
         writer.startSession(atSourceTime: .zero)
 
-        let timeline = MontageTimelineBuilder.make(
-            photos: request.photos,
-            titleCards: request.titleCards
-        )
-        let photoIndices = Dictionary(
-            uniqueKeysWithValues: request.photos.enumerated().map {
-                ($0.element.id, $0.offset)
-            }
-        )
-        let totalFrames = timeline.reduce(0) { partial, item in
-            partial + max(1, Int(ceil(item.duration(defaultPhotoDuration: request.secondsPerPhoto) * Double(frameRate))))
-        }
-        var completedFrames = 0
-        var lastPhotoImage: CGImage?
-        var previousItem: MontageTimelineItem?
-        var previousItemImage: CGImage?
-        var previousItemPhotoIndex = 0
-
-        for (itemIndex, item) in timeline.enumerated() {
+        var segmentFrames = 0
+        for itemIndex in items {
+            let item = timeline[itemIndex]
             try Task.checkCancellation()
             let itemStarted = ProcessInfo.processInfo.systemUptime
             try watchdog.checkpoint("prepare item \(itemIndex + 1)") { writerCancellation.cancel() }
@@ -985,10 +1242,10 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                         targetSize: outputSize
                     )
                 }
-                lastPhotoImage = photoImage
+                carry.lastImage = photoImage
                 itemPhotoIndex = photoIndices[photo.id] ?? 0
             case .title:
-                photoImage = lastPhotoImage
+                photoImage = carry.lastImage
                 itemPhotoIndex = 0
             }
 
@@ -1028,9 +1285,9 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                         guard photoImage != nil else {
                             throw TripReelVideoExportError.photoUnavailable(videoPhoto.label)
                         }
-                        lastPhotoImage = photoImage
+                        carry.lastImage = photoImage
                     }
-                    let transitionFrames = previousItem == nil
+                    let transitionFrames = carry.previousItem == nil
                         ? 0
                         : min(frameCount - 1, max(2, Int((0.24 * Double(frameRate)).rounded())))
                     let transitionProgress = Self.transitionProgress(
@@ -1040,17 +1297,17 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                     try Self.draw(
                         item: item,
                         photoImage: photoImage,
-                        previousItem: previousItem,
-                        previousPhotoImage: previousItemImage,
+                        previousItem: carry.previousItem,
+                        previousPhotoImage: carry.previousImage,
                         into: pixelBuffer,
                         outputSize: outputSize,
                         phase: phase,
                         photoIndex: itemPhotoIndex,
-                        previousPhotoIndex: previousItemPhotoIndex,
+                        previousPhotoIndex: carry.previousPhotoIndex,
                         transitionProgress: transitionProgress,
                         request: request
                     )
-                    let presentationTime = CMTime(value: CMTimeValue(completedFrames), timescale: frameRate)
+                    let presentationTime = CMTime(value: CMTimeValue(segmentFrames), timescale: frameRate)
                     try watchdog.check()
                     guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
                         throw TripReelVideoExportError.encodingFailed(
@@ -1058,31 +1315,20 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                         )
                     }
                 }
-                completedFrames += 1
-                if completedFrames.isMultiple(of: 6) || completedFrames == totalFrames {
-                    let renderFraction = Double(completedFrames) / Double(max(1, totalFrames))
-                    progress(
-                        TripReelVideoExportProgress(
-                            fraction: min(
-                                0.90,
-                                Self.preparationProgressWeight
-                                    + (renderFraction * Self.renderingProgressWeight)
-                            ),
-                            phase: .rendering
-                        )
-                    )
-                }
+                segmentFrames += 1
+                if segmentFrames.isMultiple(of: 6) { onFrame(segmentFrames) }
             }
             let elapsed = ProcessInfo.processInfo.systemUptime - itemStarted
             ExportProgressWatchdog.logger.info("Rendered item \(itemIndex + 1): \(frameCount) frames in \(elapsed) seconds; video=\(videoReader != nil)")
 
-            previousItem = item
-            previousItemImage = lastPhotoImage
-            previousItemPhotoIndex = itemPhotoIndex
+            carry.previousItem = item
+            carry.previousImage = carry.lastImage
+            carry.previousPhotoIndex = itemPhotoIndex
         }
+        onFrame(segmentFrames)
 
         input.markAsFinished()
-        try watchdog.checkpoint("finalize video") { writerCancellation.cancel() }
+        try watchdog.checkpoint("finalize video piece") { writerCancellation.cancel() }
         writer.finishWriting { }
         while writer.status == .writing {
             try watchdog.check()
@@ -1095,6 +1341,43 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
             )
         }
         writerCompleted = true
+    }
+
+    /// Joins the finished pieces without re-encoding them.
+    private func concatenateSegments(
+        _ urls: [URL],
+        to outputURL: URL,
+        watchdog: ExportProgressWatchdog
+    ) async throws {
+        try? FileManager.default.removeItem(at: outputURL)
+        if urls.count == 1 {
+            try FileManager.default.copyItem(at: urls[0], to: outputURL)
+            return
+        }
+        let composition = AVMutableComposition()
+        guard let track = composition.addMutableTrack(
+            withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else { throw TripReelVideoExportError.cannotCreateWriter }
+        var cursor = CMTime.zero
+        for url in urls {
+            try Task.checkCancellation()
+            let asset = AVURLAsset(url: url)
+            let duration = try await asset.load(.duration)
+            guard let source = try await asset.loadTracks(withMediaType: .video).first else {
+                throw TripReelVideoExportError.encodingFailed("A saved piece of the film could not be read.")
+            }
+            try track.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: source, at: cursor)
+            cursor = CMTimeAdd(cursor, duration)
+        }
+        guard let session = AVAssetExportSession(
+            asset: composition, presetName: AVAssetExportPresetPassthrough
+        ) else { throw TripReelVideoExportError.cannotCreateWriter }
+        session.outputURL = outputURL
+        session.outputFileType = .mp4
+        try await runExportSession(
+            session, stage: "join film pieces", watchdog: watchdog,
+            failure: .encodingFailed("The film pieces could not be joined.")
+        )
     }
 
     /// How many originals are fetched at once. Serial fetching made a long
@@ -1229,6 +1512,10 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
 
     func discardPrefetchedOriginals() {
         prefetch.discard()
+    }
+
+    func discardRenderCheckpoints() {
+        checkpoints.discardAll()
     }
 
     /// Test hooks.
@@ -1868,7 +2155,8 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
     private func runExportSession(
         _ session: AVAssetExportSession,
         stage: String,
-        watchdog: ExportProgressWatchdog
+        watchdog: ExportProgressWatchdog,
+        failure: TripReelVideoExportError = .soundtrackFailed
     ) async throws {
         let box = ExportSessionBox(session)
         let monitor = ExportSessionProgressMonitor(
@@ -1891,7 +2179,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         // "cancelled" status the aborted session reports.
         try watchdog.check()
         guard box.session.status == .completed else {
-            throw TripReelVideoExportError.soundtrackFailed
+            throw failure
         }
     }
 

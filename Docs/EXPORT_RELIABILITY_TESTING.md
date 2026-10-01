@@ -2,7 +2,7 @@
 
 ## Latest local verification
 
-30 September 2026: all 194 unit tests passed on the iPhone 17 Pro simulator, including a real 120-second 1080p export with soundtrack and atmosphere (`testRealExporterTwoMinuteHDFilmWithSoundtrackAndAtmosphere`, about 102 seconds on the simulator), the free and paid film test, and new tests for the audio-stage monitor and the PhotoKit inactivity guard. The reported hang after payment on long films was **not** reproduced in the simulator, so it is not confirmed fixed. It still needs the physical iPhone checks below.
+1 October 2026: all 200 unit tests passed on the iPhone 17 Pro simulator, including the new resume tests below. 30 September 2026: all 194 unit tests passed on the iPhone 17 Pro simulator, including a real 120-second 1080p export with soundtrack and atmosphere (`testRealExporterTwoMinuteHDFilmWithSoundtrackAndAtmosphere`, about 102 seconds on the simulator), the free and paid film test, and new tests for the audio-stage monitor and the PhotoKit inactivity guard. The reported hang after payment on long films was **not** reproduced in the simulator, so it is not confirmed fixed. It still needs the physical iPhone checks below.
 
 29 September 2026: all 181 unit tests passed on the iPhone 17 Pro / iOS 26.5 simulator with Xcode 26.6, including the 90-second real export, cancellation/retry and watchdog tests. Result bundle: `/tmp/MemoriesExportTests-Final.xcresult` (local, temporary). Physical iPhone 13 verification remains outstanding. No real-device speedup is claimed.
 
@@ -51,3 +51,30 @@ Analysis and First Cut read only what is already on the iPhone (`allowsICloudAss
 To avoid making the user wait after paying, the app now prefetches the full-quality originals for an HD export while the user is on the First Cut, options, second-watch, pace, export or paywall screens (`MediaPrefetchCoordinator`, started from `TripReelModel.go`). At export time the exporter waits for a running prefetch, reuses what it fetched and fetches only what is missing. A retry reuses the same prefetched originals. Prefetch is skipped on cellular and in Low Data Mode, uses two downloads at a time at background priority, stops waiting after 60 seconds without progress, and is discarded when the user leaves the flow, finishes, or chooses the free export. A test exports after deleting the source photos to prove reuse; how much time it saves on a real iCloud-backed library has not been measured on a device.
 
 Do not mark the reported iPhone 13 problem resolved solely because simulator tests pass. Ship to TestFlight, reproduce with the original footage, inspect timing/memory, and pass the device checks before publishing.
+
+## Resumable rendering (added 1 October 2026)
+
+A paid film is no longer one long job that iOS can throw away. The silent video is rendered in pieces of
+about ten seconds (whole timeline items), each written to its own file under
+`Application Support/RenderCheckpoints/<fingerprint>/` with a small manifest and the last picture shown
+(a lossless PNG, needed for the cross fade into the next piece). The finished pieces are joined without
+re-encoding, and only a finished film clears them.
+
+- **Interruption** (iOS ends the background task, a stall, a crash, the app is closed) keeps the finished
+  pieces. The next attempt skips them. When iOS pauses a background export the app now shows "Export
+  paused", and `TripReelModel.resumeInterruptedExportIfNeeded()` continues automatically when the person
+  returns. Cancelling on purpose discards the pieces.
+- **Fingerprint:** a hash of everything that changes the pictures (photos, titles, text, look, motion, quality,
+  frame rate). An edited film never reuses old pieces. Pieces nobody came back to are removed after 48 hours.
+- **No B-frames in pieces.** Frame reordering shifted each piece's timestamps and made the joins overlap;
+  without it the joined film has perfectly regular timing (840 frames at 30/1 fps in a 28-second test).
+- **Unique attempt files.** A cancelled attempt's writer deletes its output asynchronously. Pieces first
+  write to a unique file and are renamed into place when complete; before this, a resume could have its
+  piece deleted by the cancelled attempt's late cleanup (it failed 2 of 3 runs of the 90-second test).
+- The screen stays awake while a render runs in the foreground.
+
+Tests: piece plan, fingerprint, and `testInterruptedExportResumesFromFinishedPiecesAndMatchesAnUninterruptedFilm`
+(interrupts a 48-second export after the first piece, resumes with a new exporter, checks it renders only the
+remaining pieces, that both films are 48 s at 30 fps and look the same at the joins, and that saved pieces are
+cleared). Not yet verified on a physical iPhone: how often iOS ends the background task there, and how long
+a full 1080p film takes on an older phone.

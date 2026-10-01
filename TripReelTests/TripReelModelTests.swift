@@ -117,9 +117,15 @@ final class TripReelModelTests: XCTestCase {
         }
         // Retry the identical request with the same exporter after cancellation.
         let started = Date()
-        let outputURL = try await Task.detached {
-            try await exporter.export(mixedRequest) { _ in }
-        }.value
+        let outputURL: URL
+        do {
+            outputURL = try await Task.detached {
+                try await exporter.export(mixedRequest) { _ in }
+            }.value
+        } catch {
+            XCTFail("Retry failed: \(String(reflecting: error)) / \((error as NSError).domain) \((error as NSError).code) \((error as NSError).userInfo)")
+            return
+        }
         defer { try? FileManager.default.removeItem(at: outputURL) }
         let asset = AVURLAsset(url: outputURL)
         let duration = try await asset.load(.duration)
@@ -410,6 +416,133 @@ final class TripReelModelTests: XCTestCase {
         exporter.discardPrefetchedOriginals()
         XCTAssertFalse(FileManager.default.fileExists(atPath: prefetchDirectory.path))
         XCTAssertEqual(exporter.prefetchedItemCount, 0)
+    }
+
+    // MARK: Resumable rendering
+
+    private func makeColoredPhotos(count: Int, in directory: URL) throws -> [ReelPhoto] {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return try (0..<count).map { index in
+            let image = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 900), format: format).image { context in
+                UIColor(hue: CGFloat(index) / CGFloat(count), saturation: 0.8, brightness: 0.9, alpha: 1).setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 600, height: 900))
+                UIColor.white.setFill()
+                context.fill(CGRect(x: 80 + CGFloat(index % 5) * 60, y: 200, width: 160, height: 300))
+            }
+            let url = directory.appendingPathComponent("photo-\(index).jpg")
+            try XCTUnwrap(image.jpegData(compressionQuality: 0.9)).write(to: url)
+            return ReelPhoto(id: "photo-\(index)", source: .imported(url.path), label: "Fixture", time: "",
+                             isSimilar: false, pixelWidth: 600, pixelHeight: 900,
+                             frameStyle: .fullBleed, motionStyle: .zoomIn, durationSeconds: 2)
+        }
+    }
+
+    private func exportRequest(_ photos: [ReelPhoto]) -> TripReelVideoExportRequest {
+        TripReelVideoExportRequest(photos: photos, titleCards: [], textOverlays: [], secondsPerPhoto: 2,
+                                  look: .clean, motionIntensity: .gentle, quality: .standard,
+                                  soundtrackURL: nil, atmosphereURL: nil)
+    }
+
+    func testSegmentPlanCoversEveryItemInOrderInRunsOfAboutTenSeconds() {
+        let frameCounts = Array(repeating: 60, count: 13)   // thirteen two-second items
+        let plan = TripReelVideoExporter.segmentPlan(frameCounts: frameCounts, frameRate: 30)
+        XCTAssertEqual(plan, [0..<5, 5..<10, 10..<13])
+        XCTAssertEqual(plan.flatMap { Array($0) }, Array(0..<13))
+        XCTAssertEqual(TripReelVideoExporter.segmentPlan(frameCounts: [30], frameRate: 30), [0..<1])
+        XCTAssertTrue(TripReelVideoExporter.segmentPlan(frameCounts: [], frameRate: 30).isEmpty)
+    }
+
+    func testRenderFingerprintChangesOnlyWhenTheFilmChanges() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let photos = try makeColoredPhotos(count: 4, in: directory)
+        let same = TripReelVideoExporter.renderFingerprint(exportRequest(photos), frameRate: 30)
+        XCTAssertEqual(same, TripReelVideoExporter.renderFingerprint(exportRequest(photos), frameRate: 30))
+        XCTAssertNotEqual(same, TripReelVideoExporter.renderFingerprint(exportRequest(Array(photos.dropLast())), frameRate: 30))
+        XCTAssertNotEqual(same, TripReelVideoExporter.renderFingerprint(exportRequest(photos), frameRate: 24))
+        var hd = exportRequest(photos)
+        hd = TripReelVideoExportRequest(photos: hd.photos, titleCards: [], textOverlays: [], secondsPerPhoto: 2,
+                                       look: .clean, motionIntensity: .gentle, quality: .hd,
+                                       soundtrackURL: nil, atmosphereURL: nil)
+        XCTAssertNotEqual(same, TripReelVideoExporter.renderFingerprint(hd, frameRate: 30))
+    }
+
+    private func meanDifference(_ lhs: CGImage, _ rhs: CGImage) -> Double {
+        func pixels(_ image: CGImage) -> [UInt8] {
+            var data = [UInt8](repeating: 0, count: 48 * 80 * 4)
+            let context = CGContext(data: &data, width: 48, height: 80, bitsPerComponent: 8, bytesPerRow: 48 * 4,
+                                    space: CGColorSpaceCreateDeviceRGB(),
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(image, in: CGRect(x: 0, y: 0, width: 48, height: 80))
+            return data
+        }
+        let a = pixels(lhs), b = pixels(rhs)
+        return zip(a, b).reduce(0.0) { $0 + abs(Double($1.0) - Double($1.1)) } / Double(a.count)
+    }
+
+    /// iOS can end a background render at any time. An interrupted export must resume from the
+    /// finished pieces, not start over, and the resumed film must match an uninterrupted one.
+    func testInterruptedExportResumesFromFinishedPiecesAndMatchesAnUninterruptedFilm() async throws {
+        executionTimeAllowance = 300
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let photos = try makeColoredPhotos(count: 24, in: root)          // 48 s, five pieces
+        let request = exportRequest(photos)
+        let fingerprint = TripReelVideoExporter.renderFingerprint(request, frameRate: 30)
+
+        // A: render straight through.
+        let straight = TripReelVideoExporter(checkpoints: RenderCheckpointStore(baseDirectory: root.appendingPathComponent("cpA")))
+        let straightURL = try await Task.detached { try await straight.export(request) { _ in } }.value
+        defer { try? FileManager.default.removeItem(at: straightURL) }
+        XCTAssertEqual(straight.renderedSegmentCount, 5)
+
+        // B: interrupt once the first piece is saved, then resume with a new exporter.
+        let store = RenderCheckpointStore(baseDirectory: root.appendingPathComponent("cpB"))
+        let first = TripReelVideoExporter(checkpoints: store)
+        let started = Task.detached {
+            try await first.export(request) { progress in
+                // 0.28 preparation + a quarter of the 0.62 render share
+                if progress.fraction >= 0.45 { withUnsafeCurrentTask { $0?.cancel() } }
+            }
+        }
+        _ = try? await started.value
+        let saved = store.manifest(for: fingerprint).segments.count
+        XCTAssertGreaterThanOrEqual(saved, 1, "No finished piece was kept")
+        XCTAssertLessThan(saved, 5, "The interruption came too late to test a resume")
+
+        let second = TripReelVideoExporter(checkpoints: store)
+        let resumedURL = try await Task.detached { try await second.export(request) { _ in } }.value
+        defer { try? FileManager.default.removeItem(at: resumedURL) }
+        XCTAssertEqual(second.renderedSegmentCount, 5 - saved, "Resume re-rendered pieces that were already finished")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.directory(for: fingerprint).path),
+                       "A finished film must clear its saved pieces")
+
+        // Both films are complete and look the same, including across the joins.
+        for url in [straightURL, resumedURL] {
+            let asset = AVURLAsset(url: url)
+            let duration = try await asset.load(.duration)
+            XCTAssertEqual(duration.seconds, 48, accuracy: 0.05)
+            let tracks = try await asset.loadTracks(withMediaType: .video)
+            let track = try XCTUnwrap(tracks.first)
+            let rate = try await track.load(.nominalFrameRate)
+            XCTAssertEqual(rate, 30, accuracy: 0.01)
+        }
+        let generatorA = AVAssetImageGenerator(asset: AVURLAsset(url: straightURL))
+        let generatorB = AVAssetImageGenerator(asset: AVURLAsset(url: resumedURL))
+        for generator in [generatorA, generatorB] {
+            generator.requestedTimeToleranceBefore = .zero
+            generator.requestedTimeToleranceAfter = .zero
+            generator.appliesPreferredTrackTransform = true
+        }
+        for seconds in [9.9, 10.0, 10.1, 19.95, 20.05, 30.0, 40.0] {
+            let time = CMTime(seconds: seconds, preferredTimescale: 600)
+            let a = try generatorA.copyCGImage(at: time, actualTime: nil)
+            let b = try generatorB.copyCGImage(at: time, actualTime: nil)
+            XCTAssertLessThan(meanDifference(a, b), 4.0, "Resumed film differs from the uninterrupted one at \(seconds)s")
+        }
     }
 
     private func makeModel() -> TripReelModel {
