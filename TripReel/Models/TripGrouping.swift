@@ -689,6 +689,11 @@ enum NearbyEventDetector {
     private static let localHabitualRadiusKilometers = 3.0
     private static let habitualMinimumWeeks = 8
     private static let habitualMinimumSpan: TimeInterval = 90 * 24 * 60 * 60
+    // Any place photographed in eight different weeks used to count as "home",
+    // which on a small island swallows malls, gyms, schools and even Sentosa and
+    // hides every outing near them. Only places that dominate the library (home,
+    // work, school) now keep an outing away.
+    private static let habitualDominanceShare = 0.35
     private static let unlocatedEdgeAllowance: TimeInterval = 30 * 60
     private static let maximumResults = 20
 
@@ -725,6 +730,57 @@ enum NearbyEventDetector {
             if $0.endDate != $1.endDate { return $0.endDate > $1.endDate }
             return $0.id < $1.id
         }.prefix(maximumResults))
+    }
+
+    /// Counts-only explanation of why each recent day did or did not become a
+    /// day-out card. Uses the same rules as `detect`, so it can be shown to a
+    /// tester without revealing photo names, places or coordinates.
+    static func recentDayDiagnostics(
+        in photos: [PhotoMetadata],
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        days: Int = 3
+    ) -> [String] {
+        let candidates = TripDetector.normalizedUniquePhotos(photos)
+            .filter { $0.creationDate != nil && !$0.isScreenshot }
+            .sorted(by: TripDetector.chronologicalOrder)
+        let habitual = localHabitualPlaceCentroids(
+            in: candidates, calendar: calendar, shouldCancel: { false }
+        )
+        var lines = ["usual places learned=\(habitual.count)"]
+        let labels = ["today", "yesterday"]
+        for offset in 0..<days {
+            guard let dayStart = calendar.date(byAdding: .day, value: -offset, to: calendar.startOfDay(for: now)),
+                  let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { continue }
+            let day = candidates.filter { $0.creationDate! >= dayStart && $0.creationDate! < dayEnd }
+            let located = day.filter { $0.coordinate != nil }
+            let nearUsual = located.filter { photo in
+                habitual.contains {
+                    TripDetector.distanceKilometers(photo.coordinate!, $0) <= habitualBoundaryRadiusKilometers
+                }
+            }
+            let nearIDs = Set(nearUsual.map(\.id))
+            let away = located.filter { !nearIDs.contains($0.id) }
+            var clusters: [EventCluster] = []
+            for photo in away {
+                let nearest = clusters.indices
+                    .map { ($0, TripDetector.distanceKilometers(photo.coordinate!, clusters[$0].centroid)) }
+                    .filter { $0.1 <= eventRadiusKilometers }
+                    .min { $0.1 < $1.1 }
+                if let nearest { clusters[nearest.0].add(photo) } else { clusters.append(EventCluster(anchors: [photo])) }
+            }
+            let biggest = clusters.map { $0.anchors.count }.max() ?? 0
+            let reason: String
+            if day.isEmpty { reason = "no photos" }
+            else if located.count < minimumLocatedPhotoCount { reason = "fewer than \(minimumLocatedPhotoCount) photos with a location" }
+            else if away.count < minimumLocatedPhotoCount { reason = "almost all are near a usual place" }
+            else if biggest < minimumLocatedPhotoCount { reason = "located photos are too spread out" }
+            else if day.count < minimumPhotoCount { reason = "fewer than \(minimumPhotoCount) photos in total" }
+            else { reason = "should qualify" }
+            let label = offset < labels.count ? labels[offset] : "\(offset) days ago"
+            lines.append("\(label): photos=\(day.count) located=\(located.count) nearUsualPlace=\(nearUsual.count) biggestAwayGroup=\(biggest) -> \(reason)")
+        }
+        return lines
     }
 
     private static func sessions(
@@ -854,13 +910,15 @@ enum NearbyEventDetector {
             }
         }
 
-        return clusters.compactMap { cluster in
-            guard cluster.weekStarts.count >= habitualMinimumWeeks,
-                  cluster.latestDate.timeIntervalSince(cluster.earliestDate) >= habitualMinimumSpan else {
-                return nil
-            }
-            return cluster.centroid
+        let qualified = clusters.filter { cluster in
+            cluster.weekStarts.count >= habitualMinimumWeeks
+                && cluster.latestDate.timeIntervalSince(cluster.earliestDate) >= habitualMinimumSpan
         }
+        guard let topWeeks = qualified.map({ $0.weekStarts.count }).max() else { return [] }
+        let floor = max(habitualMinimumWeeks, Int((Double(topWeeks) * habitualDominanceShare).rounded(.up)))
+        return qualified
+            .filter { $0.weekStarts.count >= floor }
+            .map(\.centroid)
     }
 
     private static func habitualCell(for coordinate: PhotoCoordinate) -> HabitualCell {

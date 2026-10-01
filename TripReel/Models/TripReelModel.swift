@@ -1568,6 +1568,7 @@ struct PhotoDecision: Equatable {
 private struct LibraryDetectionResult: Sendable {
     let trips: [DetectedTrip]
     let nearbyEvents: [DetectedTrip]
+    var recentDays: [String] = []
 }
 
 enum ExportQuality: Equatable, Sendable {
@@ -5220,7 +5221,8 @@ final class TripReelModel: ObservableObject {
                 in: metadata,
                 shouldCancel: { Task.isCancelled }
             )
-            return LibraryDetectionResult(trips: trips, nearbyEvents: nearbyEvents)
+            let recentDays = NearbyEventDetector.recentDayDiagnostics(in: metadata)
+            return LibraryDetectionResult(trips: trips, nearbyEvents: nearbyEvents, recentDays: recentDays)
         }
         detectorTask = task
         let detected = await task.value
@@ -5246,7 +5248,8 @@ final class TripReelModel: ObservableObject {
             metadata: metadata,
             access: photoLibrary.authorizationStatus,
             tripCount: detected.trips.count,
-            nearbyCount: detected.nearbyEvents.count
+            nearbyCount: detected.nearbyEvents.count,
+            recentDays: detected.recentDays
         )
         return generation
     }
@@ -5258,7 +5261,8 @@ final class TripReelModel: ObservableObject {
         metadata: [PhotoMetadata],
         access: PHAuthorizationStatus,
         tripCount: Int,
-        nearbyCount: Int
+        nearbyCount: Int,
+        recentDays: [String] = []
     ) -> String {
         let now = Date()
         let dates = metadata.compactMap(\.creationDate)
@@ -5273,7 +5277,8 @@ final class TripReelModel: ObservableObject {
             "access=\(accessName, privacy: .public) photos=\(metadata.count) newestAgeHours=\(newestHours ?? -1) last72h=\(recent.count) last72hWithLocation=\(recentLocated) trips=\(tripCount) nearby=\(nearbyCount)"
         )
         let newest = newestHours.map { "\($0) hours ago" } ?? "none"
-        return "access=\(accessName)\nphotos seen=\(metadata.count)\nnewest photo=\(newest)\nlast 72h=\(recent.count) photos, \(recentLocated) with location\ntrips=\(tripCount)  day outings=\(nearbyCount)"
+        let base = "access=\(accessName)\nphotos seen=\(metadata.count)\nnewest photo=\(newest)\nlast 72h=\(recent.count) photos, \(recentLocated) with location\ntrips=\(tripCount)  day outings=\(nearbyCount)"
+        return recentDays.isEmpty ? base : base + "\n" + recentDays.joined(separator: "\n")
     }
 
     func refreshPhotoLibraryIfAuthorized(force: Bool = false) async {

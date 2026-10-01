@@ -525,6 +525,53 @@ final class TripGroupingTests: XCTestCase {
         XCTAssertEqual(events.first?.photoCount, 6)
     }
 
+    /// A mall, gym or school photographed in 9 different weeks used to count as "home"
+    /// and hid every outing within 4 km, which on a small island includes Sentosa.
+    private var occasionalPlaceHistory: [PhotoMetadata] {
+        let mall = PhotoCoordinate(latitude: 1.2644, longitude: 103.8222)
+        return (0..<9).map { index in
+            photo(
+                id: "mall-\(index)",
+                date: origin.addingTimeInterval(Double(index) * 14 * 24 * 60 * 60 + 9 * 3600),
+                coordinate: mall
+            )
+        }
+    }
+
+    func testAnOutingNearAPlaceYouOnlyVisitNowAndThenIsStillDetected() throws {
+        let events = NearbyEventDetector.detect(
+            in: sentosaHistory + occasionalPlaceHistory + sentosaOuting(hours: (0..<12).map { Double($0) * 0.4 }),
+            calendar: utcCalendar
+        )
+        XCTAssertEqual(try XCTUnwrap(events.first).photoCount, 12)
+    }
+
+    func testAnOutingRightNextToHomeIsStillHidden() {
+        let nearHome = PhotoCoordinate(latitude: 1.3160, longitude: 103.7660)
+        let start = origin.addingTimeInterval(210 * 24 * 60 * 60 + 10 * 60 * 60)
+        let walk = (0..<12).map { index in
+            photo(id: "walk-\(index)", date: start.addingTimeInterval(Double(index) * 0.4 * 3600), coordinate: nearHome)
+        }
+        XCTAssertTrue(NearbyEventDetector.detect(in: sentosaHistory + walk, calendar: utcCalendar).isEmpty)
+    }
+
+    func testRecentDayDiagnosticsExplainWhyADayWasDropped() {
+        let outingDay = origin.addingTimeInterval(210 * 24 * 60 * 60 + 12 * 60 * 60)
+        let fewLocated = NearbyEventDetector.recentDayDiagnostics(
+            in: sentosaHistory + sentosaOuting(hours: (0..<12).map { Double($0) * 0.4 }, located: 2),
+            now: outingDay, calendar: utcCalendar
+        )
+        XCTAssertTrue(fewLocated.contains { $0.hasPrefix("today: photos=12 located=2") && $0.contains("fewer than 3 photos with a location") }, "\(fewLocated)")
+
+        let qualifying = NearbyEventDetector.recentDayDiagnostics(
+            in: sentosaHistory + sentosaOuting(hours: (0..<12).map { Double($0) * 0.4 }),
+            now: outingDay, calendar: utcCalendar
+        )
+        XCTAssertTrue(qualifying.contains { $0.hasPrefix("today: photos=12 located=12") && $0.contains("should qualify") }, "\(qualifying)")
+        XCTAssertTrue(qualifying.contains("usual places learned=1"), "\(qualifying)")
+        XCTAssertFalse(qualifying.joined().contains("sentosa-"), "diagnostics must not leak photo IDs")
+    }
+
     private func habitualEvidence() -> [PhotoMetadata] {
         [0, 14, 28, 42, 56, 70, 84, 91].map { day in
             photo(
