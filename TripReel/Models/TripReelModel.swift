@@ -2346,7 +2346,6 @@ final class TripReelModel: ObservableObject {
     @Published var screen: AppScreen = .welcome
     /// Counts-only description of the last library scan, shown in the account
     /// screen so a missing trip can be diagnosed without a Mac or Console.
-    @Published private(set) var lastScanSummary: String?
     /// Set when iOS paused an export in the background; the render continues from its saved
     /// pieces as soon as the person returns to the app.
     private var resumeExportWhenActive = false
@@ -5308,7 +5307,7 @@ final class TripReelModel: ObservableObject {
         )
         reconcileActiveFilm(withAvailableLibraryIDs: Set(metadata.map(\.id)))
         hasScannedLibrary = true
-        lastScanSummary = Self.logScanSummary(
+        Self.logScanSummary(
             metadata: metadata,
             access: photoLibrary.authorizationStatus,
             tripCount: detected.trips.count,
@@ -5321,6 +5320,7 @@ final class TripReelModel: ObservableObject {
     /// Counts only: no filenames, places or coordinates. In Console, filter the
     /// `LibraryScan` category to see whether yesterday's photos reached the
     /// detectors (access level, newest photo age, recent and located counts).
+    @discardableResult
     private static func logScanSummary(
         metadata: [PhotoMetadata],
         access: PHAuthorizationStatus,

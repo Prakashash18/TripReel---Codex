@@ -26,7 +26,6 @@ struct AccountCenterView: View {
                     VStack(alignment: .leading, spacing: 22) {
                         accountHero
                         if account.isSignedIn { signedInContent } else { signedOutContent }
-                        if let summary = model.lastScanSummary { libraryScanSection(summary) }
                     }
                     .padding(.horizontal, 22)
                     .padding(.bottom, 36)
@@ -217,34 +216,6 @@ struct AccountCenterView: View {
             }
 
             accountDeletionSection
-        }
-    }
-
-    /// Counts only. Lets a tester see why a trip is missing (access level, how
-    /// recent the newest photo is, how many recent photos carry a location).
-    private func libraryScanSection(_ summary: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("LIBRARY SCAN")
-                .font(TR.mono(10, weight: .semibold))
-                .tracking(1.5)
-                .foregroundStyle(.white.opacity(0.46))
-            Text(summary)
-                .font(TR.mono(11))
-                .foregroundStyle(.white.opacity(0.62))
-                .lineSpacing(3)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
-            Button {
-                UIPasteboard.general.string = summary
-            } label: {
-                Label("Copy scan details", systemImage: "doc.on.doc")
-                    .font(TR.ui(13, weight: .semibold))
-                    .padding(.vertical, 6)
-            }
-            .accessibilityIdentifier("copy-library-scan")
-            Text("Only counts. No photo names, places or coordinates.")
-                .font(TR.ui(11))
-                .foregroundStyle(.white.opacity(0.4))
         }
     }
 

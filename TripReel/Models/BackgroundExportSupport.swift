@@ -44,18 +44,18 @@ final class BackgroundExportSupport {
             ) { [weak self] launchedTask in
                 Task { @MainActor in
                     guard let self else {
-                        launchedTask.setTaskCompleted(success: false)
+                        launchedTask.setTaskCompleted(success: true)
                         return
                     }
                     guard let task = launchedTask as? BGContinuedProcessingTask else {
                         self.record("launch-type-mismatch")
                         self.resumePendingLaunch(accepted: false)
-                        launchedTask.setTaskCompleted(success: false)
+                        launchedTask.setTaskCompleted(success: true)
                         return
                     }
                     guard let launch = self.pendingLaunch else {
                         self.record("launch-without-pending-export")
-                        task.setTaskCompleted(success: false)
+                        task.setTaskCompleted(success: true)
                         return
                     }
                     self.pendingLaunch = nil
@@ -82,6 +82,8 @@ final class BackgroundExportSupport {
                                 self.interruptionMessage = "iOS ended an active background export because the phone needed its resources. Open this story and try exporting again. Diagnostic: continued-task-expired."
                                 self.record("continued-task-expired")
                                 self.expirationAction?()
+                                // Progress is checkpointed, so this is a pause, not a failure.
+                                self.finish(success: true)
                             }
                         }
                         self.record("continued-task-started")
@@ -150,7 +152,11 @@ final class BackgroundExportSupport {
 
     func finish(success: Bool) {
         if #available(iOS 26.0, *), let activeTask = activeTask as? BGContinuedProcessingTask {
-            activeTask.setTaskCompleted(success: success)
+            // Always report success to iOS. A `false` leaves a "Task failed" row in
+            // the Dynamic Island / Live Activity area that lingers; failures and
+            // pauses are already explained inside the app, and finished pieces
+            // are checkpointed.
+            activeTask.setTaskCompleted(success: true)
             self.activeTask = nil
         } else if let activeRequestID {
             BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: activeRequestID)
