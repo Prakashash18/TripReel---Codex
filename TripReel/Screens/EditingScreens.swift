@@ -538,7 +538,7 @@ private struct StoryPassSheet: View {
                 .frame(maxWidth: .infinity)
             }
 
-            Button("Send the free trailer instead") {
+            Button("Use the free preview instead") {
                 sendFreeTrailer()
             }
             .font(TR.ui(14, weight: .semibold))
@@ -2176,11 +2176,8 @@ struct AIVideoIntroScreen: View {
                             .accessibilityHint("Reviews a final sharing notice before uploading the reduced previews")
                             .accessibilityIdentifier("create-ai-video-button")
 
-                        Button("Not now") { model.navigateBack() }
-                            .font(TR.ui(14, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.68))
-                            .padding(.vertical, 8)
-                            .buttonStyle(.plain)
+                        Button("Not now, keep my First Cut") { model.navigateBack() }
+                            .buttonStyle(GlassButtonStyle())
 
                         Button("Privacy details") { showsPrivacyPolicy = true }
                             .font(TR.ui(11, weight: .medium))
@@ -2389,7 +2386,7 @@ struct AIVideoGeneratingScreen: View {
                 }
                 .padding(.horizontal, 34)
 
-                Button("Stop waiting") { model.cancelAIVideoGeneration() }
+                Button("Stop waiting and go back") { model.cancelAIVideoGeneration() }
                     .buttonStyle(GlassButtonStyle())
                     .padding(.horizontal, 24)
                     .accessibilityHint("Returns to your two moments. Trying again resumes this generation")
@@ -2463,10 +2460,7 @@ struct AIVideoReadyScreen: View {
                         }
 
                         Button("Back to both cuts") { model.navigateBack() }
-                            .font(TR.ui(13, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.62))
-                            .padding(.vertical, 8)
-                            .buttonStyle(.plain)
+                            .buttonStyle(GlassButtonStyle())
                     }
 
                     Text("This AI clip is kept privately on this iPhone, so you can reopen this memory and decide about Story Pass later. Save it to Photos for a permanent copy.")
@@ -2542,7 +2536,7 @@ struct CutScreen: View {
 
                             Spacer()
 
-                            Button("Done") {
+                            Button("Save choices") {
                                 model.finishPhotoSelection()
                             }
                             .font(TR.ui(13, weight: .semibold))
@@ -2884,17 +2878,15 @@ struct PaceScreen: View {
                 Spacer()
 
                 VStack(spacing: 14) {
-                    Button("Apply pace") {
+                    Button("Save pace") {
                         model.navigateBack()
                     }
                     .buttonStyle(CreamButtonStyle())
 
-                    Button("Advanced · per-moment timing") {
+                    Button("Fine-tune each moment") {
                         showAdvanced = true
                     }
-                    .font(TR.ui(13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.47))
-                    .buttonStyle(.plain)
+                    .buttonStyle(GlassButtonStyle())
                 }
                 .padding(.horizontal, 26)
                 .padding(.bottom, 7)
@@ -3090,7 +3082,7 @@ struct SecondWatchScreen: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                Button("Export") {
+                Button("Export film") {
                     model.openExport()
                 }
                 .font(TR.ui(12, weight: .semibold))

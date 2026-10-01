@@ -362,12 +362,10 @@ struct PhotoAccessScreen: View {
                 .buttonStyle(CreamButtonStyle())
                 .disabled(requestingAccess)
 
-                Button("Select moments instead") {
+                Button("Choose which photos to share") {
                     showPicker = true
                 }
-                .font(TR.ui(14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.58))
-                .buttonStyle(.plain)
+                .buttonStyle(GlassButtonStyle())
                 .photosPicker(
                     isPresented: $showPicker,
                     selection: $pickerItems,
@@ -477,9 +475,7 @@ struct LimitedAccessScreen: View {
                     Button("Continue with \(model.selectedPhotoCount) moments") {
                         model.showTripResults()
                     }
-                    .font(TR.ui(14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.57))
-                    .buttonStyle(.plain)
+                    .buttonStyle(GlassButtonStyle())
                 }
                 .trEntrance(1, distance: 9)
             }

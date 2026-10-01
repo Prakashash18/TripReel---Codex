@@ -61,7 +61,7 @@ final class TripReelFlowUITests: XCTestCase {
 
         app.buttons["trip-row-demo-da-nang"].tap()
         XCTAssertTrue(screen("story-clue-screen").waitForExistence(timeout: 3))
-        let skipClue = app.buttons["Skip — just make it"]
+        let skipClue = app.buttons["Skip the words"]
         XCTAssertTrue(skipClue.waitForExistence(timeout: 2))
         skipClue.tap()
         XCTAssertTrue(screen("building-screen").waitForExistence(timeout: 3))
@@ -94,7 +94,7 @@ final class TripReelFlowUITests: XCTestCase {
         XCTAssertTrue(screen("pace-screen").waitForExistence(timeout: 3))
 
         app.sliders.firstMatch.adjust(toNormalizedSliderPosition: 0.72)
-        app.buttons["Apply pace"].tap()
+        app.buttons["Save pace"].tap()
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
 
         screen("studio-edit-menu").swipeLeft()

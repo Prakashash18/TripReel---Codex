@@ -6209,6 +6209,13 @@ final class TripReelModel: ObservableObject {
         exportShareLinkURL = url
     }
 
+    /// Back to the film studio from a finished film. Story Pass is tied to the memory,
+    /// so exporting an edited version of the same memory is not charged again.
+    func editFilmAfterExport() {
+        guard !restoredExportOnly else { return }
+        go(exportReturnScreen, direction: .backward)
+    }
+
     func restart() {
         restoredExportOnly = false
         currentExportID = nil

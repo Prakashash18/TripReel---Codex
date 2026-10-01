@@ -81,7 +81,7 @@ struct TripsScreen: View {
                         .trEntrance(1, distance: 8)
                 }
 
-                if !model.myExports.isEmpty {
+                do {
                     Button {
                         showsMyExports = true
                     } label: {
@@ -89,11 +89,13 @@ struct TripsScreen: View {
                             Image(systemName: "film.stack")
                                 .foregroundStyle(TR.accent)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("My exports")
+                                Text("My films")
                                     .font(TR.ui(12, weight: .semibold))
-                                Text(model.myExports.count == 1
-                                     ? "1 finished film kept on this iPhone"
-                                     : "\(model.myExports.count) finished films kept on this iPhone")
+                                Text(model.myExports.isEmpty
+                                     ? "No films yet"
+                                     : (model.myExports.count == 1
+                                        ? "1 finished film kept on this iPhone"
+                                        : "\(model.myExports.count) finished films kept on this iPhone"))
                                     .font(TR.ui(10))
                                     .foregroundStyle(.white.opacity(0.46))
                             }
@@ -190,6 +192,7 @@ struct TripsScreen: View {
                             }
                         }
 
+                        #if DEBUG
                         if model.usesDemoData {
                             Button("See the empty state") {
                                 model.go(.empty)
@@ -199,6 +202,7 @@ struct TripsScreen: View {
                             .buttonStyle(.plain)
                             .padding(.vertical, 14)
                         }
+                        #endif
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 32)
@@ -516,15 +520,11 @@ struct StoryClueScreen: View {
                 .buttonStyle(CreamButtonStyle())
                 .accessibilityIdentifier("make-memory-from-clue")
 
-                Button("Skip — just make it") {
+                Button("Skip the words") {
                     clueFocused = false
                     model.skipStoryClueAndBuild()
                 }
-                .font(TR.ui(13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .buttonStyle(.plain)
+                .buttonStyle(GlassButtonStyle())
                 .accessibilityIdentifier("skip-story-clue")
             }
             .padding(.horizontal, 24)

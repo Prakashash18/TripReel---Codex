@@ -1187,6 +1187,46 @@ struct FilmReadyScreen: View {
     @State private var shareLinkError: String?
     @State private var showsLeaveWithoutSaving = false
     @State private var wantsLinkAfterSignIn = false
+    @State private var showsMyFilms = false
+
+    private func leaveReadyScreen() {
+        if model.exportSaveMessage == nil &&
+            model.exportShareLinkURL == nil &&
+            !model.exportIsKeptOnShelf {
+            showsLeaveWithoutSaving = true
+        } else {
+            model.restart()
+        }
+    }
+
+    private var readyTopBar: some View {
+        HStack {
+            Button {
+                leaveReadyScreen()
+            } label: {
+                Label("All memories", systemImage: "chevron.left")
+                    .font(TR.ui(13, weight: .semibold))
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 44)
+            }
+            .buttonStyle(GlassButtonStyle())
+            .fixedSize()
+            .accessibilityIdentifier("ready-all-memories")
+            Spacer()
+            Button {
+                showsMyFilms = true
+            } label: {
+                Label("My films", systemImage: "film.stack")
+                    .font(TR.ui(13, weight: .semibold))
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 44)
+            }
+            .buttonStyle(GlassButtonStyle())
+            .fixedSize()
+            .accessibilityIdentifier("ready-my-films")
+        }
+        .padding(.top, 8)
+    }
 
     var body: some View {
         ZStack {
@@ -1194,11 +1234,12 @@ struct FilmReadyScreen: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
+                    readyTopBar
                     MetadataText(
                         text: "MEMORY READY",
                         color: TR.accent
                     )
-                    .padding(.top, 16)
+                    .padding(.top, 4)
                     .accessibilityIdentifier("film-ready-save-status")
 
                     memoryCard
@@ -1221,7 +1262,7 @@ struct FilmReadyScreen: View {
                         saveToPhotos()
                     } label: {
                         Label(
-                            model.exportSaveMessage == nil ? "Save video to Photos" : "Saved to Photos",
+                            model.exportSaveMessage == nil ? "Save to Photos" : "Saved to Photos",
                             systemImage: model.exportSaveMessage == nil ? "square.and.arrow.down" : "checkmark.circle.fill"
                         )
                             .frame(maxWidth: .infinity)
@@ -1234,7 +1275,7 @@ struct FilmReadyScreen: View {
                         Button {
                             shareFilm()
                         } label: {
-                            Label("Share video", systemImage: "square.and.arrow.up")
+                            Label("Send file", systemImage: "square.and.arrow.up")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(GlassButtonStyle())
@@ -1247,8 +1288,8 @@ struct FilmReadyScreen: View {
                                 if isCreatingLink { ProgressView().controlSize(.small) }
                                 Label(
                                     model.exportShareLinkURL == nil
-                                        ? (isCreatingLink ? account.shareLinkCreationPhase.statusText : "Create share link")
-                                        : "View share link",
+                                        ? (isCreatingLink ? account.shareLinkCreationPhase.statusText : "Get link")
+                                        : "Copy link",
                                     systemImage: "link"
                                 )
                             }
@@ -1270,34 +1311,29 @@ struct FilmReadyScreen: View {
                         .lineSpacing(3)
                         .padding(.horizontal, 8)
 
-                    Button {
-                        if model.exportSaveMessage == nil &&
-                            model.exportShareLinkURL == nil &&
-                            !model.exportIsKeptOnShelf {
-                            showsLeaveWithoutSaving = true
-                        } else {
-                            model.restart()
+                    if !model.restoredExportOnly {
+                        Button {
+                            model.editFilmAfterExport()
+                        } label: {
+                            Label("Edit film", systemImage: "pencil")
+                                .frame(maxWidth: .infinity)
                         }
-                    } label: {
-                        HStack(spacing: 12) {
-                            PhotoAssetView(source: .bundled("hoi-an-lanes"))
-                                .frame(width: 48, height: 48)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Another memory is ready")
-                                    .font(TR.ui(13, weight: .semibold))
-                                Text("Return to your memories")
-                                    .font(TR.ui(11))
-                                    .foregroundStyle(.white.opacity(0.48))
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .foregroundStyle(.white.opacity(0.36))
-                        }
-                        .padding(13)
-                        .glassCard(cornerRadius: 17)
+                        .buttonStyle(GlassButtonStyle())
+                        .accessibilityIdentifier("edit-film-button")
+                        Text("Changing it and exporting again doesn't cost another export.")
+                            .font(TR.ui(11))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .multilineTextAlignment(.center)
                     }
-                    .buttonStyle(TactileButtonStyle())
+
+                    Button {
+                        leaveReadyScreen()
+                    } label: {
+                        Label("Back to all memories", systemImage: "house")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(GlassButtonStyle())
+                    .accessibilityIdentifier("back-to-memories")
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 28)
@@ -1310,6 +1346,12 @@ struct FilmReadyScreen: View {
             createShareLink()
         }
         .sensoryFeedback(.success, trigger: readyFeedback)
+        .sheet(isPresented: $showsMyFilms) {
+            MyExportsSheet()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+        }
         .sheet(item: $sharePayload) { payload in
             MP4ShareController(payload: payload) {
                 sharePayload = nil
@@ -1372,8 +1414,8 @@ struct FilmReadyScreen: View {
             isPresented: $showsLeaveWithoutSaving,
             titleVisibility: .visible
         ) {
-            Button("Save video to Photos") { saveToPhotos() }
-            Button("Create 7-day link") { createShareLink() }
+            Button("Save to Photos") { saveToPhotos() }
+            Button("Get 7-day link") { createShareLink() }
             Button("Leave without keeping", role: .destructive) { model.restart() }
             Button("Stay here") { }
         } message: {
@@ -1533,20 +1575,12 @@ struct CleanupScreen: View {
                         model.cleanupShowsGrid = true
                     }
                     .buttonStyle(GlassButtonStyle())
-                } else {
-                    Button("Done") {
-                        model.restart()
-                    }
-                    .buttonStyle(GlassButtonStyle())
                 }
 
-                Button("Not now") {
+                Button("Back to all memories") {
                     model.restart()
                 }
-                .font(TR.ui(15, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.56))
-                .buttonStyle(.plain)
-                .padding(.vertical, 10)
+                .buttonStyle(GlassButtonStyle())
             }
             .padding(.top, 6)
 
@@ -1830,7 +1864,7 @@ struct MyExportsSheet: View {
                 WarmBackground(variant: .trips)
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("MY EXPORTS")
+                        Text("MY FILMS")
                             .font(TR.mono(10, weight: .semibold))
                             .tracking(1.5)
                             .foregroundStyle(TR.accent)
@@ -1841,7 +1875,7 @@ struct MyExportsSheet: View {
                             .foregroundStyle(.white.opacity(0.58))
                             .lineSpacing(3)
                         if model.myExports.isEmpty {
-                            Text("No finished films right now.")
+                            Text("No films yet. When you make one, it waits here for seven days.")
                                 .font(TR.ui(14))
                                 .foregroundStyle(.white.opacity(0.5))
                                 .padding(.top, 24)
