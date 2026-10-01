@@ -113,3 +113,30 @@ Severity: **High** = people get stuck or misled. **Medium** = slows people down 
 - Run each screen at the largest accessibility text size and with VoiceOver.
 - Time five first-time users: open the app → ready film. Note where they pause.
 - Ask them where they would go next on the Ready screen, without hints.
+
+
+## Status after the first implementation pass
+
+Done (commits `f2cb5c0` and the one after it):
+- X1 Dynamic Type: `TR.ui` and `TR.mono` now map to system text styles (capped at accessibility size 1 at the app root). Checked in the simulator at the default and largest accessibility-1 size on the trips list, ready screen and Film Studio.
+- X2 12 pt floor at the default size.
+- X3 About 150 caption styles raised to at least 72% white.
+- X4 Back button 44 pt; 20 other icon buttons now have a 44 pt hit area.
+- X5 Plain-text buttons on the main path (earlier commit); Rendering "Cancel" is now "Cancel export" in an outlined button.
+- X6 Ready screen has a single labelled exit ("All memories"); the app-wide round back button is hidden there.
+- Ready screen: after saving, the button reads "Saved · Open Photos" and opens Photos instead of looking disabled.
+- Story clue chips: 12 pt, 44 pt high.
+
+Checked and found already fine (the first draft of this audit overstated them):
+- Story clue already has suggestion chips.
+- AI comparison already has explicit buttons ("This one feels right", "Keep the First Cut").
+- Rendering already says you can leave the app.
+- No icon-only buttons without a label were found by a code scan (VoiceOver itself not yet tested).
+- Film Studio's toolbar already shows icon and word.
+
+Not done, needs a decision or real data:
+- Building screen Cancel (the build takes seconds).
+- Cleanup "space freed" figure.
+- Pull-to-refresh "last updated" time.
+- Terminology sweep (memory / film / story) across all copy.
+- Anything needing a physical device: VoiceOver, AX3+ sizes, timing with first-time users.

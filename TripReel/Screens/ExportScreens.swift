@@ -875,6 +875,8 @@ struct PaywallScreen: View {
                         .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(TR.keep)
                         .frame(width: 40, height: 40)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                         .background(TR.keep.opacity(0.13), in: Circle())
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -1149,12 +1151,11 @@ struct RenderingScreen: View {
                     .padding(.horizontal, 48)
                     .padding(.top, 18)
 
-                Button("Cancel") {
+                Button("Cancel export") {
                     model.cancelRender()
                 }
-                .font(TR.ui(14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.72))
-                .buttonStyle(.plain)
+                .buttonStyle(GlassButtonStyle())
+                .padding(.horizontal, 64)
                 .padding(.top, 26)
             }
         }
@@ -1260,16 +1261,20 @@ struct FilmReadyScreen: View {
                     saveAndLinkStatus
 
                     Button {
-                        saveToPhotos()
+                        if model.exportSaveMessage == nil {
+                            saveToPhotos()
+                        } else if let photos = URL(string: "photos-redirect://") {
+                            UIApplication.shared.open(photos)
+                        }
                     } label: {
                         Label(
-                            model.exportSaveMessage == nil ? "Save to Photos" : "Saved to Photos",
+                            model.exportSaveMessage == nil ? "Save to Photos" : "Saved · Open Photos",
                             systemImage: model.exportSaveMessage == nil ? "square.and.arrow.down" : "checkmark.circle.fill"
                         )
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(CreamButtonStyle())
-                    .disabled(model.exportedVideoURL == nil || model.isSavingExport || model.exportSaveMessage != nil)
+                    .disabled(model.exportedVideoURL == nil || model.isSavingExport)
                     .accessibilityIdentifier("save-film")
 
                     HStack(spacing: 10) {

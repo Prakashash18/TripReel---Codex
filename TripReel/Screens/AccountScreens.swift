@@ -143,6 +143,8 @@ struct AccountCenterView: View {
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(TR.keep)
                         .frame(width: 38, height: 38)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                         .background(TR.keep.opacity(0.12), in: Circle())
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Monthly full exports")
@@ -419,6 +421,8 @@ private struct SharedMemoryRow: View {
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(.black.opacity(0.8))
                         .frame(width: 38, height: 38)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                         .background(memory.isPaid ? TR.accent : TR.keep, in: Circle())
 
                     VStack(alignment: .leading, spacing: 4) {

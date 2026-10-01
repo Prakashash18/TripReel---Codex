@@ -93,7 +93,7 @@ struct RootView: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(TR.cream)
-                        .frame(width: 42, height: 42)
+                        .frame(width: 44, height: 44)
                         .background(.black.opacity(0.58))
                         .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
                         .clipShape(Circle())

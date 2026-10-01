@@ -231,6 +231,8 @@ struct TripsScreen: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(account.isSignedIn ? TR.accent : TR.cream)
                     .frame(width: 42, height: 42)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
                     .background(.black.opacity(0.42), in: Circle())
                     .overlay(Circle().stroke(.white.opacity(0.16), lineWidth: 1))
             }
@@ -503,10 +505,10 @@ struct StoryClueScreen: View {
                     HStack(spacing: 8) {
                         ForEach(model.aiCutStoryContextSuggestions, id: \.self) { suggestion in
                             Button(suggestion) { model.storyClue = suggestion }
-                                .font(TR.ui(11, weight: .medium))
-                                .foregroundStyle(model.storyClue == suggestion ? TR.ink : TR.cream.opacity(0.78))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
+                                .font(TR.ui(12, weight: .medium))
+                                .foregroundStyle(model.storyClue == suggestion ? TR.ink : TR.cream.opacity(0.85))
+                                .padding(.horizontal, 14)
+                                .frame(minHeight: 44)
                                 .background(model.storyClue == suggestion ? TR.accent : .white.opacity(0.09), in: Capsule())
                         }
                     }

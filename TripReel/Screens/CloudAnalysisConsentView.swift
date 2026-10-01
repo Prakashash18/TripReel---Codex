@@ -71,6 +71,8 @@ struct CloudAnalysisConsentView: View {
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(.white.opacity(0.78))
                     .frame(width: 36, height: 36)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
                     .background(.white.opacity(0.09))
                     .clipShape(Circle())
             }

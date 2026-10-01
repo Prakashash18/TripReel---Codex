@@ -364,6 +364,8 @@ struct FirstWatchScreen: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(TR.cream)
                 .frame(width: 42, height: 42)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
                 .background(.black.opacity(0.58))
                 .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
                 .clipShape(Circle())
@@ -1971,6 +1973,8 @@ private struct AIComparisonDetailPage: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(TR.accent)
                     .frame(width: 34, height: 34)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
                     .background(TR.accent.opacity(0.10))
                     .clipShape(Circle())
                 MetadataText(text: eyebrow, color: TR.accent)
@@ -2292,6 +2296,8 @@ private struct AIVideoBenefitPage: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(TR.accent)
                 .frame(width: 42, height: 42)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
                 .background(TR.accent.opacity(0.10))
                 .clipShape(Circle())
             VStack(alignment: .leading, spacing: 6) {
@@ -3799,6 +3805,8 @@ private struct FullFilmPreview: View {
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(TR.cream)
                 .frame(width: 38, height: 38)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
                 .background(.black.opacity(0.46))
                 .overlay(Circle().stroke(.white.opacity(0.20), lineWidth: 1))
                 .clipShape(Circle())
@@ -4026,6 +4034,8 @@ private struct PhotoEditorSheet: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(TR.keep)
                 .frame(width: 34, height: 34)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
                 .background(TR.keep.opacity(0.12))
                 .clipShape(Circle())
             VStack(alignment: .leading, spacing: 2) {
@@ -4328,6 +4338,8 @@ private struct FilmStyleSheet: View {
                     .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(selected ? TR.accent : .white.opacity(0.58))
                     .frame(width: 34, height: 34)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
                     .background(selected ? TR.accent.opacity(0.12) : .white.opacity(0.045))
                     .clipShape(Circle())
 
@@ -4790,6 +4802,8 @@ private struct MusicSheet: View {
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(TR.ink)
                     .frame(width: 36, height: 36)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
                     .background(track.tint)
                     .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
 
@@ -4844,6 +4858,8 @@ private struct MusicSheet: View {
                 HStack(spacing: 12) {
                     Image(systemName: "wand.and.stars")
                         .frame(width: 34, height: 34)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                         .background(TR.accent.opacity(0.16))
                         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                     VStack(alignment: .leading, spacing: 3) {
@@ -4878,6 +4894,8 @@ private struct MusicSheet: View {
                 HStack(spacing: 12) {
                     Image(systemName: "speaker.slash")
                         .frame(width: 34, height: 34)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                         .background(.white.opacity(0.07))
                         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                     Text("No atmosphere")
@@ -4915,6 +4933,8 @@ private struct MusicSheet: View {
                 Image(systemName: atmosphere.symbol)
                     .font(.system(size: 14, weight: .medium))
                     .frame(width: 34, height: 34)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
                     .background(TR.keep.opacity(0.14))
                     .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 VStack(alignment: .leading, spacing: 3) {
