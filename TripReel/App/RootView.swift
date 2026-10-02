@@ -1,7 +1,14 @@
 import SwiftUI
+import StoreKit
 
 struct RootView: View {
     @EnvironmentObject private var model: TripReelModel
+    @EnvironmentObject private var purchases: RevenueCatPurchaseService
+    @EnvironmentObject private var account: MemoryAccountService
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.requestReview) private var requestReview
+    @StateObject private var engagement = MemoriesEngagement.shared
+    @AppStorage(MemoriesAnalytics.preferenceKey) private var analyticsEnabled = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsUnsavedExportWarning = false
     @State private var createShareLinkRequest = 0
@@ -56,6 +63,35 @@ struct RootView: View {
             case .cleanup:
                 CleanupScreen()
             }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let tip = engagement.tip, !engagementBlocked, scenePhase == .active {
+                HStack(alignment: .top, spacing: 12) {
+                    Text(tip.text)
+                        .font(TR.ui(13))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button { engagement.dismissTip() } label: {
+                        Image(systemName: "xmark").frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Dismiss tip")
+                }
+                .padding(14)
+                .foregroundStyle(TR.cream)
+                .background(TR.sheet)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .padding(.horizontal, 16)
+                .accessibilityIdentifier("memory-help-tip")
+            }
+        }
+        .onChange(of: model.screen, initial: true) { _, screen in
+            engagement.screenChanged(screen)
+        }
+        .task(id: engagementContext) {
+            engagement.updateMessageSafety(screen: model.screen, isActive: scenePhase == .active, blocked: engagementBlocked)
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            guard !Task.isCancelled else { return }
+            engagement.offerTip()
+            if engagement.saveRevision > 0 { engagement.requestReviewIfEligible { requestReview() } }
         }
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .id(model.screen.rawValue)
@@ -185,6 +221,16 @@ struct RootView: View {
             }
         }
         .animation(reduceMotion ? .easeInOut(duration: 0.16) : TRMotion.overlay, value: model.isAnalyzingPhotos)
+    }
+
+    private var engagementBlocked: Bool {
+        model.isCloudAnalysisConsentPresented || model.isSmartSelectionReviewPresented ||
+        model.isAnalyzingPhotos || model.isSavingExport || purchases.isPurchasing || account.isBusy ||
+        model.libraryErrorMessage != nil || model.exportErrorMessage != nil || showsUnsavedExportWarning
+    }
+
+    private var engagementContext: String {
+        "\(model.screen.rawValue)-\(scenePhase)-\(engagementBlocked)-\(analyticsEnabled)-\(engagement.saveRevision)"
     }
 
     private func navigateBackWithSaveReminder() {

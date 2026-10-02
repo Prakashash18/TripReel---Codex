@@ -150,13 +150,18 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject {
     @discardableResult
     func purchase(_ package: Package, unlockingStoryID storyID: String? = nil) async -> Bool {
         guard isConfigured, !isPurchasing else { return false }
+        MemoriesEngagement.shared.record(.purchaseStarted)
         isPurchasing = true
         message = nil
         defer { isPurchasing = false }
 
         do {
             let result = try await Purchases.shared.purchase(package: package)
-            if result.userCancelled { return false }
+            if result.userCancelled {
+                MemoriesEngagement.shared.record(.purchaseCancelled)
+                return false
+            }
+            MemoriesEngagement.shared.record(.purchaseCompleted)
             if isStoryPass(package), let storyID {
                 unlockStory(storyID)
                 return true
@@ -164,6 +169,7 @@ final class RevenueCatPurchaseService: NSObject, ObservableObject {
             message = "The Story Pass purchase completed, but this story could not be unlocked. Please contact support."
             return false
         } catch {
+            MemoriesEngagement.shared.record(.purchaseFailed)
             message = Self.userFacingMessage(for: error, action: .purchasing)
             return false
         }

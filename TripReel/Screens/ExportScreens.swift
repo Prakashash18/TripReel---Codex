@@ -1530,6 +1530,7 @@ struct FilmReadyScreen: View {
 
     private func shareFilm() {
         guard let url = model.exportedVideoURL else { return }
+        MemoriesEngagement.shared.record(.shareOpened)
         sharePayload = MP4SharePayload(url: url, title: "\(model.tripShortPlace) · Memories")
     }
 
