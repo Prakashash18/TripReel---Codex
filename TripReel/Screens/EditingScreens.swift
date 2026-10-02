@@ -3736,15 +3736,19 @@ private struct FullFilmPreview: View {
                 )
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
+            }
 
-                VStack(spacing: 0) {
-                    HStack {
-                        previewControl(symbol: "xmark", label: "Close preview") {
-                            dismiss()
-                        }
+            // Keep the exit available even after the playback controls fade.
+            VStack(spacing: 0) {
+                HStack {
+                    previewControl(symbol: "xmark", label: "Close preview") {
+                        dismiss()
+                    }
+                    .accessibilityIdentifier("close-film-preview")
 
-                        Spacer()
+                    Spacer()
 
+                    if controlsVisible {
                         previewControl(
                             symbol: soundtrack.isPlaying ? "speaker.wave.2.fill" : "speaker.slash.fill",
                             label: soundtrack.isPlaying ? "Pause soundtrack" : "Play soundtrack"
@@ -3754,9 +3758,11 @@ private struct FullFilmPreview: View {
                         .disabled(model.selectedTrack == nil)
                         .opacity(model.selectedTrack == nil ? 0.46 : 1)
                     }
+                }
 
-                    Spacer()
+                Spacer()
 
+                if controlsVisible {
                     VStack(spacing: 6) {
                         MetadataText(text: "FULL FILM PREVIEW", color: .white.opacity(0.66))
                         Text("\(model.keptMediaSummary) · \(model.filmDurationText)\(trackSuffix)")
@@ -3765,13 +3771,14 @@ private struct FullFilmPreview: View {
                         Text("Tap anywhere to hide controls")
                             .font(TR.ui(10))
                             .foregroundStyle(.white.opacity(0.72))
+                            .accessibilityIdentifier("film-preview-controls-hint")
                     }
                     .padding(.bottom, 12)
+                    .transition(.opacity)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 10)
-                .transition(.opacity)
             }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
         }
         .task(id: controlsVisible) {
             guard controlsVisible, !voiceOverEnabled else { return }
@@ -3783,6 +3790,7 @@ private struct FullFilmPreview: View {
         }
         .onDisappear { soundtrack.stop() }
         .statusBarHidden(true)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("full-film-preview")
     }
 
