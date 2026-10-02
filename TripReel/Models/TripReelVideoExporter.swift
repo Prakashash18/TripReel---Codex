@@ -107,8 +107,9 @@ enum TripReelVideoExportError: LocalizedError, Sendable {
     }
 }
 
-/// A separate queue requests AVFoundation cancellation even when a synchronous
-/// decoder read blocks the task. The deadline measures inactivity, not film length.
+/// A separate queue requests AVFoundation cancellation without blocking the UI.
+/// Resource access serializes teardown with in-flight reads and frame appends.
+/// The deadline measures inactivity, not film length.
 final class ExportProgressWatchdog: @unchecked Sendable {
     private let lock = NSLock()
     private let timeout: TimeInterval
@@ -619,12 +620,39 @@ struct PreparedReelMedia: @unchecked Sendable {
     let videoAsset: AVAsset?
 }
 
+/// AVFoundation forbids cancelling a reader during copyNextSampleBuffer, or a
+/// writer during append. Keep teardown exclusive and wait for it before cleanup
+/// returns, so a retry cannot race the previous attempt's resource destruction.
+final class ExportResourceAccess: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    func perform<T>(_ operation: () throws -> T) throws -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !cancelled else { throw CancellationError() }
+        return try operation()
+    }
+
+    func cancel(_ operation: () -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !cancelled else { return }
+        cancelled = true
+        operation()
+    }
+}
+
 /// Only cancellation crosses the rendering task boundary. All writer setup,
 /// frame appends and finalization remain owned by the single rendering task.
 private final class VideoWriterCancellation: @unchecked Sendable {
     private let writer: AVAssetWriter
+    private let access = ExportResourceAccess()
     init(_ writer: AVAssetWriter) { self.writer = writer }
-    func cancel() { writer.cancelWriting() }
+    func perform<T>(_ operation: () throws -> T) throws -> T {
+        try access.perform(operation)
+    }
+    func cancel() { access.cancel { writer.cancelWriting() } }
 }
 
 /// Reads a clip in presentation order. `AVAssetImageGenerator` is excellent
@@ -634,6 +662,7 @@ private final class VideoWriterCancellation: @unchecked Sendable {
 private final class SequentialVideoFrameReader: @unchecked Sendable {
     private let reader: AVAssetReader
     private let output: AVAssetReaderVideoCompositionOutput
+    private let access = ExportResourceAccess()
 
     init(
         asset: AVAsset,
@@ -683,27 +712,29 @@ private final class SequentialVideoFrameReader: @unchecked Sendable {
     }
 
     func nextImage() throws -> CGImage? {
-        guard let sample = output.copyNextSampleBuffer() else {
-            if reader.status == .failed {
-                throw TripReelVideoExportError.encodingFailed(
-                    reader.error?.localizedDescription ?? "A source clip stopped decoding"
-                )
+        try access.perform {
+            guard let sample = output.copyNextSampleBuffer() else {
+                if reader.status == .failed {
+                    throw TripReelVideoExportError.encodingFailed(
+                        reader.error?.localizedDescription ?? "A source clip stopped decoding"
+                    )
+                }
+                return nil
             }
-            return nil
+            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sample) else {
+                throw TripReelVideoExportError.cannotCreateFrame
+            }
+            var image: CGImage?
+            let status = VTCreateCGImageFromCVPixelBuffer(pixelBuffer, options: nil, imageOut: &image)
+            guard status == noErr, let image else {
+                throw TripReelVideoExportError.cannotCreateFrame
+            }
+            return image
         }
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sample) else {
-            throw TripReelVideoExportError.cannotCreateFrame
-        }
-        var image: CGImage?
-        let status = VTCreateCGImageFromCVPixelBuffer(pixelBuffer, options: nil, imageOut: &image)
-        guard status == noErr, let image else {
-            throw TripReelVideoExportError.cannotCreateFrame
-        }
-        return image
     }
 
-    func cancel() { reader.cancelReading() }
-    deinit { reader.cancelReading() }
+    func cancel() { access.cancel { reader.cancelReading() } }
+    deinit { cancel() }
 }
 
 /// Renders the same mixed photo, video, and title timeline used by the SwiftUI
@@ -1172,7 +1203,7 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         let writerCancellation = VideoWriterCancellation(writer)
         var writerCompleted = false
         defer {
-            if !writerCompleted { writer.cancelWriting() }
+            if !writerCompleted { writerCancellation.cancel() }
         }
         let bitRate = request.quality == .hd ? 9_000_000 : 4_000_000
         let settings: [String: Any] = [
@@ -1309,7 +1340,10 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
                     )
                     let presentationTime = CMTime(value: CMTimeValue(segmentFrames), timescale: frameRate)
                     try watchdog.check()
-                    guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
+                    let appended = try writerCancellation.perform {
+                        adaptor.append(pixelBuffer, withPresentationTime: presentationTime)
+                    }
+                    guard appended else {
                         throw TripReelVideoExportError.encodingFailed(
                             writer.error?.localizedDescription ?? "A frame could not be written"
                         )
@@ -1327,9 +1361,11 @@ final class TripReelVideoExporter: TripReelVideoExporting, @unchecked Sendable {
         }
         onFrame(segmentFrames)
 
-        input.markAsFinished()
         try watchdog.checkpoint("finalize video piece") { writerCancellation.cancel() }
-        writer.finishWriting { }
+        try writerCancellation.perform {
+            input.markAsFinished()
+            writer.finishWriting { }
+        }
         while writer.status == .writing {
             try watchdog.check()
             try await Task.sleep(nanoseconds: 20_000_000)

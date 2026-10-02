@@ -158,7 +158,16 @@ final class TripReelFlowUITests: XCTestCase {
 
         screen("full-preview-button").tap()
         XCTAssertTrue(screen("full-film-preview").waitForExistence(timeout: 3))
-        app.buttons["Close preview"].tap()
+        // The exit must remain available after the other controls auto-hide.
+        let hiddenControls = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: screen("film-preview-controls-hint")
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [hiddenControls], timeout: 8), .completed)
+        let closePreview = app.buttons["close-film-preview"]
+        XCTAssertTrue(closePreview.waitForExistence(timeout: 3))
+        XCTAssertTrue(closePreview.isHittable)
+        closePreview.tap()
 
         XCTAssertTrue(screen("second-watch-screen").waitForExistence(timeout: 3))
         screen("studio-tool-clips").tap()

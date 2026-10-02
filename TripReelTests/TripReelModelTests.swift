@@ -24,6 +24,77 @@ final class TripReelModelTests: XCTestCase {
         try await super.tearDown()
     }
 
+    func testResourceCancellationWaitsForTheCurrentFrameAndRunsOnlyOnce() async throws {
+        let access = ExportResourceAccess()
+        let frameStarted = expectation(description: "Frame is being processed")
+        let cancellationRequested = expectation(description: "Cancellation requested on another thread")
+        let prematureCancellation = expectation(description: "Must not cancel during a frame")
+        prematureCancellation.isInverted = true
+        let releaseFrame = DispatchSemaphore(value: 0)
+        let framesFinished = Counter()
+        let cancellations = Counter()
+        let frame = Task.detached {
+            try access.perform {
+                frameStarted.fulfill()
+                releaseFrame.wait()
+                framesFinished.next()
+            }
+        }
+        defer { releaseFrame.signal() }
+        await fulfillment(of: [frameStarted], timeout: 5)
+        let cancellation = Task.detached {
+            cancellationRequested.fulfill()
+            access.cancel {
+                if framesFinished.value == 0 { prematureCancellation.fulfill() }
+                cancellations.next()
+            }
+        }
+        await fulfillment(of: [cancellationRequested], timeout: 5)
+        await fulfillment(of: [prematureCancellation], timeout: 0.1)
+        releaseFrame.signal()
+        try await frame.value
+        await cancellation.value
+
+        // Deferred cleanup and a late watchdog callback must not tear down twice.
+        access.cancel { cancellations.next() }
+        XCTAssertEqual(cancellations.value, 1)
+        XCTAssertThrowsError(try access.perform { XCTFail("Read or append after cancellation") }) {
+            XCTAssertTrue($0 is CancellationError)
+        }
+    }
+
+    func testConcurrentCancellationWaitsForTeardownBeforeReturning() async {
+        let access = ExportResourceAccess()
+        let teardownStarted = expectation(description: "AVFoundation teardown started")
+        let cleanupRequested = expectation(description: "Deferred cleanup requested")
+        let earlyReturn = expectation(description: "Cleanup must wait for teardown")
+        earlyReturn.isInverted = true
+        let releaseTeardown = DispatchSemaphore(value: 0)
+        let finished = Counter()
+        let cancellations = Counter()
+        let watchdog = Task.detached {
+            access.cancel {
+                cancellations.next()
+                teardownStarted.fulfill()
+                releaseTeardown.wait()
+                finished.next()
+            }
+        }
+        defer { releaseTeardown.signal() }
+        await fulfillment(of: [teardownStarted], timeout: 5)
+        let cleanup = Task.detached {
+            cleanupRequested.fulfill()
+            access.cancel { cancellations.next() }
+            if finished.value == 0 { earlyReturn.fulfill() }
+        }
+        await fulfillment(of: [cleanupRequested], timeout: 5)
+        await fulfillment(of: [earlyReturn], timeout: 0.1)
+        releaseTeardown.signal()
+        await watchdog.value
+        await cleanup.value
+        XCTAssertEqual(cancellations.value, 1)
+    }
+
     func testExportWatchdogTimerStopsBlockedWork() async throws {
         let aborted = expectation(description: "Independent watchdog queue fires")
         let watchdog = ExportProgressWatchdog(timeout: 0.01)
@@ -97,7 +168,9 @@ final class TripReelModelTests: XCTestCase {
                                       secondsPerPhoto: 2, look: .clean, motionIntensity: .gentle,
                                       quality: .hd, soundtrackURL: nil, atmosphereURL: nil)
         }
-        let exporter = TripReelVideoExporter()
+        let exporter = TripReelVideoExporter(
+            checkpoints: RenderCheckpointStore(baseDirectory: directory.appendingPathComponent("checkpoints"))
+        )
         let sourceRequest = request([photo("source-1"), photo("source-2")])
         let sourceURL = try await Task.detached {
             try await exporter.export(sourceRequest) { _ in }
@@ -192,7 +265,9 @@ final class TripReelModelTests: XCTestCase {
             (.standard, CGSize(width: 720, height: 1_280)),
             (.hd, CGSize(width: 1_080, height: 1_920))
         ]
-        let exporter = TripReelVideoExporter()
+        let exporter = TripReelVideoExporter(
+            checkpoints: RenderCheckpointStore(baseDirectory: directory.appendingPathComponent("checkpoints"))
+        )
         for (quality, expectedSize) in expectations {
             let request = TripReelVideoExportRequest(
                 photos: photos, titleCards: [], textOverlays: [], secondsPerPhoto: 2,
@@ -313,7 +388,9 @@ final class TripReelModelTests: XCTestCase {
             photos: photos, titleCards: [], textOverlays: [], secondsPerPhoto: 2,
             look: .clean, motionIntensity: .gentle, quality: .hd,
             soundtrackURL: soundtrack, atmosphereURL: atmosphere)
-        let exporter = TripReelVideoExporter()
+        let exporter = TripReelVideoExporter(
+            checkpoints: RenderCheckpointStore(baseDirectory: directory.appendingPathComponent("checkpoints"))
+        )
         let started = Date()
         let phases = Counter()
         let outputURL = try await Task.detached {
@@ -404,7 +481,10 @@ final class TripReelModelTests: XCTestCase {
                       isSimilar: false, pixelWidth: 600, pixelHeight: 900,
                       frameStyle: .fullBleed, motionStyle: .zoomIn, durationSeconds: 2)
         }
-        let exporter = TripReelVideoExporter(prefetchNetworkPolicy: { true })
+        let exporter = TripReelVideoExporter(
+            prefetchNetworkPolicy: { true },
+            checkpoints: RenderCheckpointStore(baseDirectory: directory.appendingPathComponent("checkpoints"))
+        )
         defer { exporter.discardPrefetchedOriginals() }
 
         exporter.prefetchOriginals(for: photos)
@@ -553,11 +633,17 @@ final class TripReelModelTests: XCTestCase {
             generator.requestedTimeToleranceAfter = .zero
             generator.appliesPreferredTrackTransform = true
         }
-        for seconds in [9.9, 10.0, 10.1, 19.95, 20.05, 30.0, 40.0] {
-            let time = CMTime(seconds: seconds, preferredTimescale: 600)
-            let a = try generatorA.copyCGImage(at: time, actualTime: nil)
-            let b = try generatorB.copyCGImage(at: time, actualTime: nil)
-            XCTAssertLessThan(meanDifference(a, b), 4.0, "Resumed film differs from the uninterrupted one at \(seconds)s")
+        // Zero-tolerance reads must request actual 30 fps frame timestamps,
+        // including the frames immediately before and after a segment join.
+        // Await decoding so a loaded simulator does not block the main actor.
+        for frame: Int64 in [297, 300, 303, 599, 601, 900, 1200] {
+            let time = CMTime(value: frame, timescale: 30)
+            let a = try await generatorA.image(at: time)
+            let b = try await generatorB.image(at: time)
+            XCTAssertEqual(a.actualTime.seconds, time.seconds, accuracy: 0.001)
+            XCTAssertEqual(b.actualTime.seconds, time.seconds, accuracy: 0.001)
+            XCTAssertLessThan(meanDifference(a.image, b.image), 4.0,
+                              "Resumed film differs from the uninterrupted one at frame \(frame)")
         }
     }
 
