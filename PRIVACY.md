@@ -1,6 +1,6 @@
 # Memories: Create Stories Privacy Policy
 
-Effective September 13, 2026
+Effective October 2, 2026
 
 Memories: Create Stories ("Memories") turns the photos that matter into a story. This policy explains what the app processes and what happens when you optionally enable cloud photo intelligence.
 
@@ -17,6 +17,10 @@ Photos or videos selected without broad library permission are copied temporaril
 ## Finished films kept on your iPhone
 
 A finished film is kept in Memories' private storage on your iPhone, in **My exports**, so you can save or share it again: a full 1080p film for up to seven days and a free preview for up to 24 hours. Nothing is uploaded for this. Memories keeps only your five newest films, you can delete any of them yourself, and expired films are removed when the app next opens. Saving to Photos is the only permanent copy Memories offers; the copy in My exports is temporary.
+
+## Service availability and saving your videos
+
+Memories is an independently funded project with a limited budget for AI and hosting. The project or its online features may be paused or discontinued if ongoing costs become unsustainable. Shared videos and their links are temporary, available for at most seven days, and may become unavailable sooner if the service closes. Save any finished film you want to keep to Photos or another location you control. Service closure does not remove your original photos and videos or copies you have already saved outside Memories. Memories is not a backup service. The seven-day limit applies to shared videos and links, not to all account or analytics data.
 
 ## On-device visual intelligence
 
@@ -45,6 +49,12 @@ A short, watermarked trailer can be exported without a purchase. A Story Pass un
 ## Identity and tracking
 
 Memories sends per-request placeholder IDs instead of Apple Photos identifiers. Cloud images are not used by Memories for advertising or cross-app tracking. Cloud AI requests are not linked to a Memories user profile.
+
+## App analytics
+
+Memories uses Google Analytics for Firebase to measure first opens, sessions, basic app usage, and campaign performance. Google receives an app-instance identifier, app and device information, and approximate location derived from network information. The SDK can also measure in-app purchase events, including product identifiers and prices. Memories does not send your photos, videos, story titles, precise location, email, or Memories account ID to Analytics. Advertising ID and vendor ID collection, automatic screen reporting, and personalized advertising signals are disabled. You can turn off future collection using Share app analytics in the app’s Privacy Policy screen. Turning it off resets the local analytics identifier but does not erase data already collected. With app analytics enabled, Memories also uses Firebase In-App Messaging and Remote Config to provide relevant tips and test which guidance helps people finish and save films. Firebase processes an installation identifier, app/device metadata, feature-use events, and message interactions for this purpose. Event details use fixed categories, never your story text or media. Turning off Share app analytics also stops new messaging collection and Remote Config fetches and hides optional tips. Existing in-flight requests may finish. Rating requests use Apple’s system prompt and local save counts; Memories cannot see whether you submit a rating.
+
+See [Google’s privacy policy](https://policies.google.com/privacy).
 
 ## Your choices
 

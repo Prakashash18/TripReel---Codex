@@ -3006,6 +3006,7 @@ final class TripReelModel: ObservableObject {
     }
 
     func setTitleText(_ text: String, for kind: TitleCardKind) {
+        MemoriesEngagement.shared.used(.title)
         var draft = titleDraft(for: kind)
         draft.title = String(text.prefix(80))
         titleDrafts[kind] = draft
@@ -3018,6 +3019,7 @@ final class TripReelModel: ObservableObject {
     }
 
     func setTitleStyle(_ style: MontageTitleStyle, for kind: TitleCardKind) {
+        MemoriesEngagement.shared.used(.titleStyle)
         var draft = titleDraft(for: kind)
         draft.style = style
         titleDrafts[kind] = draft
@@ -3845,6 +3847,7 @@ final class TripReelModel: ObservableObject {
                 ) else {
                     throw CloudPhotoAnalysisError.invalidBaseline
                 }
+                MemoriesEngagement.shared.record(.aiStarted)
                 let plan = try await self.cloudPhotoAnalysis.createEditPlan(
                     direction: direction,
                     storyContext: self.aiCutStoryContext,
@@ -3862,6 +3865,7 @@ final class TripReelModel: ObservableObject {
                     candidatePhotosByLocalID: allPhotosByID
                 )
                 guard self.aiCutGeneration == generation, !Task.isCancelled else { return }
+                MemoriesEngagement.shared.record(.aiCompleted)
                 self.aiCutSnapshot = snapshot
                 self.aiCutSummary = plan.summary
                 self.aiCutRecommendations = Self.recommendations(for: plan)
@@ -3875,12 +3879,14 @@ final class TripReelModel: ObservableObject {
             } catch {
                 guard self.aiCutGeneration == generation else { return }
                 self.aiCutTask = nil
+                MemoriesEngagement.shared.record(.aiFailed)
                 self.aiCutFailure = .from(error)
             }
         }
     }
 
     func cancelAICut() {
+        if screen == .aiProcessing { MemoriesEngagement.shared.record(.aiCancelled) }
         let returnScreen: AppScreen = aiCutSnapshot == nil ? .firstCutOptions : .aiComparison
         aiCutGeneration = UUID()
         aiCutTask?.cancel()
@@ -4009,6 +4015,7 @@ final class TripReelModel: ObservableObject {
                 }
                 guard self.aiVideoGenerationID == generation, !Task.isCancelled else { return }
                 self.aiVideoProgress = 0.08
+                MemoriesEngagement.shared.record(.aiVideoStarted)
                 let rawURL = try await generationService.generate(
                     AIVideoGenerationInput(
                         jpegFrames: preparedFrames.map(\.jpegData),
@@ -4051,6 +4058,7 @@ final class TripReelModel: ObservableObject {
                 if persistedURL != finishedURL {
                     try? FileManager.default.removeItem(at: finishedURL)
                 }
+                MemoriesEngagement.shared.record(.aiVideoCompleted)
                 self.aiVideoURL = persistedURL
                 self.aiVideoSaveMessage = "Saved in Memories on this iPhone"
                 self.aiVideoProgress = 1
@@ -4061,6 +4069,7 @@ final class TripReelModel: ObservableObject {
             } catch {
                 guard self.aiVideoGenerationID == generation else { return }
                 self.aiVideoTask = nil
+                MemoriesEngagement.shared.record(.aiVideoFailed)
                 self.aiVideoFailureMessage = (error as? LocalizedError)?.errorDescription
                     ?? "The AI video could not be finished. Your existing cut is unchanged."
                 self.go(.aiVideoIntro, direction: .backward)
@@ -4069,6 +4078,7 @@ final class TripReelModel: ObservableObject {
     }
 
     func cancelAIVideoGeneration() {
+        MemoriesEngagement.shared.record(.aiVideoCancelled)
         aiVideoGenerationID = UUID()
         aiVideoTask?.cancel()
         aiVideoTask = nil
@@ -4172,6 +4182,7 @@ final class TripReelModel: ObservableObject {
     }
 
     func exportCut(_ source: TripCutSource) {
+        if source == .aiCut { MemoriesEngagement.shared.record(.aiAccepted) }
         guard let snapshot = editSnapshot(for: source) else { return }
         applyEditSnapshot(snapshot, source: source)
         exportReturnScreen = .aiComparison
@@ -4179,6 +4190,7 @@ final class TripReelModel: ObservableObject {
     }
 
     func keepFirstCut() {
+        if aiCutSnapshot != nil { MemoriesEngagement.shared.record(.aiRejected) }
         guard let firstCutSnapshot else { return }
         applyEditSnapshot(firstCutSnapshot, source: .firstCut)
         go(.firstCutOptions, direction: .backward)
@@ -5590,6 +5602,7 @@ final class TripReelModel: ObservableObject {
 
     func startBuild(trip: Trip) {
         guard !trip.assets.isEmpty else { return }
+        if !usesDemoData { MemoriesEngagement.shared.beginStory() }
         let isNearbyTrip = nearbyEvents.contains(where: { $0.id == trip.id })
         selectedTrip = trip
         let atmosphere = MemoryAtmosphereCatalog.recommended(
@@ -5683,6 +5696,7 @@ final class TripReelModel: ObservableObject {
             self.buildCount = self.photos.count
             try? await Task.sleep(nanoseconds: 650_000_000)
             guard !Task.isCancelled else { return }
+            if !self.usesDemoData { MemoriesEngagement.shared.record(.firstCutCompleted) }
             self.go(.firstWatch)
         }
     }
@@ -5742,6 +5756,7 @@ final class TripReelModel: ObservableObject {
     /// action instantly reversible and lets the clip manager add it back.
     @discardableResult
     func setMomentIncludedInFilm(_ included: Bool, id: String) -> Bool {
+        MemoriesEngagement.shared.used(.selection)
         guard photos.contains(where: { $0.id == id }) else { return false }
 
         if included {
@@ -5776,6 +5791,7 @@ final class TripReelModel: ObservableObject {
     /// for the cleanup flow. This keeps timeline edits reversible and avoids
     /// changing which images belong to the film.
     func moveKeptPhoto(id: String, before targetID: String) {
+        MemoriesEngagement.shared.used(.reorder)
         guard id != targetID else { return }
         var reordered = keptPhotos
         guard let sourceIndex = reordered.firstIndex(where: { $0.id == id }),
@@ -5793,6 +5809,7 @@ final class TripReelModel: ObservableObject {
     }
 
     func selectTrack(_ track: MusicTrack) {
+        MemoriesEngagement.shared.used(.music)
         if track.id == "none" {
             selectedTrackID = nil
             cutToBeat = false
@@ -5807,6 +5824,7 @@ final class TripReelModel: ObservableObject {
     }
 
     func selectAtmosphere(_ atmosphere: MemoryAtmosphere) {
+        MemoriesEngagement.shared.used(.atmosphere)
         usesAutomaticAtmosphere = false
         selectedAtmosphereID = atmosphere.id
     }
@@ -5817,6 +5835,7 @@ final class TripReelModel: ObservableObject {
     }
 
     func setFrameStyle(_ frameStyle: MontageFrameStyle, forPhotoID id: String) {
+        MemoriesEngagement.shared.used(.frame)
         guard let index = photos.firstIndex(where: { $0.id == id }) else { return }
         photos[index].frameStyle = frameStyle
         photos[index].hasCustomFrameStyle = true
@@ -5826,6 +5845,7 @@ final class TripReelModel: ObservableObject {
     }
 
     func setMotionStyle(_ motionStyle: MontageMotionStyle, forPhotoID id: String) {
+        MemoriesEngagement.shared.used(.motion)
         guard let index = photos.firstIndex(where: { $0.id == id }) else { return }
         photos[index].motionStyle = motionStyle
         var edit = photoEditOverrides[id] ?? PhotoEditOverride()
@@ -5840,6 +5860,7 @@ final class TripReelModel: ObservableObject {
         forPhotoID id: String
     ) {
         guard let index = photos.firstIndex(where: { $0.id == id }) else { return }
+        MemoriesEngagement.shared.used(.crop)
         let scale = min(max(scale, 1), 3)
         let offsetX = min(max(offsetX, -1), 1)
         let offsetY = min(max(offsetY, -1), 1)
@@ -5854,6 +5875,7 @@ final class TripReelModel: ObservableObject {
     }
 
     func setPhotoDuration(_ duration: Double, forPhotoID id: String) {
+        MemoriesEngagement.shared.used(.duration)
         guard let index = photos.firstIndex(where: { $0.id == id }) else { return }
         let minimum = photos[index].isVideo ? 0.8 : 0.6
         let available = photos[index].isVideo
@@ -5867,6 +5889,7 @@ final class TripReelModel: ObservableObject {
     }
 
     func setVideoStart(_ startSeconds: Double, forPhotoID id: String) {
+        MemoriesEngagement.shared.used(.videoTrim)
         guard let index = photos.firstIndex(where: { $0.id == id }), photos[index].isVideo else {
             return
         }
@@ -5956,6 +5979,7 @@ final class TripReelModel: ObservableObject {
     }
 
     private func startRender(quality: ExportQuality, handoff: ExportHandoff, resuming: Bool = false) {
+        if !resuming && !usesDemoData { MemoriesEngagement.shared.record(.exportStarted) }
         workTask?.cancel()
         if !resuming {
             exportPausedPercent = nil
@@ -6085,6 +6109,7 @@ final class TripReelModel: ObservableObject {
                     durationSeconds: self.activeExportDurationSeconds,
                     isHD: quality == .hd
                 )
+                MemoriesEngagement.shared.record(.exportCompleted)
                 self.exportedVideoURL = receipt.fileURL
                 self.currentExportID = receipt.id
                 LocalCompletedExport.markSeen(receipt.id)
@@ -6102,6 +6127,7 @@ final class TripReelModel: ObservableObject {
             } catch {
                 background.finish(success: false)
                 guard self.exportGeneration == generation else { return }
+                MemoriesEngagement.shared.record(.exportFailed)
                 self.preferenceStore.removeObject(forKey: LocalCompletedExport.interruptedKey)
                 if let exportError = error as? TripReelVideoExportError,
                    case .photoUnavailable = exportError {
@@ -6183,6 +6209,7 @@ final class TripReelModel: ObservableObject {
     }
 
     func cancelRender() {
+        MemoriesEngagement.shared.record(.exportCancelled)
         exportGeneration = UUID()
         workTask?.cancel()
         workTask = nil
@@ -6217,16 +6244,21 @@ final class TripReelModel: ObservableObject {
     @discardableResult
     func saveExportToPhotos() async -> Bool {
         guard let exportedVideoURL, !isSavingExport else { return false }
+        let savedExportID = currentExportID
         isSavingExport = true
         exportSaveMessage = nil
         defer { isSavingExport = false }
         do {
             try await videoExporter.saveToPhotoLibrary(exportedVideoURL)
             exportSaveMessage = "Saved to Photos"
+            if !usesDemoData, let savedExportID {
+                MemoriesEngagement.shared.savedExport(id: savedExportID)
+            }
             return true
         } catch {
             exportErrorMessage = (error as? LocalizedError)?.errorDescription
                 ?? "Memories couldn't save this film to Photos."
+            MemoriesEngagement.shared.record(.saveFailed)
             return false
         }
     }
@@ -6240,6 +6272,7 @@ final class TripReelModel: ObservableObject {
     }
 
     func recordExportShareLink(_ url: URL) {
+        if exportShareLinkURL != url { MemoriesEngagement.shared.record(.shareLinkCreated) }
         exportShareLinkURL = url
     }
 

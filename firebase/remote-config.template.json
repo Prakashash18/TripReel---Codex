@@ -1,0 +1,19 @@
+{
+  "parameters": {
+    "memories_help_tip_variant": {
+      "defaultValue": {"value": "save"},
+      "description": "Allowed values: save, music, none. A/B-test save versus music; optimize save_completed. none is a no-tip control.",
+      "valueType": "STRING"
+    },
+    "memories_help_tips_enabled": {
+      "defaultValue": {"value": "true"},
+      "description": "Disable contextual tips remotely. Local analytics opt-out always overrides this.",
+      "valueType": "BOOLEAN"
+    },
+    "memories_review_requests_enabled": {
+      "defaultValue": {"value": "true"},
+      "description": "Disable automatic StoreKit review requests. Local eligibility and cooldown cannot be overridden.",
+      "valueType": "BOOLEAN"
+    }
+  }
+}

@@ -3,6 +3,7 @@ import SwiftUI
 struct TripReelPrivacyPolicyView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showsTermsOfUse = false
+    @AppStorage(MemoriesAnalytics.preferenceKey) private var analyticsEnabled = true
 
     var body: some View {
         NavigationStack {
@@ -29,6 +30,10 @@ struct TripReelPrivacyPolicyView: View {
                             "AI previews and edit plans are not intentionally persisted by Memories. A finished film is kept in the app's private storage on your iPhone, in My exports, so you can save or share it again: a full 1080p film for up to seven days and a free preview for up to 24 hours. Nothing is uploaded for this. Memories keeps only your five newest films, you can delete any of them yourself, and expired films are removed when the app next opens. If you explicitly create a share link, the finished exported video—not your photo library or original moments—is uploaded to a private Supabase Storage bucket and linked to your Memories account. A viewer receives only a short-lived playback address after presenting the unguessable share token. While signed in, you can download that linked video to Photos again before it expires. The cloud video and link expire after seven days. Saving to Photos is the only permanent copy Memories offers; the copy in My exports is temporary. OpenAI is called with store set to false. Under default API controls, OpenAI may retain API content for abuse monitoring for up to 30 days, or longer when legally or safety-required."
                         )
                         section(
+                            "Service availability and saving your videos",
+                            "Memories is an independently funded project with a limited budget for AI and hosting. The project or its online features may be paused or discontinued if ongoing costs become unsustainable. Shared videos and their links are temporary, available for at most seven days, and may become unavailable sooner if the service closes. Save any finished film you want to keep to Photos or another location you control. Service closure does not remove your original photos and videos or copies you have already saved outside Memories. Memories is not a backup service. The seven-day limit applies to shared videos and links, not to all account or analytics data."
+                        )
+                        section(
                             "Training, identity, and tracking",
                             "OpenAI states that API data is not used to train its models by default unless the API organization opts in. Memories sends temporary request identifiers instead of your Photos identifiers and does not use these images for advertising or cross-app tracking."
                         )
@@ -36,6 +41,16 @@ struct TripReelPrivacyPolicyView: View {
                             "Purchases",
                             "Apple processes payments. RevenueCat receives an anonymous app user identifier and Story Pass purchase status so Memories can unlock one full HD export. RevenueCat never receives your photos, previews, films, titles, or location data. Story Pass is a consumable whose memory unlock is retained on the purchasing device."
                         )
+                        section(
+                            "App analytics",
+                            "Memories uses Google Analytics for Firebase to measure first opens, sessions, basic app usage, and campaign performance. Google receives an app-instance identifier, app and device information, and approximate location derived from network information. The SDK can also measure in-app purchase events, including product identifiers and prices. Memories does not send your photos, videos, story titles, precise location, email, or Memories account ID to Analytics. Advertising ID and vendor ID collection, automatic screen reporting, and personalized advertising signals are disabled. You can turn off future analytics collection below; this also resets the local analytics identifier but does not erase data already collected. With app analytics enabled, Memories also uses Firebase In-App Messaging and Remote Config to provide relevant tips and test which guidance helps people finish and save films. Firebase processes an installation identifier, app/device metadata, feature-use events, and message interactions for this purpose. Event details use fixed categories, never your story text or media. Turning off Share app analytics also stops new messaging collection and Remote Config fetches and hides optional tips. Existing in-flight requests may finish. Rating requests use Apple’s system prompt and local save counts; Memories cannot see whether you submit a rating."
+                        )
+                        Toggle("Share app analytics", isOn: $analyticsEnabled)
+                            .tint(TR.accent)
+                            .onChange(of: analyticsEnabled) { _, enabled in
+                                MemoriesAnalytics.applyPreference(enabled)
+                            }
+                            .accessibilityIdentifier("analytics-collection-toggle")
                         section(
                             "Your choices",
                             "You can create, edit, save, and share a video file without an account. An account is requested only when you choose Create share link. You can remove an active link from Your shared stories before it expires. Every AI edit starts with an explicit OpenAI sharing decision. Declining sends nothing and returns to First Cut. Revoking Photos access in iOS Settings stops further library access."
@@ -49,6 +64,7 @@ struct TripReelPrivacyPolicyView: View {
                             )
                             Link("RevenueCat privacy policy", destination: URL(string: "https://www.revenuecat.com/privacy")!)
                             Link("Supabase privacy policy", destination: URL(string: "https://supabase.com/privacy")!)
+                            Link("Google privacy policy", destination: URL(string: "https://policies.google.com/privacy")!)
                             Link(
                                 "Memories support",
                                 destination: URL(string: "https://github.com/Prakashash18/TripReel---Codex/issues")!
@@ -57,7 +73,7 @@ struct TripReelPrivacyPolicyView: View {
                         .font(TR.ui(13, weight: .semibold))
                         .foregroundStyle(TR.accent)
 
-                        Text("Effective September 18, 2026")
+                        Text("Effective October 2, 2026")
                             .font(TR.mono(10))
                             .tracking(0.8)
                             .foregroundStyle(.white.opacity(0.72))
