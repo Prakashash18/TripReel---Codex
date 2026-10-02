@@ -1900,11 +1900,14 @@ private struct CleanupGrid: View {
 
 // MARK: - My exports
 
-/// Finished films kept on this iPhone for a few days. Nothing here is uploaded.
+/// Local finished films and the private links the owner has explicitly created.
 struct MyExportsSheet: View {
     @EnvironmentObject private var model: TripReelModel
+    @EnvironmentObject private var account: MemoryAccountService
     @Environment(\.dismiss) private var dismiss
     @State private var pendingDeletion: LocalCompletedExport?
+    @State private var showsAccount = false
+    @State private var isLoadingLinks = true
 
     var body: some View {
         NavigationStack {
@@ -1918,12 +1921,17 @@ struct MyExportsSheet: View {
                             .foregroundStyle(TR.accent)
                         Text("Your finished films")
                             .font(TR.display(34))
-                        Text("Kept on this iPhone so you can save or share them again. Full films stay for seven days, previews for one day. Nothing is uploaded.")
+                        Text("Save or share your finished films and manage the private links you’ve created.")
                             .font(TR.ui(13))
                             .foregroundStyle(.white.opacity(0.72))
                             .lineSpacing(3)
+                        MetadataText(text: "ON THIS IPHONE", color: TR.accent)
+                            .padding(.top, 12)
+                        Text("Full films stay for seven days, previews for one day. These copies stay on your iPhone unless you create a share link.")
+                            .font(TR.ui(12))
+                            .foregroundStyle(.white.opacity(0.72))
                         if model.myExports.isEmpty {
-                            Text("No films yet. When you make one, it waits here for seven days.")
+                            Text("No films on this iPhone yet. Export a film to find it here.")
                                 .font(TR.ui(14))
                                 .foregroundStyle(.white.opacity(0.72))
                                 .padding(.top, 24)
@@ -1931,6 +1939,7 @@ struct MyExportsSheet: View {
                         ForEach(model.myExports) { item in
                             row(item)
                         }
+                        activeLinks
                     }
                     .padding(.horizontal, 22)
                     .padding(.bottom, 36)
@@ -1942,6 +1951,27 @@ struct MyExportsSheet: View {
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
+        }
+        .task {
+            model.refreshMyExports()
+            await account.restoreSession()
+            isLoadingLinks = false
+        }
+        .refreshable {
+            model.refreshMyExports()
+            await account.refreshMemories()
+        }
+        .sheet(isPresented: $showsAccount) {
+            AccountCenterView(context: .account)
+                .environmentObject(account)
+        }
+        .alert("Your films", isPresented: Binding(
+            get: { account.message != nil && !showsAccount },
+            set: { if !$0 { account.message = nil } }
+        )) {
+            Button("OK", role: .cancel) { account.message = nil }
+        } message: {
+            Text(account.message ?? "Please try again.")
         }
         .confirmationDialog(
             "Delete this film?",
@@ -1957,6 +1987,35 @@ struct MyExportsSheet: View {
             Text("This removes the film from Memories. A copy saved to Photos or a link you created is not affected.")
         }
         .accessibilityIdentifier("my-exports-sheet")
+    }
+
+    private var activeLinks: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            MetadataText(text: "ACTIVE LINKS", color: TR.accent)
+            Text("Links and their uploaded videos expire after seven days. Save a video to Photos to keep it.")
+                .font(TR.ui(12))
+                .foregroundStyle(.white.opacity(0.72))
+            if isLoadingLinks {
+                ProgressView("Loading links…")
+                    .tint(TR.cream)
+            } else if !account.isSignedIn {
+                Button("Sign in to see your links") { showsAccount = true }
+                    .buttonStyle(GlassButtonStyle())
+                    .accessibilityIdentifier("my-films-sign-in")
+            } else if account.memories.isEmpty {
+                Text("No active links. Open a finished film and choose Create share link.")
+                    .font(TR.ui(13))
+                    .foregroundStyle(.white.opacity(0.72))
+            } else {
+                ForEach(account.memories) { memory in
+                    SharedMemoryRow(memory: memory)
+                        .environmentObject(account)
+                }
+            }
+        }
+        .padding(.top, 18)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("my-films-active-links")
     }
 
     private func row(_ item: LocalCompletedExport) -> some View {

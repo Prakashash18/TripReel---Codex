@@ -53,7 +53,7 @@ struct TripReelPrivacyPolicyView: View {
                             .accessibilityIdentifier("analytics-collection-toggle")
                         section(
                             "Your choices",
-                            "You can create, edit, save, and share a video file without an account. An account is requested only when you choose Create share link. You can remove an active link from Your shared stories before it expires. Every AI edit starts with an explicit OpenAI sharing decision. Declining sends nothing and returns to First Cut. Revoking Photos access in iOS Settings stops further library access."
+                            "You can create, edit, save, and share a video file without an account. An account is requested only when you choose Create share link. You can remove an active link from My films before it expires. Every AI edit starts with an explicit OpenAI sharing decision. Declining sends nothing and returns to First Cut. Revoking Photos access in iOS Settings stops further library access."
                         )
 
                         VStack(alignment: .leading, spacing: 10) {

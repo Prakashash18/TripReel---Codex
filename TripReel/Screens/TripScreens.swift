@@ -91,11 +91,7 @@ struct TripsScreen: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("My films")
                                     .font(TR.ui(12, weight: .semibold))
-                                Text(model.myExports.isEmpty
-                                     ? "No films yet"
-                                     : (model.myExports.count == 1
-                                        ? "1 finished film kept on this iPhone"
-                                        : "\(model.myExports.count) finished films kept on this iPhone"))
+                                Text("Finished films and active share links")
                                     .font(TR.ui(10))
                                     .foregroundStyle(.white.opacity(0.72))
                             }

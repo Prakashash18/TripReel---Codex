@@ -69,11 +69,11 @@ struct AccountCenterView: View {
                 text: account.isSignedIn ? "YOUR MEMORIES ACCOUNT" : "SHARE FROM MEMORIES",
                 color: TR.accent
             )
-            Text(account.isSignedIn ? "Your shared stories" : "A link your people can open")
+            Text(context == .sharing ? "A link your people can open" : "Your account")
                 .font(TR.display(39))
                 .tracking(-0.6)
             Text(account.isSignedIn
-                 ? "Share or save a linked video again before it expires in seven days."
+                 ? "Manage your sign-in, monthly full exports, and privacy. Your films and active links are in My films."
                  : "Sign in to create a private share link for Messages or social media. Local saving never needs an account.")
                 .font(TR.ui(15))
                 .foregroundStyle(.white.opacity(0.72))
@@ -189,32 +189,10 @@ struct AccountCenterView: View {
             .padding(16)
             .glassCard(cornerRadius: 18, highlighted: account.monthlyExportAllowance.remaining > 0)
 
-            if account.memories.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "link.badge.plus")
-                        .font(.system(size: 30, weight: .light))
-                        .foregroundStyle(TR.accent)
-                    Text(context == .sharing ? "You’re ready to create this link" : "No shared stories yet")
-                        .font(TR.display(24))
-                    Text(context == .sharing
-                         ? "Close this screen, then tap Create share link again."
-                         : "Create a link from the final screen of any memory.")
-                        .font(TR.ui(13))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 42)
-            } else {
-                Text("ACTIVE LINKS")
-                    .font(TR.mono(10, weight: .semibold))
-                    .tracking(1.5)
-                    .foregroundStyle(TR.accent)
-
-                ForEach(account.memories) { memory in
-                    SharedMemoryRow(memory: memory)
-                        .environmentObject(account)
-                }
+            if context == .sharing {
+                Text("You’re ready to create this link. Close this screen, then tap Create share link again.")
+                    .font(TR.ui(13))
+                    .foregroundStyle(.white.opacity(0.72))
             }
 
             accountDeletionSection
@@ -405,7 +383,7 @@ private struct AccountDeletionSheet: View {
     }
 }
 
-private struct SharedMemoryRow: View {
+struct SharedMemoryRow: View {
     @EnvironmentObject private var account: MemoryAccountService
     let memory: SharedMemory
     @State private var copyConfirmation: String?
