@@ -43,3 +43,9 @@ Unsigned iPhone Release build passed. Four targeted iPhone simulator tests passe
 - https://firebase.google.com/docs/remote-config/personalization
 - https://support.google.com/analytics/answer/9846734
 - https://developer.apple.com/documentation/storekit/requesting-app-store-reviews
+
+## Toolchain-compatible package resolution
+
+The app explicitly pins `swift-clocks` 1.0.6 and `xctest-dynamic-overlay` 1.11.0. These versions satisfy Supabase's requirements and keep the same dependency graph across Swift 6.3 and 6.4. Later versions (Clocks 1.1.1 and overlay 1.13.1) select a different Swift 6.4 manifest that introduces the separate `swift-issue-reporting` package. Resolving them on Swift 6.3 omits that package, causing a strict Xcode Cloud resolution failure. Adding the new package unconditionally is not compatible with the older toolchain because it duplicates the overlay's module names.
+
+Keep these compatibility pins until upgrading and validating the local and cloud toolchains together. CI checks the committed lockfile with automatic resolution disabled before building. No Supabase, Firebase, or RevenueCat version change is required by this fix.
