@@ -403,6 +403,8 @@
 			);
 			mainGroup = 623E839C444C1ADA3044DCEE;
 			packageReferences = (
+				F10000000000000000000002 /* XCRemoteSwiftPackageReference "xctest-dynamic-overlay" */,
+				F10000000000000000000001 /* XCRemoteSwiftPackageReference "swift-clocks" */,
 				B4BDE843342F447500EE852D /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 				D001C0010000000000000001 /* XCRemoteSwiftPackageReference "supabase-swift" */,
 				28AF38E15C136CFA212680CA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
@@ -847,6 +849,22 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		F10000000000000000000002 /* XCRemoteSwiftPackageReference "xctest-dynamic-overlay" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pointfreeco/xctest-dynamic-overlay";
+			requirement = {
+				kind = exactVersion;
+				version = 1.11.0;
+			};
+		};
+		F10000000000000000000001 /* XCRemoteSwiftPackageReference "swift-clocks" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pointfreeco/swift-clocks";
+			requirement = {
+				kind = exactVersion;
+				version = 1.0.6;
+			};
+		};
 		28AF38E15C136CFA212680CA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
