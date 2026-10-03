@@ -6271,6 +6271,10 @@ final class TripReelModel: ObservableObject {
         exportSaveMessage = nil
     }
 
+    func restoreExportShareLink(_ url: URL?) {
+        exportShareLinkURL = url
+    }
+
     func recordExportShareLink(_ url: URL) {
         if exportShareLinkURL != url { MemoriesEngagement.shared.record(.shareLinkCreated) }
         exportShareLinkURL = url

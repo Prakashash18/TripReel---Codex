@@ -1369,6 +1369,13 @@ struct FilmReadyScreen: View {
         }
         .onAppear {
             readyFeedback.toggle()
+            model.restoreExportShareLink(account.existingShareLink(for: model.currentExportID))
+        }
+        .onChange(of: account.memories) { _, _ in
+            model.restoreExportShareLink(account.existingShareLink(for: model.currentExportID))
+        }
+        .onChange(of: account.userID) { _, _ in
+            model.restoreExportShareLink(account.existingShareLink(for: model.currentExportID))
         }
         .onChange(of: createShareLinkRequest) { _, _ in
             requestShareLink()
@@ -1553,10 +1560,7 @@ struct FilmReadyScreen: View {
     }
 
     private func createShareLink() {
-        if let existingLink = model.exportShareLinkURL {
-            shareLink = existingLink
-            return
-        }
+        guard !isCreatingLink else { return }
         guard let videoURL = model.exportedVideoURL else { return }
         guard account.isSignedIn else {
             wantsLinkAfterSignIn = true
@@ -1565,15 +1569,24 @@ struct FilmReadyScreen: View {
         }
         isCreatingLink = true
         shareLinkError = nil
+        let exportID = model.currentExportID
+        let existingShareURL = model.exportShareLinkURL
+        let title = model.titleDraft(for: .opening).title
+        let duration = model.activeExportDurationSeconds
+        let isPaid = model.exportQuality == .hd
+        let wasSaved = model.exportSaveMessage != nil
         Task {
             let url = await account.createShareLink(
                 videoURL: videoURL,
-                title: model.titleDraft(for: .opening).title,
-                durationSeconds: model.activeExportDurationSeconds,
-                isPaid: model.exportQuality == .hd,
-                wasSavedToPhone: model.exportSaveMessage != nil
+                title: title,
+                durationSeconds: duration,
+                isPaid: isPaid,
+                wasSavedToPhone: wasSaved,
+                localExportID: exportID,
+                existingShareURL: existingShareURL
             )
             isCreatingLink = false
+            guard model.currentExportID == exportID, model.exportedVideoURL == videoURL else { return }
             if let url {
                 model.recordExportShareLink(url)
             } else {

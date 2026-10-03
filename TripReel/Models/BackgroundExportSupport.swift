@@ -290,6 +290,7 @@ struct LocalCompletedExport: Codable, Identifiable, Equatable {
     /// False until the film has been shown once, so a render that finished while the app was
     /// closed opens on the ready screen next launch, and only once.
     var seen: Bool
+    var sharedMemoryID: UUID? = nil
 
     static let interruptedKey = "memories.export-in-progress.v1"
     static let fullFilmLifetime: TimeInterval = 7 * 24 * 60 * 60
@@ -383,6 +384,17 @@ struct LocalCompletedExport: Codable, Identifiable, Equatable {
             throw CocoaError(.fileWriteOutOfSpace)
         }
         return receipt
+    }
+
+    func activeShareLink(in memories: [SharedMemory], now: Date = Date()) -> URL? {
+        memories.first { $0.id == sharedMemoryID && $0.expiresAt > now }?.shareURL
+    }
+
+    static func rememberShareLink(for exportID: String, memoryID: UUID) {
+        var shelf = all()
+        guard let index = shelf.firstIndex(where: { $0.id == exportID }) else { return }
+        shelf[index].sharedMemoryID = memoryID
+        writeIndex(shelf)
     }
 
     static func markSeen(_ id: String) {

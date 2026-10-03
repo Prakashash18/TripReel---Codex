@@ -769,6 +769,36 @@ final class TripReelModelTests: XCTestCase {
         }
     }
 
+    func testSavedFilmRemembersItsLinkAfterReloadAndRejectsExpiredOrRemovedLinks() throws {
+        try withTemporaryShelf {
+            let now = Date()
+            let film = try LocalCompletedExport.keep(try renderedFile(), title: "Film", durationSeconds: 12, isHD: true)
+            let other = try LocalCompletedExport.keep(try renderedFile(), title: "Other", durationSeconds: 12, isHD: true)
+            let memory = SharedMemory(id: UUID(), title: "Film", durationSeconds: 12,
+                                      exportTier: "story_pass", shareToken: UUID(), createdAt: now,
+                                      expiresAt: now.addingTimeInterval(3600), savedToPhoneAt: nil)
+            LocalCompletedExport.rememberShareLink(for: film.id, memoryID: memory.id)
+
+            let reloaded = try XCTUnwrap(LocalCompletedExport.all().first { $0.id == film.id })
+            XCTAssertEqual(reloaded.sharedMemoryID, memory.id)
+            XCTAssertEqual(reloaded.activeShareLink(in: [memory], now: now), memory.shareURL)
+            XCTAssertNil(reloaded.activeShareLink(in: [], now: now), "Removed or other-account links must not be reused")
+            XCTAssertNil(reloaded.activeShareLink(in: [memory], now: memory.expiresAt), "Expired links must not be reused")
+            XCTAssertNil(LocalCompletedExport.all().first { $0.id == other.id }?.sharedMemoryID)
+        }
+    }
+
+    func testSavedFilmsFromBeforeLinkPersistenceStillDecode() throws {
+        let oldFilm = LocalCompletedExport(id: "legacy", fileName: "legacy.mp4", title: "Film",
+                                          durationSeconds: 12, isHD: true, completedAt: Date(), seen: true)
+        let data = try JSONEncoder().encode(oldFilm)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        json.removeValue(forKey: "sharedMemoryID")
+        let decoded = try JSONDecoder().decode(LocalCompletedExport.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(decoded.id, oldFilm.id)
+        XCTAssertNil(decoded.sharedMemoryID)
+    }
+
     func testTheShelfKeepsOnlyTheNewestFiveFilms() throws {
         try withTemporaryShelf {
             let start = Date(timeIntervalSince1970: 1_800_000_000)

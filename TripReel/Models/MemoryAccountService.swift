@@ -355,13 +355,22 @@ final class MemoryAccountService: ObservableObject {
         }
     }
 
+    func existingShareLink(for exportID: String?) -> URL? {
+        guard isSignedIn, let exportID else { return nil }
+        return LocalCompletedExport.all().first { $0.id == exportID }?
+            .activeShareLink(in: memories)
+    }
+
     func createShareLink(
         videoURL: URL,
         title: String,
         durationSeconds: Double,
         isPaid: Bool,
-        wasSavedToPhone: Bool
+        wasSavedToPhone: Bool,
+        localExportID: String? = nil,
+        existingShareURL: URL? = nil
     ) async -> URL? {
+        guard case .idle = shareLinkCreationPhase else { return nil }
         guard let client, let projectURL, let userID else {
             message = "Create an account first to make a share link. Your video stays on this iPhone until then."
             return nil
@@ -379,12 +388,26 @@ final class MemoryAccountService: ObservableObject {
         let shareToken = UUID()
         let storagePath = "\(userID.uuidString.lowercased())/\(memoryID.uuidString.lowercased()).mp4"
 
+        var uploadStarted = false
         do {
+            let savedMemoryID = LocalCompletedExport.all().first { $0.id == localExportID }?.sharedMemoryID
+            if savedMemoryID != nil || existingShareURL != nil {
+                // A failed lookup must not fall through to another upload. Refresh
+                // through the signed-in owner's existing RLS-protected query.
+                let rows = try await fetchMemories(using: client)
+                guard self.userID == userID else { throw SharedMemoryPlaybackError.signedOut }
+                memories = sortedActiveMemories(rows)
+                if let existing = existingShareLink(for: localExportID) { return existing }
+                if let existingShareURL, memories.contains(where: { $0.shareURL == existingShareURL }) {
+                    return existingShareURL
+                }
+            }
             let session = try await client.auth.session
             let uploader = try SupabaseResumableUploader(
                 projectURL: projectURL,
                 accessToken: session.accessToken
             )
+            uploadStarted = true
             try await uploader.upload(
                 fileURL: videoURL,
                 bucket: "memory-exports",
@@ -412,6 +435,9 @@ final class MemoryAccountService: ObservableObject {
                 .execute()
                 .value
 
+            if let localExportID {
+                LocalCompletedExport.rememberShareLink(for: localExportID, memoryID: inserted.id)
+            }
             memories = sortedActiveMemories(memories + [inserted])
             await expiryNotificationScheduler.synchronize(
                 memories: memories,
@@ -419,7 +445,9 @@ final class MemoryAccountService: ObservableObject {
             )
             return inserted.shareURL
         } catch {
-            _ = try? await client.storage.from("memory-exports").remove(paths: [storagePath])
+            if uploadStarted {
+                _ = try? await client.storage.from("memory-exports").remove(paths: [storagePath])
+            }
             if let description = (error as? LocalizedError)?.errorDescription,
                !description.isEmpty {
                 message = "\(description) Your video is still safe on this iPhone. Please try again."
